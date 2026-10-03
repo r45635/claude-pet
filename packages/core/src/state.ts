@@ -51,10 +51,13 @@ export type StateInputs = {
   /** Dominant recent activity, from the most recent activity-bearing event. */
   dominant: 'read' | 'write' | 'tool' | null;
   dominantAtMs: number;
+  /** The previous resolved state, for HIGH_LOAD hysteresis. */
+  previous?: PetState;
 };
 
 export type StateConfig = {
   highLoadThreshold: number;
+  highLoadExitThreshold?: number;
   errorStickyMs: number;
   doneStickyMs: number;
   idleAfterMs: number;
@@ -93,7 +96,9 @@ export function resolveState(input: StateInputs, config: StateConfig): PetState 
   }
 
   // 5. Token storm.
-  if (input.load >= config.highLoadThreshold) return 'HIGH_LOAD';
+  const exit = config.highLoadExitThreshold ?? config.highLoadThreshold;
+  const threshold = input.previous === 'HIGH_LOAD' ? exit : config.highLoadThreshold;
+  if (input.load >= threshold) return 'HIGH_LOAD';
 
   // 6. What it is visibly doing. `dominant` decays with the load window, so a long
   //    silence after a Read does not keep the creature "reading" forever.

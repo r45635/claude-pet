@@ -19,7 +19,8 @@
     "snapshot": "node packages/collector/src/snapshot.ts",
     "install-hooks": "node packages/collector/src/install.ts install",
     "uninstall-hooks": "node packages/collector/src/install.ts uninstall",
-    "autostart": "node packages/collector/src/autostart.ts"
+    "autostart": "node packages/collector/src/autostart.ts",
+    "replay": "node packages/simulator/src/replay.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

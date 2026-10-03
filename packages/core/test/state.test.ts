@@ -114,6 +114,16 @@ test('HIGH_LOAD triggers exactly at the threshold', () => {
   assert.equal(resolveState(inputs({ ...busy, load: C.highLoadThreshold - 1 }), C), 'CODING');
 });
 
+test('HIGH_LOAD has hysteresis: it holds until load falls below the exit threshold', () => {
+  const busy = { dominant: 'write' as const, dominantAtMs: NOW };
+  const exit = C.highLoadExitThreshold!;
+  assert.ok(exit < C.highLoadThreshold);
+  const between = { ...busy, load: exit + 1 };
+  assert.equal(resolveState(inputs({ ...between, previous: 'HIGH_LOAD' }), C), 'HIGH_LOAD');
+  assert.equal(resolveState(inputs({ ...between, previous: 'CODING' }), C), 'CODING');
+  assert.equal(resolveState(inputs({ ...busy, load: exit - 1, previous: 'HIGH_LOAD' }), C), 'CODING');
+});
+
 test('all nine states collapse onto the four MVP visuals', () => {
   assert.equal(toVisualState('IDLE'), 'IDLE');
   assert.equal(toVisualState('ERROR'), 'ERROR');

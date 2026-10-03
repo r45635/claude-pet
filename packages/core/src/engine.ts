@@ -59,6 +59,7 @@ export type PetSnapshot = {
 };
 
 type RecentEvent = { tsMs: number; isToolCall: boolean };
+type Turn = { startMs: number; lastEventMs: number };
 
 const READ_TYPES: ReadonlySet<string> = new Set(['FILE_READ', 'SEARCH']);
 const WRITE_TYPES: ReadonlySet<string> = new Set(['FILE_WRITE']);
@@ -87,8 +88,15 @@ export class Engine {
   #recent: RecentEvent[] = [];
   #meter: MeterSample | null = null;
 
-  #turnActive = false;
-  #permissionPending = false;
+  /**
+   * Open turns, per session. Several Claude Code windows share one spool: a Stop in one
+   * must not end the turn of another (observed: a second window's Stop put this one to
+   * sleep mid-turn).
+   */
+  #turns = new Map<string, Turn>();
+  #previous: PetState = 'IDLE';
+  /** Sessions blocked on a permission prompt. */
+  #pending = new Set<string>();
   #activeSubagents = 0;
 
   #lastActivityMs = 0;
@@ -141,6 +149,12 @@ export class Engine {
     this.#sawHookEvent = true;
     ingestLoad(this.#load, event, this.config);
 
+    const sid = event.sid ?? '';
+    const turn = this.#turns.get(sid);
+    if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, event.tsMs);
+    // No hook says "permission granted": the session doing anything again is the proof.
+    if (this.#pending.has(sid) && ACTIVITY_TYPES.has(event.type)) this.#pending.delete(sid);
+
     if (ACTIVITY_TYPES.has(event.type)) {
       this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
       this.#recent.push({ tsMs: event.tsMs, isToolCall: TOOL_TYPES.has(event.type) });
@@ -162,22 +176,23 @@ export class Engine {
         this.#lastIdleSignalMs = 0;
         break;
       case 'PROMPT_SUBMITTED':
-        this.#turnActive = true;
+        // A prompt typed mid-turn does not restart the turn.
+        if (!this.#turns.has(sid)) this.#turns.set(sid, { startMs: event.tsMs, lastEventMs: event.tsMs });
         this.#lastDoneMs = 0;
         this.#lastIdleSignalMs = 0;
         this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
         break;
       case 'TURN_COMPLETED':
-        this.#turnActive = false;
-        this.#permissionPending = false;
+        this.#turns.delete(sid);
+        this.#pending.delete(sid);
         this.#lastDoneMs = event.tsMs;
         this.#dominant = null;
         break;
       case 'PERMISSION_WAITING':
-        this.#permissionPending = true;
+        this.#pending.add(sid);
         break;
       case 'PERMISSION_RESOLVED':
-        this.#permissionPending = false;
+        this.#pending.delete(sid);
         break;
       case 'SUBAGENT_STARTED':
         this.#activeSubagents += 1;
@@ -192,8 +207,8 @@ export class Engine {
         this.#lastIdleSignalMs = event.tsMs;
         break;
       case 'SESSION_ENDED':
-        this.#turnActive = false;
-        this.#permissionPending = false;
+        this.#turns.delete(sid);
+        this.#pending.delete(sid);
         this.#activeSubagents = 0;
         this.#lastIdleSignalMs = event.tsMs;
         break;
@@ -202,12 +217,41 @@ export class Engine {
     }
   }
 
+  /** Turns that are running and trusted: not blocked on the user, not gone silent. */
+  #workingTurns(nowMs: number): Turn[] {
+    const out: Turn[] = [];
+    for (const [sid, turn] of this.#turns) {
+      if (this.#pending.has(sid)) continue;
+      if (nowMs - turn.lastEventMs > this.config.work.staleAfterMs) continue;
+      out.push(turn);
+    }
+    return out;
+  }
+
+  /** The turn-running gauge, 0-100: the busiest session's. See EngineConfig.work. */
+  #work(nowMs: number): number {
+    const { max, rampMs } = this.config.work;
+    let work = 0;
+    for (const turn of this.#workingTurns(nowMs)) {
+      const ramp = 1 - Math.exp(-Math.max(0, nowMs - turn.startMs) / rampMs);
+      work = Math.max(work, max * ramp);
+    }
+    return work;
+  }
+
+  get #turnActive(): boolean {
+    return this.#turns.size > 0;
+  }
+
   snapshot(nowMs: number): PetSnapshot {
+    const work = this.#work(nowMs);
     const { load, confidence, channels } = tickLoad(
       this.#load,
       nowMs,
       this.#activeSubagents,
       this.config,
+      work,
+      this.#turnActive,
     );
 
     const windowStart = nowMs - this.config.rateWindowMs;
@@ -226,15 +270,17 @@ export class Engine {
         load,
         lastActivityMs: this.#lastActivityMs,
         turnActive: this.#turnActive,
-        permissionPending: this.#permissionPending,
+        permissionPending: this.#pending.size > 0,
         lastErrorMs: this.#lastErrorMs,
         lastDoneMs: this.#lastDoneMs,
         lastIdleSignalMs: this.#lastIdleSignalMs,
         dominant: this.#dominant,
         dominantAtMs: this.#dominantAtMs,
+        previous: this.#previous,
       },
       this.config,
     );
+    this.#previous = state;
 
     const meter = this.#meter;
     const contextLoad =
@@ -275,7 +321,7 @@ export class Engine {
         this.#lastActivityMs > 0 ? new Date(this.#lastActivityMs).toISOString() : null,
       updated_at: new Date(nowMs).toISOString(),
       debug: {
-        channels,
+        channels: { ...channels, work: Math.round(work) },
         events_seen: this.#eventsSeen,
         events_dropped: this.#eventsDropped,
         turn_active: this.#turnActive,

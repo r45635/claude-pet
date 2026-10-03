@@ -33,6 +33,26 @@ export type EngineConfig = {
   /** Extra reservoir added per active subagent, per second. */
   subagentGaugePerSec: number;
   /**
+   * The "turn is running" gauge, 0-100. Between UserPromptSubmit and Stop the model is
+   * working — thinking or writing — even when no hook fires for a minute. That fact is
+   * observable; how hard it works is not, so the gauge only ramps with turn duration.
+   * Measured before it existed: 11.7 min of real turns averaged load 10, never above 40.
+   */
+  work: {
+    /** Plateau of the gauge on its own; bursts add on top (see load.ts, soft OR). */
+    max: number;
+    /** Time constant of the ramp from 0 to `max`, ms. */
+    rampMs: number;
+    /** No event at all for this long => stop trusting the turn (e.g. Stop never came). */
+    staleAfterMs: number;
+    /**
+     * Reservoir decay speed-up outside a turn (multiplies `tauMs`). Inertia is right
+     * *inside* a turn — the gaps between tool calls are the model working — but once
+     * Stop has arrived nothing is working, and the creature should calm down promptly.
+     */
+    idleDecayFactor: number;
+  };
+  /**
    * Exponent of the weighted power mean used to blend the channels.
    *
    * 1 would be an arithmetic mean, which is wrong here: it says a session must max every
@@ -42,10 +62,15 @@ export type EngineConfig = {
    * live channel without ignoring the others.
    */
   blendExponent: number;
-  /** Asymmetric smoothing of the final score. */
-  smoothing: { attack: number; release: number };
-  /** `load` at or above this is HIGH_LOAD. */
+  /**
+   * Asymmetric smoothing of the final score, as time constants (ms) so the inertia does
+   * not depend on the tick rate (100 ms busy, 1 s idle).
+   */
+  smoothing: { attackMs: number; releaseMs: number };
+  /** `load` at or above this enters HIGH_LOAD. */
   highLoadThreshold: number;
+  /** Hysteresis: HIGH_LOAD holds until `load` falls below this. Stops flicker at 75. */
+  highLoadExitThreshold: number;
   /** How long ERROR stays on screen after the last error, ms. */
   errorStickyMs: number;
   /** How long DONE stays on screen after a turn ends, ms. */
@@ -58,9 +83,12 @@ export type EngineConfig = {
 
 export const DEFAULT_CONFIG: EngineConfig = {
   channels: {
-    generation: { tauMs: 5_000, k: 14, weight: 0.3, capFactor: 3 },
-    tool: { tauMs: 5_000, k: 6, weight: 0.3, capFactor: 3 },
-    file: { tauMs: 6_000, k: 5, weight: 0.2, capFactor: 3 },
+    // Tuned on a replayed real session (2026-10-03): at 5 s / k=14,6,5 the gaps between
+    // real tool calls (10-30 s of model work) drained every channel, so bursts never
+    // registered. 10 s lets a sequence of calls build up.
+    generation: { tauMs: 10_000, k: 6, weight: 0.3, capFactor: 3 },
+    tool: { tauMs: 10_000, k: 4, weight: 0.3, capFactor: 3 },
+    file: { tauMs: 10_000, k: 3, weight: 0.2, capFactor: 3 },
     agent: { tauMs: 6_000, k: 2, weight: 0.2, capFactor: 3 },
   },
   eventWeights: {
@@ -78,9 +106,11 @@ export const DEFAULT_CONFIG: EngineConfig = {
     ERROR: 3,
   },
   subagentGaugePerSec: 1.5,
+  work: { max: 60, rampMs: 15_000, staleAfterMs: 120_000, idleDecayFactor: 0.4 },
   blendExponent: 2,
-  smoothing: { attack: 0.45, release: 0.12 },
+  smoothing: { attackMs: 1_000, releaseMs: 6_000 },
   highLoadThreshold: 75,
+  highLoadExitThreshold: 65,
   errorStickyMs: 4_000,
   doneStickyMs: 3_000,
   idleAfterMs: 20_000,
@@ -123,5 +153,6 @@ export function mergeConfig(overrides: unknown): EngineConfig {
     channels,
     eventWeights: { ...base.eventWeights, ...(o.eventWeights as object | undefined) },
     smoothing: { ...base.smoothing, ...(o.smoothing as object | undefined) },
+    work: { ...base.work, ...(o.work as object | undefined) },
   } as EngineConfig;
 }

@@ -95,3 +95,27 @@ test('garbage lines are dropped and counted, and do not stop the good ones', () 
   );
   assert.equal(result.dropped, 2, 'the bad JSON and the wrong schema version');
 });
+
+test('warm start: a daemon restarted mid-turn knows the turn is running', async () => {
+  const { Runtime } = await import('../src/runtime.ts');
+  const file = tempSpool();
+  const now = Date.parse('2026-10-03T20:00:00.000Z');
+  const at = (msAgo: number, type: string) =>
+    `${JSON.stringify({ v: 1, ts: new Date(now - msAgo).toISOString(), type, sid: 'abcd1234' })}\n`;
+  writeFileSync(
+    file,
+    at(60 * 60_000, 'BASH_STARTED') + // an hour ago: outside the window, ignored
+      at(60_000, 'PROMPT_SUBMITTED') +
+      at(50_000, 'BASH_STARTED') +
+      at(40_000, 'BASH_FINISHED'),
+  );
+
+  const runtime = new Runtime({ spoolFile: file, warmStartMs: 15 * 60_000, now: () => now });
+  const s = runtime.snapshot();
+  assert.equal(s.debug.turn_active, true, 'the open turn must survive a restart');
+  assert.equal(s.debug.events_seen, 3, 'only the warm window is replayed');
+  assert.ok(s.state !== 'IDLE', `mid-turn must not look asleep, got ${s.state}`);
+
+  appendFileSync(file, at(0, 'TOOL_STARTED'));
+  assert.equal(runtime.pump(), 1, 'after the warm start it tails new lines only');
+});

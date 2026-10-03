@@ -47,22 +47,56 @@ SUBAGENT_FINISHED   1.0        ERROR          3.0
 These are **conventions**, not physics; they live in `config/default.json` and exist to be
 tuned by watching the creature next to a real session.
 
-## Blend and smoothing
+## Blend, turn work, and smoothing
+
+The channels are blended with a weighted **power mean** (p = 2) over the live channels —
+see `EngineConfig.blendExponent` for why an arithmetic mean lies low. Call that `bursts`.
+
+### The turn `work` gauge — the part hooks cannot see
+
+Between `UserPromptSubmit` and `Stop` the model is working — thinking or writing — even when
+no hook fires for a minute. *That a turn is running* is observable; *how hard* the model
+thinks is not, so the gauge only ramps with turn duration:
 
 ```text
-raw = 0.35·s_generation + 0.30·s_tool + 0.15·s_file + 0.20·s_agent
+work = turn running && not waiting on a permission && an event within 120 s
+         ? 60 · (1 − e^(−turn_elapsed / 15 s))
+         : 0
 ```
 
-Then an **asymmetric EMA** — the creature should startle quickly and calm down slowly:
+Measured before it existed, replaying a real 11.7-minute session: mean load **10**, never
+above 40, HIGH_LOAD never reached — the creature dozed through the busiest part of the work,
+because the long stretches of model reasoning between tool calls emit nothing.
+
+`work` and `bursts` combine as a **soft OR**, so bursts land on top of a working turn
+rather than being averaged against it:
 
 ```text
-α = raw > load ? 0.45 (attack) : 0.12 (release)
-load ← load + α · (raw − load)
+raw = 100 − (100 − work) · (100 − bursts) / 100       # 60 working + 40 bursts = 76
 ```
 
-At a 100 ms tick that is ~0.4 s to visually reach a new high and ~2 s to settle back down.
-A symmetric filter either lags the startle or jitters on the way down; this was the whole
-reason for splitting the coefficient.
+### Inertia
+
+Reservoirs decay with `tauMs = 10 s` inside a turn — the gaps between real tool calls are
+10–30 s of model work and must not drain the channel — and 2.5× faster (`idleDecayFactor`
+0.4) once the turn is over, so the creature calms down promptly when Claude stops.
+
+Then an **asymmetric EMA in time** — startle quickly, calm down slowly — with time
+constants rather than per-tick coefficients, so the inertia is the same at the daemon's
+100 ms busy tick and its 1 s idle tick:
+
+```text
+τ = raw > load ? 1 s (attack) : 6 s (release)
+load ← load + (1 − e^(−dt/τ)) · (raw − load)
+```
+
+HIGH_LOAD has **hysteresis**: entered at 75, left below 65, so a load hovering at the
+threshold does not flicker. On the widget side the animation *speed* moves through three
+tiers (also with hysteresis) while the *amplitude* follows load continuously: changing
+`animation-duration` mid-animation re-maps the phase and makes the creature jump.
+
+Replay of the same real session with the current defaults (`npm run replay`): mean load in
+turns **64**, ≥ 40 for 92 % of the time, HIGH_LOAD 25 %, ~2 visual changes per minute.
 
 Finally `load_score = round(load)` — integer, because a creature cannot animate 72.4138%
 differently from 72.4139% and publishing the decimals would be inventing precision.

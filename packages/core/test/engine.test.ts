@@ -202,3 +202,56 @@ test('dropped lines are counted, not hidden', () => {
   engine.noteDrop(3);
   assert.equal(engine.snapshot(0).debug.events_dropped, 3);
 });
+
+// Real sessions spend most of a turn in model reasoning that emits no hook at all.
+// Measured before the work gauge: 11.7 min of real turns averaged load 10, never above 40.
+test('a running turn with no events still reads as work, and calms once it ends', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0));
+  let s = engine.snapshot(0);
+  for (let now = 100; now <= 30_000; now += 100) s = engine.snapshot(now);
+  assert.ok(s.load >= 45, `30 s into a silent turn the model is working, got load ${s.load}`);
+  assert.equal(s.state, 'THINKING');
+
+  engine.ingest(event('TURN_COMPLETED', 30_000));
+  for (let now = 30_100; now <= 50_000; now += 100) s = engine.snapshot(now);
+  assert.ok(s.load < 10, `20 s after Stop the creature should be calm, got ${s.load}`);
+});
+
+test('a turn whose Stop never came stops counting as work', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0));
+  let s = engine.snapshot(0);
+  for (let now = 1_000; now <= 200_000; now += 1_000) s = engine.snapshot(now);
+  assert.equal(s.debug.channels.work, 0, 'no event for > staleAfterMs: the turn is not trusted');
+});
+
+test('waiting on a permission is not work', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0));
+  engine.ingest(event('PERMISSION_WAITING', 1_000));
+  let s = engine.snapshot(0);
+  for (let now = 100; now <= 30_000; now += 100) s = engine.snapshot(now);
+  assert.equal(s.state, 'WAITING');
+  assert.ok(s.load < 10, `blocked on the user is not load, got ${s.load}`);
+});
+
+test('a Stop in one session does not end the turn of another', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 1_000, { sid: 'bbbb2222' }));
+  engine.ingest(event('TURN_COMPLETED', 5_000, { sid: 'bbbb2222' }));
+  let s = engine.snapshot(0);
+  for (let now = 100; now <= 20_000; now += 100) s = engine.snapshot(now);
+  assert.equal(s.debug.turn_active, true, 'session aaaa1111 is still mid-turn');
+  assert.ok(s.debug.channels.work > 30, `its work must still count, got ${s.debug.channels.work}`);
+});
+
+test('a granted permission clears WAITING as soon as the session acts again', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingest(event('PERMISSION_WAITING', 1_000, { sid: 'aaaa1111' }));
+  assert.equal(engine.snapshot(2_000).state, 'WAITING');
+  engine.ingest(event('BASH_FINISHED', 3_000, { sid: 'aaaa1111' }));
+  assert.notEqual(engine.snapshot(3_100).state, 'WAITING');
+});

@@ -32,7 +32,8 @@
     animation: breathe var(--dur, 3.2s) ease-in-out infinite;
   }
   #arms { animation: flail var(--dur, 3.2s) ease-in-out infinite; transform-origin: 50% 55%; }
-  #sparks { opacity: 0; }
+  #sparks { opacity: 0; transition: opacity .6s ease; }
+  #body { transition: fill .8s ease; }
 
   @keyframes breathe {
     0%, 100% { transform: scale(1, 1) translateY(0); }
@@ -95,7 +96,7 @@
     <path d="M44 92 L18 112" /><path d="M116 92 L142 112" />
   </g>
   <g id="body">
-    <ellipse cx="80" cy="92" rx="44" ry="40" fill="#7cc4ff" />
+    <ellipse cx="80" cy="92" rx="44" ry="40" />
     <circle cx="64" cy="84" r="6" fill="var(--eye)" />
     <circle cx="96" cy="84" r="6" fill="var(--eye)" />
     <g class="lid" stroke="var(--eye)" stroke-width="3" stroke-linecap="round">
@@ -126,6 +127,16 @@
   const token = injected?.token ?? params.get('token') ?? '';
   const base = injected?.url ?? params.get('url') ?? 'http://127.0.0.1:8787';
 
+  // Speed tiers: calm / busy / storm. Enter a tier at its threshold, leave it 8 points lower.
+  let currentTier = 0;
+  function speedTier(load) {
+    const up = [0, 35, 70];
+    let tier = currentTier;
+    while (tier < 2 && load >= up[tier + 1]) tier += 1;
+    while (tier > 0 && load < up[tier] - 8) tier -= 1;
+    return tier;
+  }
+
   // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
   let last = '';
   function render(s) {
@@ -137,10 +148,17 @@
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 
-    // Continuous mapping, not four fixed speeds: load 0 -> 3.2s/0.03, load 100 -> 0.16s/0.22.
+    // Amplitude follows load continuously: changing a custom property inside running
+    // keyframes is seamless. Speed does NOT: every change of animation-duration re-maps
+    // the current phase and the creature visibly jumps — at one change per 100 ms tick
+    // that read as "choppy". So speed moves through three tiers, with hysteresis.
     const t = s.load / 100;
-    pet.style.setProperty('--dur', `${(3.2 - 3.04 * t).toFixed(2)}s`);
-    pet.style.setProperty('--amp', (0.03 + 0.19 * t).toFixed(3));
+    pet.style.setProperty('--amp', (0.03 + 0.17 * t).toFixed(3));
+    const tier = speedTier(s.load);
+    if (tier !== currentTier) {
+      currentTier = tier;
+      pet.style.setProperty('--dur', ['3.2s', '1.4s', '0.7s'][tier]);
+    }
 
     const ctx = s.context_load === null ? '  —' : `${String(s.context_load).padStart(2)}%`;
     hud.textContent =

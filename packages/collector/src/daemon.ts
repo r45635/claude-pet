@@ -28,7 +28,7 @@ const TICK_IDLE_MS = 1_000;
 const IDLE_AFTER_QUIET_TICKS = 50;
 
 ensureSpool();
-const runtime = new Runtime({ spoolFile: SPOOL_FILE, fromStart: false });
+const runtime = new Runtime({ spoolFile: SPOOL_FILE, warmStartMs: 2 * 60 * 60_000 }); // turns can run for an hour
 
 const clients = new Set<ServerResponse>();
 let quietTicks = 0;

@@ -104,3 +104,28 @@ test('subagents contribute as a gauge, with no events at all', () => {
   assert.ok(result.load > 20, `three idle subagents should register, got ${result.load}`);
   assert.equal(result.confidence, 0.2);
 });
+
+test('smoothing is set in time, not per tick: 100 ms and 1 s ticks agree', () => {
+  const run = (tickMs: number) => {
+    const state = createLoadState(0);
+    for (let i = 0; i < 10; i += 1) ingestLoad(state, event('BASH_STARTED'), DEFAULT_CONFIG);
+    let load = 0;
+    for (let now = tickMs; now <= 4_000; now += tickMs) {
+      load = tickLoad(state, now, 0, DEFAULT_CONFIG).load;
+    }
+    return load;
+  };
+  const fine = run(100);
+  const coarse = run(1_000);
+  assert.ok(Math.abs(fine - coarse) <= 3, `100 ms tick gave ${fine}, 1 s tick gave ${coarse}`);
+});
+
+test('bursts land on top of turn work instead of being averaged against it', () => {
+  const state = createLoadState(0);
+  for (let i = 0; i < 4; i += 1) ingestLoad(state, event('BASH_STARTED'), DEFAULT_CONFIG);
+  let withWork = 0;
+  for (let now = 100; now <= 3_000; now += 100) {
+    withWork = tickLoad(state, now, 0, DEFAULT_CONFIG, 60, true).load;
+  }
+  assert.ok(withWork > 75, `60 of work plus a burst should be a storm, got ${withWork}`);
+});

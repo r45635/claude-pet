@@ -1,9 +1,9 @@
 {
   "_comment": "Copy to ~/.claude-pet/config.json to override. Every number here is a convention chosen to make a cartoon legible — see docs/LOAD_SCORE.md.",
   "channels": {
-    "generation": { "tauMs": 5000, "k": 14, "weight": 0.3, "capFactor": 3 },
-    "tool":       { "tauMs": 5000, "k": 6,  "weight": 0.3, "capFactor": 3 },
-    "file":       { "tauMs": 6000, "k": 5,  "weight": 0.2, "capFactor": 3 },
+    "generation": { "tauMs": 10000, "k": 6, "weight": 0.3, "capFactor": 3 },
+    "tool":       { "tauMs": 10000, "k": 4, "weight": 0.3, "capFactor": 3 },
+    "file":       { "tauMs": 10000, "k": 3, "weight": 0.2, "capFactor": 3 },
     "agent":      { "tauMs": 6000, "k": 2,  "weight": 0.2, "capFactor": 3 }
   },
   "eventWeights": {
@@ -22,8 +22,10 @@
   },
   "subagentGaugePerSec": 1.5,
   "blendExponent": 2,
-  "smoothing": { "attack": 0.45, "release": 0.12 },
+  "work": { "max": 60, "rampMs": 15000, "staleAfterMs": 120000, "idleDecayFactor": 0.4 },
+  "smoothing": { "attackMs": 1000, "releaseMs": 6000 },
   "highLoadThreshold": 75,
+  "highLoadExitThreshold": 65,
   "errorStickyMs": 4000,
   "doneStickyMs": 3000,
   "idleAfterMs": 20000,

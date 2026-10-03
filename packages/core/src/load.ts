@@ -1,8 +1,9 @@
 /**
  * load_score — a visualization index, not a measurement.
  *
- * Four decaying reservoirs, each saturating independently, blended by weight and then
- * smoothed asymmetrically so the creature startles fast and calms slowly.
+ * Four decaying reservoirs, each saturating independently, blended by weight; combined
+ * with the engine's turn `work` gauge; then smoothed asymmetrically in time so the
+ * creature startles fast and calms slowly.
  * Algorithm and rationale: docs/LOAD_SCORE.md
  */
 
@@ -59,6 +60,10 @@ export function tickLoad(
   nowMs: number,
   activeSubagents: number,
   config: EngineConfig,
+  /** 0-100: the turn-running gauge (EngineConfig.work), computed by the engine. */
+  work = 0,
+  /** Whether a turn is running; outside one, reservoirs drain faster (work.idleDecayFactor). */
+  turnActive = false,
 ): LoadResult {
   const dtMs = Math.max(0, nowMs - state.lastTickMs);
   state.lastTickMs = nowMs;
@@ -71,7 +76,8 @@ export function tickLoad(
   const channels = {} as Record<ChannelName, number>;
   for (const name of CHANNELS) {
     const channel = config.channels[name];
-    state.reservoirs[name] *= Math.exp(-dtMs / channel.tauMs);
+    const tauMs = turnActive ? channel.tauMs : channel.tauMs * config.work.idleDecayFactor;
+    state.reservoirs[name] *= Math.exp(-dtMs / tauMs);
     // Cap before saturating: an uncapped reservoir keeps the channel pinned for tens of
     // seconds after the session went quiet. See ChannelConfig.capFactor.
     const ceiling = channel.k * channel.capFactor;
@@ -96,10 +102,15 @@ export function tickLoad(
     liveWeight += weight;
     accumulated += weight * Math.pow(channels[name], p);
   }
-  const raw = liveWeight > 0 ? Math.pow(accumulated / liveWeight, 1 / p) : 0;
+  const bursts = liveWeight > 0 ? Math.pow(accumulated / liveWeight, 1 / p) : 0;
 
-  const alpha = raw > state.smoothed ? config.smoothing.attack : config.smoothing.release;
-  state.smoothed += alpha * (raw - state.smoothed);
+  // Soft OR: bursts of tools/output land *on top of* a working turn instead of being
+  // averaged against it. 60 working + 40 of bursts = 76, not 50.
+  const raw = 100 - ((100 - clamp(work, 0, 100)) * (100 - bursts)) / 100;
+
+  // Exponential smoothing in time: the same inertia at 100 ms and at 1 s ticks.
+  const tau = raw > state.smoothed ? config.smoothing.attackMs : config.smoothing.releaseMs;
+  state.smoothed += (1 - Math.exp(-dtMs / tau)) * (raw - state.smoothed);
 
   return {
     load: Math.round(clamp(state.smoothed, 0, 100)),
