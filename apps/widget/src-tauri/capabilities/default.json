@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The pet window may only be dragged. No fs, no shell, no network plugin.",
-  "windows": ["pet"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "description": "The pet window may be dragged, resized from its menu, and closed (Quit). Menus come with core:default. No fs, shell or network plugin.",
+  "windows": [
+    "pet"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-close"
+  ]
 }

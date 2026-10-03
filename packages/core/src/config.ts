@@ -157,12 +157,38 @@ export const EVENT_CHANNEL: Record<string, ChannelName> = {
   SUBAGENT_FINISHED: 'agent',
 };
 
-export function mergeConfig(overrides: unknown): EngineConfig {
-  if (!overrides || typeof overrides !== 'object') return DEFAULT_CONFIG;
-  const o = overrides as Record<string, unknown>;
-  const base = DEFAULT_CONFIG;
+/**
+ * Temperaments: named bundles of the knobs a human actually perceives — how much it takes
+ * to excite the creature, when it storms, how long it takes to calm down. Chosen from the
+ * creature's right-click menu; `normal` is the defaults above.
+ */
+export const TEMPERAMENTS = {
+  zen: {
+    work: { max: 50 },
+    net: { perKb: 0.12 },
+    smoothing: { attackMs: 1_800, releaseMs: 9_000 },
+    highLoadThreshold: 85,
+    highLoadExitThreshold: 75,
+  },
+  normal: {},
+  nervous: {
+    work: { max: 68 },
+    net: { perKb: 0.3 },
+    smoothing: { attackMs: 600, releaseMs: 4_000 },
+    highLoadThreshold: 68,
+    highLoadExitThreshold: 58,
+  },
+} as const;
+export type Temperament = keyof typeof TEMPERAMENTS;
+export const isTemperament = (v: unknown): v is Temperament =>
+  typeof v === 'string' && Object.hasOwn(TEMPERAMENTS, v);
+
+/** Engine keys a user file may override; anything else in it (e.g. `ui`) is not engine config. */
+const ENGINE_KEYS = new Set<string>(Object.keys(DEFAULT_CONFIG));
+
+function mergeOnto(base: EngineConfig, overrides: Record<string, unknown>): EngineConfig {
   const channels = { ...base.channels };
-  const oc = o.channels;
+  const oc = overrides.channels;
   if (oc && typeof oc === 'object') {
     for (const name of Object.keys(channels) as ChannelName[]) {
       const patch = (oc as Record<string, unknown>)[name];
@@ -171,13 +197,25 @@ export function mergeConfig(overrides: unknown): EngineConfig {
       }
     }
   }
+  const flat = Object.fromEntries(Object.entries(overrides).filter(([k]) => ENGINE_KEYS.has(k)));
   return {
     ...base,
-    ...(o as object),
+    ...flat,
     channels,
-    eventWeights: { ...base.eventWeights, ...(o.eventWeights as object | undefined) },
-    smoothing: { ...base.smoothing, ...(o.smoothing as object | undefined) },
-    work: { ...base.work, ...(o.work as object | undefined) },
-    net: { ...base.net, ...(o.net as object | undefined) },
+    eventWeights: { ...base.eventWeights, ...(overrides.eventWeights as object | undefined) },
+    smoothing: { ...base.smoothing, ...(overrides.smoothing as object | undefined) },
+    work: { ...base.work, ...(overrides.work as object | undefined) },
+    net: { ...base.net, ...(overrides.net as object | undefined) },
   } as EngineConfig;
+}
+
+/**
+ * Defaults, then the file's `temperament` preset, then the file's explicit overrides —
+ * so a hand-tuned value in config.json always wins over the menu's preset.
+ */
+export function mergeConfig(overrides: unknown): EngineConfig {
+  if (!overrides || typeof overrides !== 'object') return DEFAULT_CONFIG;
+  const o = overrides as Record<string, unknown>;
+  const preset = isTemperament(o.temperament) ? TEMPERAMENTS[o.temperament] : {};
+  return mergeOnto(mergeOnto(DEFAULT_CONFIG, preset as Record<string, unknown>), o);
 }

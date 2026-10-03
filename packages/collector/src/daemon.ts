@@ -18,6 +18,11 @@ import { ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
+import { execFile } from 'node:child_process';
+import { existsSync, watch } from 'node:fs';
+import { mergeConfig } from '@claude-pet/core';
+import { CONFIG_FILE } from './paths.ts';
+import { applyPatch, prefsOf, readUserFile, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -32,6 +37,59 @@ ensureSpool();
 const runtime = new Runtime({ spoolFile: SPOOL_FILE, warmStartMs: 2 * 60 * 60_000 }); // turns can run for an hour
 
 const clients = new Set<ServerResponse>();
+let prefs: Prefs = prefsOf(readUserFile());
+
+/** What the widget receives: the engine snapshot plus the menu's preferences. */
+function view(): string {
+  return JSON.stringify({ ...runtime.snapshot(), prefs });
+}
+
+function broadcast(): void {
+  const frame = `data: ${view()}\n\n`;
+  for (const client of clients) client.write(frame);
+}
+
+function readBody(req: IncomingMessage, limit = 4_096): Promise<string | null> {
+  return new Promise((resolve) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk: string) => {
+      body += chunk;
+      if (body.length > limit) {
+        resolve(null);
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * POST /config — a patch from the right-click menu. Body is JSON sent as text/plain, so
+ * the browser makes a "simple" request with no CORS preflight; the token still gates it.
+ */
+async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readBody(req);
+  let patch: ReturnType<typeof validatePatch>;
+  try {
+    patch = validatePatch(body === null ? null : JSON.parse(body));
+  } catch {
+    patch = { error: 'body is not JSON' };
+  }
+  if ('error' in patch) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(patch));
+    return;
+  }
+  const user = applyPatch(readUserFile(), patch);
+  writeUserFile(user);
+  prefs = prefsOf(user);
+  runtime.engine.setConfig(mergeConfig(user)); // hot: no restart, state kept
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(prefs));
+  broadcast();
+}
 let quietTicks = 0;
 let tickMs = TICK_IDLE_MS;
 let timer: NodeJS.Timeout | undefined;
@@ -53,8 +111,7 @@ function tick(): void {
   }
 
   if (clients.size === 0) return;
-  const frame = `data: ${JSON.stringify(runtime.snapshot())}\n\n`;
-  for (const client of clients) client.write(frame);
+  broadcast();
 }
 
 function schedule(): void {
@@ -103,7 +160,27 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname === '/snapshot') {
     runtime.pump();
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(runtime.snapshot()));
+    res.end(view());
+    return;
+  }
+
+  if (url.pathname === '/config' && req.method === 'POST') {
+    void updateConfig(req, res);
+    return;
+  }
+
+  if (url.pathname === '/config') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(prefs));
+    return;
+  }
+
+  // "Advanced settings…": open the file in the user's default text editor.
+  if (url.pathname === '/open-config' && req.method === 'POST') {
+    if (!existsSync(CONFIG_FILE)) writeUserFile(readUserFile());
+    execFile('open', ['-t', CONFIG_FILE], () => {});
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -113,7 +190,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
-    res.write(`data: ${JSON.stringify(runtime.snapshot())}\n\n`);
+    res.write(`data: ${view()}\n\n`);
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
@@ -138,12 +215,26 @@ server.listen(PORT, '127.0.0.1', () => {
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
 });
 
+// Hand edits to config.json ("Advanced settings…") apply live too. The directory is
+// watched rather than the file: editors save by renaming over it, which ends a file watch.
+let reloadTimer: NodeJS.Timeout | undefined;
+watch(ROOT_DIR, (_event, name) => {
+  if (name !== 'config.json') return;
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    const user = readUserFile();
+    prefs = prefsOf(user);
+    runtime.engine.setConfig(mergeConfig(user));
+    broadcast();
+  }, 200);
+});
+
 // The network sensor runs only while a turn is open: back-to-back one-shot samples
 // (~5 s each) for the sessions the engine says are mid-turn. See net.ts for the cost.
 const net = new NetSensor();
 async function netLoop(): Promise<void> {
   for (;;) {
-    const targets = runtime.engine.sessionsToSample();
+    const targets = prefs.paused ? [] : runtime.engine.sessionsToSample();
     if (targets.length === 0) {
       await new Promise((r) => setTimeout(r, 1_000));
       continue;

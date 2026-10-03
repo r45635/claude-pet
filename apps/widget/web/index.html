@@ -77,7 +77,13 @@
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
   html.widget, html.widget body { background: transparent; overflow: hidden; }
-  html.widget #pet { width: 150px; height: 150px; }
+  html.widget #pet { width: var(--pet-size, 150px); height: var(--pet-size, 150px); }
+  html.widget body { gap: 0; }
+
+  /* Menu preferences. Paused = asleep on purpose: everything still, no pastilles. */
+  [data-show-sessions="false"] #sessions,
+  [data-paused="true"] #sessions, [data-paused="true"] #thought { display: none; }
+  [data-paused="true"] * { animation-play-state: paused !important; }
 
   /* Covers the window so the whole creature is a drag handle (Tauri only reads the
      attribute on the element actually clicked, not on its ancestors). */
@@ -189,14 +195,75 @@
 
   // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
   let last = '';
+  // ---- right-click menu (widget only) ------------------------------------------------
+  // Native macOS menu via Tauri's JS API. Each choice is POSTed to the daemon, which
+  // writes ~/.claude-pet/config.json and hot-reloads the engine; the new prefs come back
+  // in the next SSE frame, so the page never keeps its own copy as truth.
+  const T = window.__TAURI__;
+  let prefs = { temperament: 'normal', size: 'medium', showSessions: true, paused: false };
+
+  async function post(path, body) {
+    try {
+      const res = await fetch(`${base}${path}?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        body: body === undefined ? undefined : JSON.stringify(body), // text/plain: no preflight
+      });
+      if (res.ok && res.status !== 204) applyPrefs(await res.json());
+    } catch { /* daemon down: the menu simply does nothing */ }
+  }
+
+  const SIZES = { small: 110, medium: 150, large: 220 };
+  let appliedSize = null;
+  function applyPrefs(p) {
+    if (!p) return;
+    prefs = p;
+    pet.dataset.showSessions = String(p.showSessions);
+    pet.dataset.paused = String(p.paused);
+    const px = SIZES[p.size] ?? SIZES.medium;
+    document.documentElement.style.setProperty('--pet-size', `${px}px`);
+    if (T && appliedSize !== px) {
+      appliedSize = px;
+      const Size = (T.dpi ?? T.window).LogicalSize;
+      T.window.getCurrentWindow().setSize(new Size(px + 30, px + 30)).catch(() => {});
+    }
+  }
+
+  if (T) {
+    addEventListener('contextmenu', async (e) => {
+      e.preventDefault();
+      const { Menu } = T.menu;
+      const radio = (key, options) => options.map(([value, text]) => ({
+        text, checked: prefs[key] === value, action: () => post('/config', { [key]: value }),
+      }));
+      const menu = await Menu.new({ items: [
+        { text: 'Temperament', items: radio('temperament',
+            [['zen', 'Zen'], ['normal', 'Normal'], ['nervous', 'Nervous']]) },
+        { text: 'Size', items: radio('size',
+            [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]) },
+        { text: 'Session pastilles', checked: prefs.showSessions,
+          action: () => post('/config', { showSessions: !prefs.showSessions }) },
+        { text: 'Pause (sleep)', checked: prefs.paused,
+          action: () => post('/config', { paused: !prefs.paused }) },
+        { item: 'Separator' },
+        { text: 'Advanced settings…', action: () => post('/open-config') },
+        { item: 'Separator' },
+        { text: 'Quit claude-pet', action: () => T.window.getCurrentWindow().close() },
+      ] });
+      await menu.popup();
+    });
+  }
+
   function render(s) {
-    const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources,
+    applyPrefs(s.prefs);
+    const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => x.id + x.status),
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
-    pet.dataset.visual = s.visual;
-    pet.dataset.state = s.state;
+    // Paused: render as asleep whatever the engine says (it keeps running underneath, so
+    // resuming is accurate at once).
+    pet.dataset.visual = prefs.paused ? 'IDLE' : s.visual;
+    pet.dataset.state = prefs.paused ? 'IDLE' : s.state;
     renderSessions(s.sessions ?? []);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';

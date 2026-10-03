@@ -105,7 +105,8 @@ const ACTIVITY_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 export class Engine {
-  readonly config: EngineConfig;
+  /** Swappable at runtime (menu → daemon → setConfig); state is kept across a swap. */
+  config: EngineConfig;
 
   #load: LoadState;
   #recent: RecentEvent[] = [];
@@ -144,6 +145,10 @@ export class Engine {
   constructor(nowMs: number, config: EngineConfig = DEFAULT_CONFIG) {
     this.config = config;
     this.#load = createLoadState(nowMs);
+  }
+
+  setConfig(config: EngineConfig): void {
+    this.config = config;
   }
 
   /** Called by the tailer when a line could not be parsed. Counted, never guessed at. */
