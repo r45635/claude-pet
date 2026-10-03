@@ -79,6 +79,8 @@ export type EngineConfig = {
   idleAfterMs: number;
   /** Rolling window for the activity-rate figures, ms. */
   rateWindowMs: number;
+  /** A session with no event for this long drops off the per-session list, ms. */
+  sessionTtlMs: number;
 };
 
 export const DEFAULT_CONFIG: EngineConfig = {
@@ -115,6 +117,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   doneStickyMs: 3_000,
   idleAfterMs: 20_000,
   rateWindowMs: 60_000,
+  sessionTtlMs: 30 * 60_000,
 };
 
 /** Which reservoir an event type pours into. Absent => contributes no load. */

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/engine.ts';
+import { DEFAULT_CONFIG } from '../src/config.ts';
 import { parsePetEvent, type PetEvent } from '../src/events.ts';
 import { generateSession } from '../../simulator/src/generate.ts';
 import type { ProfileName } from '../../simulator/src/profiles.ts';
@@ -254,4 +255,28 @@ test('a granted permission clears WAITING as soon as the session acts again', ()
   assert.equal(engine.snapshot(2_000).state, 'WAITING');
   engine.ingest(event('BASH_FINISHED', 3_000, { sid: 'aaaa1111' }));
   assert.notEqual(engine.snapshot(3_100).state, 'WAITING');
+});
+
+test('sessions: one entry per live session, each with its own status', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbb2222' }));
+  engine.ingest(event('PERMISSION_WAITING', 1_000, { sid: 'bbbb2222' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'cccc3333' }));
+  engine.ingest(event('TURN_COMPLETED', 9_000, { sid: 'cccc3333' }));
+  engine.ingest(event('SESSION_STARTED', 0, { sid: 'dddd4444' }));
+  engine.ingest(event('SESSION_STARTED', 0, { sid: 'eeee5555' }));
+  engine.ingest(event('SESSION_ENDED', 5_000, { sid: 'eeee5555' }));
+
+  const byId = Object.fromEntries(engine.snapshot(10_000).sessions.map((s) => [s.id, s]));
+  assert.equal(byId.aaaa1111?.status, 'working');
+  assert.ok((byId.aaaa1111?.turn_ms ?? 0) >= 10_000);
+  assert.equal(byId.bbbb2222?.status, 'waiting');
+  assert.equal(byId.cccc3333?.status, 'done');
+  assert.equal(byId.cccc3333?.turn_ms, null);
+  assert.equal(byId.dddd4444?.status, 'idle');
+  assert.equal(byId.eeee5555, undefined, 'an ended session is gone');
+
+  const later = engine.snapshot(10_000 + DEFAULT_CONFIG.sessionTtlMs + 1_000).sessions;
+  assert.deepEqual(later, [], 'silent sessions drop off after sessionTtlMs');
 });

@@ -37,6 +37,8 @@ export type PetSnapshot = {
   tokens_per_minute: number | null;
   tool_calls_per_minute: number;
   active_subagents: number;
+  /** One entry per live Claude Code session on this machine; the creature shows the busiest. */
+  sessions: SessionSummary[];
   session: {
     tokens: number | null;
     cost_usd: number | null;
@@ -60,6 +62,17 @@ export type PetSnapshot = {
 
 type RecentEvent = { tsMs: number; isToolCall: boolean };
 type Turn = { startMs: number; lastEventMs: number };
+
+/** One Claude Code session, as the per-session pastilles show it. */
+export type SessionStatus = 'working' | 'waiting' | 'done' | 'idle';
+export type SessionSummary = {
+  /** First 8 chars of the session UUID: opaque, carries nothing about the user. */
+  id: string;
+  status: SessionStatus;
+  /** ms since this session's current turn started; null outside a turn. */
+  turn_ms: number | null;
+};
+type SessionSeen = { firstMs: number; lastMs: number; doneMs: number };
 
 const READ_TYPES: ReadonlySet<string> = new Set(['FILE_READ', 'SEARCH']);
 const WRITE_TYPES: ReadonlySet<string> = new Set(['FILE_WRITE']);
@@ -95,6 +108,8 @@ export class Engine {
    */
   #turns = new Map<string, Turn>();
   #previous: PetState = 'IDLE';
+  /** Every session seen, for the per-session list. Insertion order = display order. */
+  #sessions = new Map<string, SessionSeen>();
   /** Sessions blocked on a permission prompt. */
   #pending = new Set<string>();
   #activeSubagents = 0;
@@ -150,6 +165,11 @@ export class Engine {
     ingestLoad(this.#load, event, this.config);
 
     const sid = event.sid ?? '';
+    const seen = this.#sessions.get(sid);
+    if (seen) seen.lastMs = Math.max(seen.lastMs, event.tsMs);
+    else this.#sessions.set(sid, { firstMs: event.tsMs, lastMs: event.tsMs, doneMs: 0 });
+    if (event.type === 'TURN_COMPLETED') this.#sessions.get(sid)!.doneMs = event.tsMs;
+    if (event.type === 'SESSION_ENDED') this.#sessions.delete(sid);
     const turn = this.#turns.get(sid);
     if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, event.tsMs);
     // No hook says "permission granted": the session doing anything again is the proof.
@@ -239,6 +259,24 @@ export class Engine {
     return work;
   }
 
+  #sessionList(nowMs: number): SessionSummary[] {
+    const working = new Set(this.#workingTurns(nowMs));
+    const out: SessionSummary[] = [];
+    for (const [sid, seen] of this.#sessions) {
+      if (nowMs - seen.lastMs > this.config.sessionTtlMs) {
+        this.#sessions.delete(sid);
+        continue;
+      }
+      const turn = this.#turns.get(sid);
+      let status: SessionStatus = 'idle';
+      if (this.#pending.has(sid)) status = 'waiting';
+      else if (turn && working.has(turn)) status = 'working';
+      else if (seen.doneMs > 0 && nowMs - seen.doneMs < this.config.doneStickyMs) status = 'done';
+      out.push({ id: sid, status, turn_ms: turn ? Math.max(0, nowMs - turn.startMs) : null });
+    }
+    return out;
+  }
+
   get #turnActive(): boolean {
     return this.#turns.size > 0;
   }
@@ -303,6 +341,7 @@ export class Engine {
       tokens_per_minute: this.#tokensPerMinute,
       tool_calls_per_minute: toolRate,
       active_subagents: this.#activeSubagents,
+      sessions: this.#sessionList(nowMs),
       session: {
         tokens,
         cost_usd: meter?.cost_usd ?? null,

@@ -29,5 +29,6 @@
   "errorStickyMs": 4000,
   "doneStickyMs": 3000,
   "idleAfterMs": 20000,
-  "rateWindowMs": 60000
+  "rateWindowMs": 60000,
+  "sessionTtlMs": 1800000
 }

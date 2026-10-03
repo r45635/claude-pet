@@ -83,6 +83,16 @@
      attribute on the element actually clicked, not on its ancestors). */
   #drag { position: fixed; inset: 0; }
 
+  /* One pastille per live Claude Code session on this machine. The creature shows the
+     busiest session; the pastilles say how many there are and what each is doing. */
+  #sessions circle { stroke: var(--bg-ring, #11131a); stroke-width: 1.5;
+                     transition: fill .6s ease; }
+  #sessions .working { fill: #7cc4ff; animation: pulse 1.2s ease-in-out infinite; }
+  #sessions .waiting { fill: #ffd166; }
+  #sessions .done    { fill: #8bd17c; }
+  #sessions .idle    { fill: #5a6273; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
@@ -95,6 +105,7 @@
   <g id="arms" stroke="#4a90c2" stroke-width="7" stroke-linecap="round">
     <path d="M44 92 L18 112" /><path d="M116 92 L142 112" />
   </g>
+  <g id="sessions"></g>
   <g id="body">
     <ellipse cx="80" cy="92" rx="44" ry="40" />
     <circle cx="64" cy="84" r="6" fill="var(--eye)" />
@@ -113,6 +124,28 @@
 <script type="module">
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
+  const sessionsLayer = document.getElementById('sessions');
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // Pastilles on an arc above the head, centred, 16° apart, in first-seen order so a
+  // session keeps its place while others come and go.
+  function renderSessions(sessions) {
+    const shown = sessions.slice(0, 7);
+    while (sessionsLayer.childElementCount > shown.length) sessionsLayer.lastChild.remove();
+    while (sessionsLayer.childElementCount < shown.length) {
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('r', '4.5');
+      sessionsLayer.appendChild(dot);
+    }
+    shown.forEach((session, i) => {
+      const deg = -90 + (i - (shown.length - 1) / 2) * 16;
+      const rad = (deg * Math.PI) / 180;
+      const dot = sessionsLayer.children[i];
+      dot.setAttribute('cx', (80 + 60 * Math.cos(rad)).toFixed(1));
+      dot.setAttribute('cy', (92 + 60 * Math.sin(rad)).toFixed(1));
+      dot.setAttribute('class', session.status);
+    });
+  }
 
   // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
   const params = new URLSearchParams(location.hash.slice(1));
@@ -141,10 +174,12 @@
   let last = '';
   function render(s) {
     const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources,
+                                (s.sessions ?? []).map((x) => x.id + x.status),
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
     pet.dataset.visual = s.visual;
+    renderSessions(s.sessions ?? []);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 
@@ -165,7 +200,8 @@
       `STATE: ${s.state.padEnd(10)} LOAD: ${String(s.load).padStart(3)}\n` +
       `EVENTS/MIN: ${String(s.estimated_activity_rate).padStart(4)}  CTX: ${ctx}\n` +
       `agents ${s.active_subagents}  conf ${s.load_confidence.toFixed(2)}  ` +
-      `hooks:${s.sources.hooks ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}`;
+      `hooks:${s.sources.hooks ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}\n` +
+      (s.sessions ?? []).map((x) => `${x.id} ${x.status}`).join('  ');
   }
 
   function connect() {
