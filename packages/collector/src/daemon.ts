@@ -21,7 +21,8 @@ import { NetSensor } from './net.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
 import { mergeConfig } from '@claude-pet/core';
-import { CONFIG_FILE } from './paths.ts';
+import { CONFIG_FILE, REFERENCE_FILE } from './paths.ts';
+import { writeReference } from './reference.ts';
 import { applyPatch, prefsOf, readUserFile, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
@@ -178,7 +179,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // "Advanced settings…": open the file in the user's default text editor.
   if (url.pathname === '/open-config' && req.method === 'POST') {
     if (!existsSync(CONFIG_FILE)) writeUserFile(readUserFile());
-    execFile('open', ['-t', CONFIG_FILE], () => {});
+    writeReference(REFERENCE_FILE, runtime.engine.config, prefs.temperament);
+    execFile('open', ['-t', CONFIG_FILE, REFERENCE_FILE], () => {});
     res.writeHead(204);
     res.end();
     return;

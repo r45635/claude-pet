@@ -7,6 +7,7 @@ export const SPOOL_DIR = join(ROOT_DIR, 'spool');
 export const SPOOL_FILE = join(SPOOL_DIR, 'events.jsonl');
 export const STATE_FILE = join(ROOT_DIR, 'state.json');
 export const CONFIG_FILE = join(ROOT_DIR, 'config.json');
+export const REFERENCE_FILE = join(ROOT_DIR, 'config.reference.jsonc');
 export const TOKEN_FILE = join(ROOT_DIR, 'token');
 export const LOG_DIR = join(ROOT_DIR, 'logs');
 

@@ -37,7 +37,7 @@ without the other: the widget reconnects on its own. To start both at login:
 | Size → Small / Medium / Large | window and creature size |
 | Session pastilles | show/hide one dot per live Claude Code session |
 | Pause (sleep) | the creature sleeps; the network sensor stops sampling |
-| Advanced settings… | opens `~/.claude-pet/config.json` in the default text editor |
+| Advanced settings… | opens `~/.claude-pet/config.json` (yours to edit) next to `config.reference.jsonc` (read-only: every key, its effective value, what it does) |
 | Quit claude-pet | closes the widget until the next login (or `launchctl kickstart`) |
 
 Every choice is written by the daemon to `~/.claude-pet/config.json` and applied **live**,
