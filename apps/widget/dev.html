@@ -1,0 +1,138 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>claude-pet dev harness</title>
+<!--
+  Rust-free Phase 3 harness. Open this in Safari against a running daemon:
+
+    node packages/collector/src/daemon.ts
+    open "apps/widget/dev.html#token=<token printed by the daemon>"
+
+  The same markup becomes the Tauri webview content in Phase 3 proper, so the animation
+  work is not gated on installing a 1.5 GB toolchain.
+-->
+<style>
+  :root {
+    --bg: #11131a;
+    --skin: #7cc4ff;
+    --skin-hot: #ff9f68;
+    --skin-bad: #ff6b81;
+    --eye: #11131a;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: #c9d1d9;
+               font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display: grid; place-items: center; gap: 14px; grid-auto-flow: row; }
+  /* Transparent background in the real widget; the dev page paints one so it is visible. */
+  #pet { width: 160px; height: 160px; overflow: visible; }
+
+  /* Animation intensity is interpolated from load, never switched in steps:
+     --dur and --amp are written by JS from the snapshot. */
+  #body {
+    transform-origin: 50% 70%;
+    animation: breathe var(--dur, 3.2s) ease-in-out infinite;
+  }
+  #arms { animation: flail var(--dur, 3.2s) ease-in-out infinite; transform-origin: 50% 55%; }
+  #sparks { opacity: 0; }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(1, 1) translateY(0); }
+    50%      { transform: scale(calc(1 + var(--amp, .03)), calc(1 - var(--amp, .03) * .6))
+                          translateY(calc(var(--amp, .03) * -40px)); }
+  }
+  @keyframes flail {
+    0%, 100% { transform: rotate(calc(var(--amp, .03) * -60deg)); }
+    50%      { transform: rotate(calc(var(--amp, .03) * 60deg)); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translate(0, 0) rotate(0); }
+    25%      { transform: translate(-2px, 1px) rotate(-2deg); }
+    75%      { transform: translate(2px, -1px) rotate(2deg); }
+  }
+
+  /* --- the four MVP visual states ----------------------------------------------- */
+  [data-visual="IDLE"] #body  { fill: var(--skin); }
+  [data-visual="IDLE"] .lid   { opacity: 1; }          /* eyes closed: sleeping */
+  [data-visual="IDLE"] #arms  { animation-play-state: paused; }
+
+  [data-visual="ACTIVE"] #body { fill: var(--skin); }
+  [data-visual="ACTIVE"] .lid  { opacity: 0; }         /* eyes open */
+
+  [data-visual="HIGH_LOAD"] #body   { fill: var(--skin-hot); }
+  [data-visual="HIGH_LOAD"] .lid    { opacity: 0; }
+  [data-visual="HIGH_LOAD"] #pet    { animation: shake .12s linear infinite; }
+  [data-visual="HIGH_LOAD"] #sparks { opacity: 1; }
+
+  [data-visual="ERROR"] #body { fill: var(--skin-bad); }
+  [data-visual="ERROR"] .lid  { opacity: 0; }
+  [data-visual="ERROR"] #pet  { animation: shake .4s linear infinite; }
+  [data-visual="ERROR"] #mouth { d: path("M 62 108 Q 80 94 98 108"); }  /* frown */
+
+  /* A disconnected creature must not look like a sleeping one. */
+  [data-signal="none"] #body { fill: #3a4050; }
+  [data-signal="none"] #pet  { opacity: .45; }
+
+  #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
+  #hud[hidden] { display: none; }
+</style>
+
+<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-signal="none">
+  <g id="sparks" stroke="#ffd166" stroke-width="3" stroke-linecap="round">
+    <path d="M30 40 l-10 -10" /><path d="M130 40 l10 -10" />
+    <path d="M26 86 l-13 0" /><path d="M134 86 l13 0" />
+  </g>
+  <g id="arms" stroke="#4a90c2" stroke-width="7" stroke-linecap="round">
+    <path d="M44 92 L18 112" /><path d="M116 92 L142 112" />
+  </g>
+  <g id="body">
+    <ellipse cx="80" cy="92" rx="44" ry="40" fill="#7cc4ff" />
+    <circle cx="64" cy="84" r="6" fill="var(--eye)" />
+    <circle cx="96" cy="84" r="6" fill="var(--eye)" />
+    <g class="lid" stroke="var(--eye)" stroke-width="3" stroke-linecap="round">
+      <path d="M57 84 h14" /><path d="M89 84 h14" />
+    </g>
+    <path id="mouth" d="M66 106 Q80 114 94 106" fill="none"
+          stroke="var(--eye)" stroke-width="3" stroke-linecap="round" />
+  </g>
+</svg>
+
+<div id="hud" hidden></div>
+
+<script type="module">
+  const pet = document.getElementById('pet');
+  const hud = document.getElementById('hud');
+
+  // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
+  const params = new URLSearchParams(location.hash.slice(1));
+  let debug = params.has('debug');
+  const applyDebug = () => { hud.hidden = !debug; };
+  applyDebug();
+  addEventListener('keydown', (e) => { if (e.key === 'd') { debug = !debug; applyDebug(); } });
+
+  const token = params.get('token') ?? '';
+  const base = params.get('url') ?? 'http://127.0.0.1:8787';
+
+  function render(s) {
+    pet.dataset.visual = s.visual;
+    // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
+    pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
+
+    // Continuous mapping, not four fixed speeds: load 0 -> 3.2s/0.03, load 100 -> 0.16s/0.22.
+    const t = s.load / 100;
+    pet.style.setProperty('--dur', `${(3.2 - 3.04 * t).toFixed(2)}s`);
+    pet.style.setProperty('--amp', (0.03 + 0.19 * t).toFixed(3));
+
+    const ctx = s.context_load === null ? '  —' : `${String(s.context_load).padStart(2)}%`;
+    hud.textContent =
+      `STATE: ${s.state.padEnd(10)} LOAD: ${String(s.load).padStart(3)}\n` +
+      `EVENTS/MIN: ${String(s.estimated_activity_rate).padStart(4)}  CTX: ${ctx}\n` +
+      `agents ${s.active_subagents}  conf ${s.load_confidence.toFixed(2)}  ` +
+      `hooks:${s.sources.hooks ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}`;
+  }
+
+  function connect() {
+    const es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`);
+    es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch { /* keep last frame */ } };
+    // EventSource reconnects on its own; this only surfaces the gap to the viewer.
+    es.onerror = () => { pet.dataset.signal = 'none'; };
+  }
+  connect();
+</script>

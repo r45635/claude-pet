@@ -1,0 +1,11 @@
+{
+  "name": "@claude-pet/collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./spool": "./src/spool.ts"
+  },
+  "dependencies": { "@claude-pet/core": "*" }
+}
