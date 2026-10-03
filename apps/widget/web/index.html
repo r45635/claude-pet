@@ -1,14 +1,15 @@
 <!doctype html>
 <meta charset="utf-8" />
-<title>claude-pet dev harness</title>
+<title>claude-pet</title>
 <!--
-  Rust-free Phase 3 harness. Open this in Safari against a running daemon:
+  The creature. One page, two hosts:
 
-    node packages/collector/src/daemon.ts
-    open "apps/widget/dev.html#token=<token printed by the daemon>"
+    - the Tauri widget (apps/widget/src-tauri), which injects window.__CLAUDE_PET__
+      = {url, token} read from ~/.claude-pet/endpoint.json, and renders it transparent;
+    - any browser, as a Rust-free harness against a running daemon:
 
-  The same markup becomes the Tauri webview content in Phase 3 proper, so the animation
-  work is not gated on installing a 1.5 GB toolchain.
+        npm run daemon
+        open "apps/widget/web/index.html#token=<token printed by the daemon>&debug"
 -->
 <style>
   :root {
@@ -70,6 +71,14 @@
   [data-signal="none"] #body { fill: #3a4050; }
   [data-signal="none"] #pet  { opacity: .45; }
 
+  /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
+  html.widget, html.widget body { background: transparent; overflow: hidden; }
+  html.widget #pet { width: 150px; height: 150px; }
+
+  /* Covers the window so the whole creature is a drag handle (Tauri only reads the
+     attribute on the element actually clicked, not on its ancestors). */
+  #drag { position: fixed; inset: 0; }
+
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
@@ -95,6 +104,7 @@
 </svg>
 
 <div id="hud" hidden></div>
+<div id="drag" data-tauri-drag-region></div>
 
 <script type="module">
   const pet = document.getElementById('pet');
@@ -107,8 +117,11 @@
   applyDebug();
   addEventListener('keydown', (e) => { if (e.key === 'd') { debug = !debug; applyDebug(); } });
 
-  const token = params.get('token') ?? '';
-  const base = params.get('url') ?? 'http://127.0.0.1:8787';
+  // The widget host injects the endpoint; the browser harness passes it in the hash.
+  const injected = window.__CLAUDE_PET__;
+  if (injected !== undefined) document.documentElement.classList.add('widget');
+  const token = injected?.token ?? params.get('token') ?? '';
+  const base = injected?.url ?? params.get('url') ?? 'http://127.0.0.1:8787';
 
   function render(s) {
     pet.dataset.visual = s.visual;

@@ -21,9 +21,9 @@ Fully local. No cloud, no telemetry, no outbound network call anywhere in the co
 |---|---|---|
 | 0 | telemetry investigation | ✅ `docs/CLAUDE_CODE_TELEMETRY.md` |
 | 1 | event simulator | ✅ deterministic, 4 profiles |
-| 2 | state engine + tests | ✅ 62 tests |
-| 3 | Tauri widget | ⬜ scaffolded — `apps/widget/dev.html` runs without Rust |
-| 4 | real Claude Code integration | ⬜ scripts written, **not wired into `~/.claude/settings.json`** |
+| 2 | state engine + tests | ✅ |
+| 3 | Tauri widget | 🟡 transparent window built; budgets (CPU/RSS) to measure |
+| 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
 | 5 | refinement | ⬜ |
 
 ## Try it without Claude Code
@@ -42,7 +42,7 @@ npm run sim -- --profile heavy --duration 30
 node packages/collector/src/snapshot.ts --watch
 ```
 
-Or see the creature: `open "apps/widget/dev.html#token=<token>&debug"`.
+Or see the creature: `open "apps/widget/web/index.html#token=<token>&debug"`, or run the Tauri widget (`apps/widget/README.md`).
 
 Profiles: `idle`, `moderate`, `heavy`, `error`. Add `--seed 7 --fast` for a byte-identical
 replay; `--stdout` to print events instead of writing the spool.
@@ -101,11 +101,18 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - `jq` (ships with macOS 26 at `/usr/bin/jq`)
 - Rust — **only** for Phase 3; see `apps/widget/README.md`
 
-## Not wired in yet
+## Wiring into Claude Code
 
-Phase 4 is what edits `~/.claude/settings.json`. Until then nothing here observes a real
-session. When it lands it must **merge** into existing hooks rather than replace them, and
-back the file up first.
+```bash
+npm run install-hooks -- --dry-run   # show what would change
+npm run install-hooks                # back up ~/.claude/settings.json, then merge
+npm run uninstall-hooks              # remove only our entries
+```
+
+The installer **merges**: existing hooks are left untouched, a foreign `statusLine` is never
+overwritten (the meter then stays offline and says so), and a re-run is a no-op. Every write
+is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
+without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
 
 ## License
 

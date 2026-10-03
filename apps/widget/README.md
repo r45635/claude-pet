@@ -1,37 +1,33 @@
 # apps/widget — Phase 3
 
-**Not built yet.** Two things live here:
+- `web/index.html` — the creature. The same page runs in two hosts:
+  - the Tauri window, which injects `window.__CLAUDE_PET__ = {url, token}` read from
+    `~/.claude-pet/endpoint.json` and renders it transparent;
+  - any browser, as a Rust-free harness:
+    `open "apps/widget/web/index.html#token=<token>&debug"`. Press `d` for the debug overlay.
+- `src-tauri/` — a transparent, undecorated, always-on-top 180×180 window, no Dock icon.
+  Its only capability is `start-dragging`: no fs, shell or network plugin.
 
-- `dev.html` — a Rust-free harness that renders the four MVP visual states against the
-  daemon's SSE feed. Open it in Safari; press `d` for the debug overlay.
-- this note, recording the prerequisite the rest of the repo deliberately avoids.
+## Build and run
 
-## Prerequisite before Phase 3 proper
-
-`cargo` and `rustc` are **not installed** on this machine (checked 2026-10-03). Tauri
-cannot build without them:
+Needs Rust and the Tauri CLI (one-time, ~1.5 GB):
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 cargo install tauri-cli --locked
 ```
 
-That is a ~1.5 GB one-time install. Phases 1, 2 and the whole collector need none of it,
-which is why they come first.
+Then, with the daemon already running (the widget reads its endpoint **at startup**):
 
-## Window configuration Phase 3 will need
-
-```jsonc
-// src-tauri/tauri.conf.json (sketch)
-{
-  "app": { "windows": [{
-    "transparent": true, "decorations": false, "alwaysOnTop": true,
-    "shadow": false, "resizable": false, "skipTaskbar": true,
-    "width": 180, "height": 180
-  }] }
-}
+```bash
+npm run daemon                                   # terminal 1
+cd apps/widget && cargo tauri build --no-bundle  # once
+./src-tauri/target/release/claude-pet-widget
 ```
 
-`macOSPrivateApi: true` is required for a genuinely transparent window on macOS.
-Click-through is `window.setIgnoreCursorEvents(true)` — Phase 5, behind a toggle, because
-a creature you cannot click is a creature you cannot move.
+⚠️ The daemon picks a fresh token on every start unless `CLAUDE_PET_TOKEN` is set; restart
+the widget after restarting the daemon, or pin the token.
+
+Drag the creature anywhere to move it. Click-through
+(`window.setIgnoreCursorEvents(true)`) is Phase 5, behind a toggle, because a creature you
+cannot click is a creature you cannot move.

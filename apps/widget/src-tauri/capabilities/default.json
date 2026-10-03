@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The pet window may only be dragged. No fs, no shell, no network plugin.",
+  "windows": ["pet"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

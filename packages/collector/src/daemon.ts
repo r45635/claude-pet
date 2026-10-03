@@ -67,6 +67,11 @@ function authorized(url: URL): boolean {
 function handle(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
 
+  // The widget runs from `tauri://localhost` (or `file://` for the browser harness), so
+  // without this header EventSource is blocked as cross-origin. Wildcard is safe here:
+  // CORS only decides who may *read* a response, and the token still gates every route.
+  res.setHeader('access-control-allow-origin', '*');
+
   if (!authorized(url)) {
     res.writeHead(401, { 'content-type': 'application/json' });
     res.end('{"error":"token required"}');

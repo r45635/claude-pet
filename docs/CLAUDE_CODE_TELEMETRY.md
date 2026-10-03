@@ -112,6 +112,13 @@ before the first API call **and again after `/compact`**; `used_percentage` /
 `remaining_percentage` may be `null` early in a session; `prompt_cache` is absent until the
 first response; `workspace.repo` is absent outside a git repo.
 
+🪤 **The status line only exists in the terminal CLI.** Observed 2026-10-03 with the hooks
+installed: a session in the **VS Code extension** emitted 50 hook events and **zero**
+`METER_SAMPLE`, while a terminal session on the same machine emitted samples normally. The
+extension has no status bar, so it never runs `statusLine.command`. Consequence: in VS Code
+the context/token meter is `null` and `sources.statusline` stays `false` — which is the
+honest answer. Getting a gauge there means the opt-in transcript or OTEL sources (§2.1, OTEL).
+
 ---
 
 ## 2. Usable but indirect signals

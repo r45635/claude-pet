@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 .DS_Store
 apps/widget/src-tauri/target/
+apps/widget/src-tauri/gen/
