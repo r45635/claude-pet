@@ -25,8 +25,9 @@ cd apps/widget && cargo tauri build --no-bundle  # once
 ./src-tauri/target/release/claude-pet-widget
 ```
 
-⚠️ The daemon picks a fresh token on every start unless `CLAUDE_PET_TOKEN` is set; restart
-the widget after restarting the daemon, or pin the token.
+Daemon and widget share a persistent token (`~/.claude-pet/token`), so either can restart
+without the other: the widget reconnects on its own. To start both at login:
+`npm run autostart -- install`.
 
 ## Right-click menu
 
