@@ -11,15 +11,16 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureSpool, rotateIfNeeded } from './spool.ts';
 import { ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
+import { readOrCreateToken } from './token.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
-const TOKEN = process.env.CLAUDE_PET_TOKEN ?? randomBytes(12).toString('hex');
+// Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
+const TOKEN = process.env.CLAUDE_PET_TOKEN ?? readOrCreateToken();
 
 /** 100 ms while events flow, 1 s when idle — an always-on widget must cost nothing. */
 const TICK_BUSY_MS = 100;
