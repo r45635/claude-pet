@@ -79,6 +79,8 @@ export type PetEvent = {
   type: PetEventType;
   /** sha256(session_id)[0:8] — correlation only. */
   sid?: string;
+  /** Parent pid of the hook: leads the daemon to this session's `claude` process. */
+  ppid?: number;
   tool?: ToolClass;
   agent?: string;
   /** Multiplicity, default 1. */
@@ -160,6 +162,9 @@ export function parsePetEvent(raw: unknown): PetEvent | null {
 
   const sid = str(r.sid, 16);
   if (sid) event.sid = sid;
+
+  const ppid = num(r.ppid);
+  if (ppid !== null && Number.isInteger(ppid) && ppid > 1) event.ppid = ppid;
 
   if (typeof r.tool === 'string') {
     event.tool = (TOOL_CLASS_SET.has(r.tool) ? r.tool : 'other') as ToolClass;

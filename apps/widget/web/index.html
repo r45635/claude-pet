@@ -83,11 +83,25 @@
      attribute on the element actually clicked, not on its ancestors). */
   #drag { position: fixed; inset: 0; }
 
+  /* THINKING — measured: bytes are streaming into a `claude` process. Eyes up and to
+     the side, and a thought bubble whose dots light in turn. Distinct from a tool
+     running, which keeps the eyes forward. */
+  .eye { transition: transform .5s ease; }
+  #thought { opacity: 0; transition: opacity .4s ease; }
+  #thought circle { opacity: .25; }
+  [data-state="THINKING"] .eye { transform: translate(3px, -4px); }
+  [data-state="THINKING"] #thought { opacity: 1; }
+  [data-state="THINKING"] #thought circle { animation: think 1.2s ease-in-out infinite; }
+  [data-state="THINKING"] #thought circle:nth-child(2) { animation-delay: .2s; }
+  [data-state="THINKING"] #thought circle:nth-child(3) { animation-delay: .4s; }
+  @keyframes think { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
   /* One pastille per live Claude Code session on this machine. The creature shows the
      busiest session; the pastilles say how many there are and what each is doing. */
   #sessions circle { stroke: var(--bg-ring, #11131a); stroke-width: 1.5;
                      transition: fill .6s ease; }
-  #sessions .working { fill: #7cc4ff; animation: pulse 1.2s ease-in-out infinite; }
+  #sessions .thinking { fill: #c9a2ff; animation: pulse .8s ease-in-out infinite; }
+  #sessions .working { fill: #7cc4ff; animation: pulse 1.6s ease-in-out infinite; }
   #sessions .waiting { fill: #ffd166; }
   #sessions .done    { fill: #8bd17c; }
   #sessions .idle    { fill: #5a6273; }
@@ -106,10 +120,13 @@
     <path d="M44 92 L18 112" /><path d="M116 92 L142 112" />
   </g>
   <g id="sessions"></g>
+  <g id="thought" fill="#c9d1d9">
+    <circle cx="116" cy="50" r="3.2" /><circle cx="127" cy="44" r="3.2" /><circle cx="138" cy="38" r="3.2" />
+  </g>
   <g id="body">
     <ellipse cx="80" cy="92" rx="44" ry="40" />
-    <circle cx="64" cy="84" r="6" fill="var(--eye)" />
-    <circle cx="96" cy="84" r="6" fill="var(--eye)" />
+    <circle class="eye" cx="64" cy="84" r="6" fill="var(--eye)" />
+    <circle class="eye" cx="96" cy="84" r="6" fill="var(--eye)" />
     <g class="lid" stroke="var(--eye)" stroke-width="3" stroke-linecap="round">
       <path d="M57 84 h14" /><path d="M89 84 h14" />
     </g>
@@ -179,6 +196,7 @@
     if (key === last) return;
     last = key;
     pet.dataset.visual = s.visual;
+    pet.dataset.state = s.state;
     renderSessions(s.sessions ?? []);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
@@ -200,7 +218,7 @@
       `STATE: ${s.state.padEnd(10)} LOAD: ${String(s.load).padStart(3)}\n` +
       `EVENTS/MIN: ${String(s.estimated_activity_rate).padStart(4)}  CTX: ${ctx}\n` +
       `agents ${s.active_subagents}  conf ${s.load_confidence.toFixed(2)}  ` +
-      `hooks:${s.sources.hooks ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}\n` +
+      `hooks:${s.sources.hooks ? 'y' : 'n'} net:${s.sources.net ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}\n` +
       (s.sessions ?? []).map((x) => `${x.id} ${x.status}`).join('  ');
   }
 

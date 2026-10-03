@@ -49,6 +49,13 @@ export function ingestLoad(state: LoadState, event: PetEvent, config: EngineConf
   state.live[channel] = true;
 }
 
+/** Pour an arbitrary amount into a channel (used by measured, non-event sources). */
+export function pourLoad(state: LoadState, channel: ChannelName, amount: number): void {
+  if (!(amount > 0)) return;
+  state.reservoirs[channel] += amount;
+  state.live[channel] = true;
+}
+
 /**
  * Advance the reservoirs to `nowMs` and produce the blended score.
  *

@@ -53,6 +53,8 @@ export type StateInputs = {
   dominantAtMs: number;
   /** The previous resolved state, for HIGH_LOAD hysteresis. */
   previous?: PetState;
+  /** Measured: a session's model is streaming right now (network sensor). */
+  generating?: boolean;
 };
 
 export type StateConfig = {
@@ -100,7 +102,11 @@ export function resolveState(input: StateInputs, config: StateConfig): PetState 
   const threshold = input.previous === 'HIGH_LOAD' ? exit : config.highLoadThreshold;
   if (input.load >= threshold) return 'HIGH_LOAD';
 
-  // 6. What it is visibly doing. `dominant` decays with the load window, so a long
+  // 6. Measured streaming beats the last tool event: if bytes are arriving, the model is
+  //    thinking or writing now, whatever tool ran before.
+  if (input.generating) return 'THINKING';
+
+  // 7. What it is visibly doing. `dominant` decays with the load window, so a long
   //    silence after a Read does not keep the creature "reading" forever.
   if (input.dominant && nowMs - input.dominantAtMs < config.idleAfterMs) {
     if (input.dominant === 'read') return 'READING';
@@ -108,7 +114,7 @@ export function resolveState(input: StateInputs, config: StateConfig): PetState 
     return 'TOOL_CALL';
   }
 
-  // 7. A turn is running with nothing observable in flight: the model is working.
+  // 8. A turn is running with nothing observable in flight: the model is working.
   if (input.turnActive) return 'THINKING';
 
   return 'IDLE';

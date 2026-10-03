@@ -81,6 +81,22 @@ export type EngineConfig = {
   rateWindowMs: number;
   /** A session with no event for this long drops off the per-session list, ms. */
   sessionTtlMs: number;
+  /**
+   * The network sensor (macOS `nettop`, sampled by the daemon). Bytes arriving at a
+   * session's `claude` process are the model streaming — thinking or writing — the one
+   * real-time signal no hook gives. Measured: ~0.5 KB every ~30 s at rest (keepalives),
+   * several KB per sample while generating.
+   */
+  net: {
+    /** Below this inbound rate the process is idle (keepalives), bytes/s. */
+    activeBytesPerSec: number;
+    /** A sample older than this no longer says anything, ms (samples come every ~5 s). */
+    freshMs: number;
+    /** Reservoir poured into the `generation` channel per KB received. */
+    perKb: number;
+    /** Work gauge while a measured turn is open but nothing streams (a tool runs), 0..1 of work.max. */
+    quietWorkFactor: number;
+  };
 };
 
 export const DEFAULT_CONFIG: EngineConfig = {
@@ -118,6 +134,8 @@ export const DEFAULT_CONFIG: EngineConfig = {
   idleAfterMs: 20_000,
   rateWindowMs: 60_000,
   sessionTtlMs: 30 * 60_000,
+  // perKb: ~1 KB/s of streaming reads as THINKING (load ~70); ~3 KB/s and up as a storm.
+  net: { activeBytesPerSec: 250, freshMs: 8_000, perKb: 0.2, quietWorkFactor: 0.4 },
 };
 
 /** Which reservoir an event type pours into. Absent => contributes no load. */
@@ -157,5 +175,6 @@ export function mergeConfig(overrides: unknown): EngineConfig {
     eventWeights: { ...base.eventWeights, ...(o.eventWeights as object | undefined) },
     smoothing: { ...base.smoothing, ...(o.smoothing as object | undefined) },
     work: { ...base.work, ...(o.work as object | undefined) },
+    net: { ...base.net, ...(o.net as object | undefined) },
   } as EngineConfig;
 }

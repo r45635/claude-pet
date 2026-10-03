@@ -23,7 +23,10 @@ command -v jq >/dev/null 2>&1 || exit 0
 chmod 700 "$PET_HOME" "$SPOOL_DIR" 2>/dev/null
 
 # A single jq program. `empty` means "this event carries no signal" and writes nothing.
-jq -c '
+# $PPID is free (no fork) and lets the daemon find the `claude` process of this session,
+# whose network traffic is the only real-time sign of the model generating. A pid says
+# nothing about the user.
+jq -c --arg ppid "${PPID:-}" '
   def iso:
     now as $n
     | ($n | floor) as $s
@@ -85,7 +88,9 @@ jq -c '
       else null end
     ) as $out
   | if $out == null then empty
-    else { v: 1, ts: iso, sid: sid } + ($out | with_entries(select(.value != "" and .value != null)))
+    else { v: 1, ts: iso, sid: sid }
+         + ({ ppid: ($ppid | tonumber? // null) } | with_entries(select(.value != null)))
+         + ($out | with_entries(select(.value != "" and .value != null)))
     end
 ' >> "$SPOOL" 2>/dev/null
 

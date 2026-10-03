@@ -17,6 +17,7 @@ import { ensureSpool, rotateIfNeeded } from './spool.ts';
 import { ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
+import { NetSensor } from './net.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -136,6 +137,30 @@ server.listen(PORT, '127.0.0.1', () => {
   schedule();
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
 });
+
+// The network sensor runs only while a turn is open: back-to-back one-shot samples
+// (~5 s each) for the sessions the engine says are mid-turn. See net.ts for the cost.
+const net = new NetSensor();
+async function netLoop(): Promise<void> {
+  for (;;) {
+    const targets = runtime.engine.sessionsToSample();
+    if (targets.length === 0) {
+      await new Promise((r) => setTimeout(r, 1_000));
+      continue;
+    }
+    const sample = await net.sample(Date.now);
+    if (sample === null) return; // sensor unavailable on this machine
+    const now = Date.now();
+    for (const { sid, ppid } of targets) {
+      const pid = await net.claudePidOf(ppid);
+      const delta = pid === null ? undefined : sample.get(pid);
+      // No delta (first sighting, counter reset, no socket): say nothing; the last sample
+      // goes stale and the engine falls back to its unmeasured behaviour.
+      if (delta) runtime.engine.ingestNet(sid, delta.bytesIn, delta.spanMs, now);
+    }
+  }
+}
+void netLoop();
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

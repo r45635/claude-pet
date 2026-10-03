@@ -43,6 +43,7 @@ test('the fresh engine reports absence as absence, not as zero', () => {
   assert.equal(snapshot.session.cost_usd, null);
   assert.deepEqual(snapshot.sources, {
     hooks: false,
+    net: false,
     statusline: false,
     transcript: false,
     otel: false,
@@ -279,4 +280,35 @@ test('sessions: one entry per live session, each with its own status', () => {
 
   const later = engine.snapshot(10_000 + DEFAULT_CONFIG.sessionTtlMs + 1_000).sessions;
   assert.deepEqual(later, [], 'silent sessions drop off after sessionTtlMs');
+});
+
+test('net: bytes arriving mean the model is generating, whatever tool ran before', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111', ppid: 4242 }));
+  engine.ingest(event('BASH_STARTED', 1_000, { sid: 'aaaa1111' }));
+  engine.ingest(event('BASH_FINISHED', 2_000, { sid: 'aaaa1111' }));
+  assert.deepEqual(engine.sessionsToSample(), [{ sid: 'aaaa1111', ppid: 4242 }]);
+
+  engine.ingestNet('aaaa1111', 6_000, 5_000, 8_000); // 1.2 KB/s: streaming
+  let s = engine.snapshot(8_000);
+  assert.equal(s.state, 'THINKING');
+  assert.equal(s.sessions[0]?.status, 'thinking');
+  assert.equal(s.sources.net, true);
+
+  engine.ingestNet('aaaa1111', 500, 5_000, 13_000); // keepalive only: not generating
+  s = engine.snapshot(13_000);
+  assert.notEqual(s.state, 'THINKING');
+  assert.equal(s.sessions[0]?.status, 'working');
+});
+
+test('net: a streaming session is not dropped by the silent-turn cutoff', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111', ppid: 4242 }));
+  let s = engine.snapshot(0);
+  for (let now = 5_000; now <= 300_000; now += 5_000) {
+    engine.ingestNet('aaaa1111', 4_000, 5_000, now); // a five-minute think, no hook at all
+    s = engine.snapshot(now);
+  }
+  assert.equal(s.state, 'THINKING');
+  assert.ok(s.load >= 60, `a long measured think is real work, got ${s.load}`);
 });

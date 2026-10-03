@@ -10,13 +10,15 @@ import type { EngineConfig } from './config.ts';
 import { DEFAULT_CONFIG } from './config.ts';
 import type { MeterSample, PetEvent } from './events.ts';
 import type { LoadState } from './load.ts';
-import { clamp, createLoadState, ingestLoad, tickLoad } from './load.ts';
+import { clamp, createLoadState, ingestLoad, pourLoad, tickLoad } from './load.ts';
 import type { PetState } from './state.ts';
 import { resolveState, toVisualState } from './state.ts';
 import type { VisualState } from './state.ts';
 
 export type SnapshotSources = {
   hooks: boolean;
+  /** The daemon's network sensor has delivered at least one sample. */
+  net?: boolean;
   statusline: boolean;
   transcript: boolean;
   otel: boolean;
@@ -64,7 +66,7 @@ type RecentEvent = { tsMs: number; isToolCall: boolean };
 type Turn = { startMs: number; lastEventMs: number };
 
 /** One Claude Code session, as the per-session pastilles show it. */
-export type SessionStatus = 'working' | 'waiting' | 'done' | 'idle';
+export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle';
 export type SessionSummary = {
   /** First 8 chars of the session UUID: opaque, carries nothing about the user. */
   id: string;
@@ -72,7 +74,15 @@ export type SessionSummary = {
   /** ms since this session's current turn started; null outside a turn. */
   turn_ms: number | null;
 };
-type SessionSeen = { firstMs: number; lastMs: number; doneMs: number };
+type SessionSeen = {
+  firstMs: number;
+  lastMs: number;
+  doneMs: number;
+  /** Parent pid of the session's hooks; the daemon resolves it to the `claude` process. */
+  ppid?: number;
+  /** Last network sample for this session's process. */
+  net?: { bytesPerSec: number; atMs: number };
+};
 
 const READ_TYPES: ReadonlySet<string> = new Set(['FILE_READ', 'SEARCH']);
 const WRITE_TYPES: ReadonlySet<string> = new Set(['FILE_WRITE']);
@@ -123,6 +133,7 @@ export class Engine {
   #dominant: 'read' | 'write' | 'tool' | null = null;
   #dominantAtMs = 0;
 
+  #netSeen = false;
   #eventsSeen = 0;
   #eventsDropped = 0;
   #sawHookEvent = false;
@@ -168,6 +179,7 @@ export class Engine {
     const seen = this.#sessions.get(sid);
     if (seen) seen.lastMs = Math.max(seen.lastMs, event.tsMs);
     else this.#sessions.set(sid, { firstMs: event.tsMs, lastMs: event.tsMs, doneMs: 0 });
+    if (event.ppid) this.#sessions.get(sid)!.ppid = event.ppid;
     if (event.type === 'TURN_COMPLETED') this.#sessions.get(sid)!.doneMs = event.tsMs;
     if (event.type === 'SESSION_ENDED') this.#sessions.delete(sid);
     const turn = this.#turns.get(sid);
@@ -237,30 +249,76 @@ export class Engine {
     }
   }
 
-  /** Turns that are running and trusted: not blocked on the user, not gone silent. */
-  #workingTurns(nowMs: number): Turn[] {
-    const out: Turn[] = [];
-    for (const [sid, turn] of this.#turns) {
-      if (this.#pending.has(sid)) continue;
-      if (nowMs - turn.lastEventMs > this.config.work.staleAfterMs) continue;
-      out.push(turn);
+  /** Sessions with an open turn and a known hook parent pid — what the net sensor samples. */
+  sessionsToSample(): { sid: string; ppid: number }[] {
+    const out: { sid: string; ppid: number }[] = [];
+    for (const sid of this.#turns.keys()) {
+      const ppid = this.#sessions.get(sid)?.ppid;
+      if (ppid) out.push({ sid, ppid });
     }
     return out;
   }
 
-  /** The turn-running gauge, 0-100: the busiest session's. See EngineConfig.work. */
+  /**
+   * A network sample for a session's `claude` process: `bytesIn` received over `spanMs`.
+   * Inbound bytes are the model streaming; they feed the generation channel and mark the
+   * session as generating while the sample is fresh.
+   */
+  ingestNet(sid: string, bytesIn: number, spanMs: number, nowMs: number): void {
+    const seen = this.#sessions.get(sid);
+    if (!seen || !(spanMs > 0)) return;
+    const bytesPerSec = Math.max(0, bytesIn) / (spanMs / 1000);
+    seen.net = { bytesPerSec, atMs: nowMs };
+    this.#netSeen = true;
+    if (bytesPerSec >= this.config.net.activeBytesPerSec) {
+      pourLoad(this.#load, 'generation', (bytesIn / 1000) * this.config.net.perKb);
+      seen.lastMs = Math.max(seen.lastMs, nowMs);
+      const turn = this.#turns.get(sid);
+      if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, nowMs);
+    }
+  }
+
+  /** null = no fresh measurement for this session; else whether its model is streaming. */
+  #generating(sid: string, nowMs: number): boolean | null {
+    const net = this.#sessions.get(sid)?.net;
+    if (!net || nowMs - net.atMs > this.config.net.freshMs) return null;
+    return net.bytesPerSec >= this.config.net.activeBytesPerSec;
+  }
+
+  /** Turns that are running and trusted: not blocked on the user, not gone silent. */
+  #workingTurns(nowMs: number): [string, Turn][] {
+    const out: [string, Turn][] = [];
+    for (const [sid, turn] of this.#turns) {
+      if (this.#pending.has(sid)) continue;
+      // A measured session is trusted for as long as its process streams; only an
+      // unmeasured one falls back to "no event for staleAfterMs = forget the turn".
+      if (this.#generating(sid, nowMs) === null &&
+          nowMs - turn.lastEventMs > this.config.work.staleAfterMs) continue;
+      out.push([sid, turn]);
+    }
+    return out;
+  }
+
+  /**
+   * The turn-running gauge, 0-100: the busiest session's. Measured sessions use the
+   * network: full while streaming, reduced while a tool runs. Unmeasured ones fall back
+   * to a ramp on turn duration. See EngineConfig.work / EngineConfig.net.
+   */
   #work(nowMs: number): number {
     const { max, rampMs } = this.config.work;
     let work = 0;
-    for (const turn of this.#workingTurns(nowMs)) {
-      const ramp = 1 - Math.exp(-Math.max(0, nowMs - turn.startMs) / rampMs);
-      work = Math.max(work, max * ramp);
+    for (const [sid, turn] of this.#workingTurns(nowMs)) {
+      const generating = this.#generating(sid, nowMs);
+      const value = generating === null
+        ? max * (1 - Math.exp(-Math.max(0, nowMs - turn.startMs) / rampMs))
+        : generating ? max : max * this.config.net.quietWorkFactor;
+      work = Math.max(work, value);
     }
     return work;
   }
 
   #sessionList(nowMs: number): SessionSummary[] {
-    const working = new Set(this.#workingTurns(nowMs));
+    const working = new Set(this.#workingTurns(nowMs).map(([, turn]) => turn));
     const out: SessionSummary[] = [];
     for (const [sid, seen] of this.#sessions) {
       if (nowMs - seen.lastMs > this.config.sessionTtlMs) {
@@ -270,7 +328,9 @@ export class Engine {
       const turn = this.#turns.get(sid);
       let status: SessionStatus = 'idle';
       if (this.#pending.has(sid)) status = 'waiting';
-      else if (turn && working.has(turn)) status = 'working';
+      else if (turn && working.has(turn)) {
+        status = this.#generating(sid, nowMs) ? 'thinking' : 'working';
+      }
       else if (seen.doneMs > 0 && nowMs - seen.doneMs < this.config.doneStickyMs) status = 'done';
       out.push({ id: sid, status, turn_ms: turn ? Math.max(0, nowMs - turn.startMs) : null });
     }
@@ -315,6 +375,7 @@ export class Engine {
         dominant: this.#dominant,
         dominantAtMs: this.#dominantAtMs,
         previous: this.#previous,
+        generating: this.#workingTurns(nowMs).some(([sid]) => this.#generating(sid, nowMs) === true),
       },
       this.config,
     );
@@ -351,6 +412,7 @@ export class Engine {
       },
       sources: {
         hooks: this.#sawHookEvent,
+        net: this.#netSeen,
         statusline: this.#lastMeterMs > 0,
         transcript: this.#transcriptEnabled,
         otel: false,
