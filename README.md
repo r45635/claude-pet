@@ -22,7 +22,7 @@ Fully local. No cloud, no telemetry, no outbound network call anywhere in the co
 | 0 | telemetry investigation | ✅ `docs/CLAUDE_CODE_TELEMETRY.md` |
 | 1 | event simulator | ✅ deterministic, 4 profiles |
 | 2 | state engine + tests | ✅ |
-| 3 | Tauri widget | 🟡 transparent window built; budgets (CPU/RSS) to measure |
+| 3 | Tauri widget | ✅ transparent window, ~0.2% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
 | 5 | refinement | ⬜ |
 

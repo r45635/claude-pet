@@ -52,7 +52,10 @@
   /* --- the four MVP visual states ----------------------------------------------- */
   [data-visual="IDLE"] #body  { fill: var(--skin); }
   [data-visual="IDLE"] .lid   { opacity: 1; }          /* eyes closed: sleeping */
-  [data-visual="IDLE"] #arms  { animation-play-state: paused; }
+  /* Asleep or disconnected = fully still. An always-visible window that animates while
+     nothing happens costs ~8% CPU (measured): macOS recomposites the whole transparent
+     window every frame. The idle budget is < 1% — see docs/RISKS.md #6. */
+  [data-visual="IDLE"] *, [data-signal="none"] * { animation-play-state: paused !important; }
 
   [data-visual="ACTIVE"] #body { fill: var(--skin); }
   [data-visual="ACTIVE"] .lid  { opacity: 0; }         /* eyes open */
@@ -123,7 +126,13 @@
   const token = injected?.token ?? params.get('token') ?? '';
   const base = injected?.url ?? params.get('url') ?? 'http://127.0.0.1:8787';
 
+  // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
+  let last = '';
   function render(s) {
+    const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources,
+                                s.active_subagents, debug && s.estimated_activity_rate]);
+    if (key === last) return;
+    last = key;
     pet.dataset.visual = s.visual;
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';

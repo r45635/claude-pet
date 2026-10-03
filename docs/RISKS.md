@@ -64,7 +64,12 @@ A creature on screen all day that burns 3% CPU is a worse tool than no creature.
 - **Mitigation:** CSS/SVG animations only (compositor-driven, no JS rAF loop); the daemon
   ticks at 100 ms only while events are flowing and drops to 1 s when idle; the webview
   pauses animations on `IDLE`.
-- **Budget, to be measured in Phase 3:** < 1% CPU idle, < 60 MB RSS for the widget.
+- **Budget:** < 1% CPU idle, < 60 MB for the widget.
+- **Measured 2026-10-03 (MacBook Air M1, 4 processes: widget + 3 WebKit XPC):** with the
+  breathing animation still looping in `IDLE`, **~8.5% CPU / ~64 MB** — macOS recomposites
+  the whole transparent window every frame. With every animation paused in `IDLE` and
+  "no signal", and the DOM touched only when the snapshot changes: **~0.2% CPU / ~55 MB**.
+  ⇒ Any always-visible transparent window must be fully still when nothing happens.
 
 ## 7. Privacy regression by accident — 🟠 medium, high consequence
 
