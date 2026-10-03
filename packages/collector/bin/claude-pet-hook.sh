@@ -38,7 +38,7 @@ jq -c '
       elif $n == "Edit" or $n == "MultiEdit" then "edit"
       elif $n == "Grep" or $n == "Glob"      then "search"
       elif $n == "WebFetch" or $n == "WebSearch" then "fetch"
-      elif $n == "Task"                      then "task"
+      elif $n == "Agent" or $n == "Task"     then "task"
       elif $n == "TodoWrite"                 then "todo"
       elif ($n | startswith("Notebook"))     then "notebook"
       elif ($n | startswith("mcp__"))        then "mcp"

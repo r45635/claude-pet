@@ -159,6 +159,20 @@ test('hook: an event with no activity signal writes nothing at all', () => {
   assert.equal(spool, '', 'an unmapped hook must stay silent rather than guess');
 });
 
+// The subagent tool was renamed Task → Agent; both must classify as `task`, not `other`.
+for (const toolName of ['Agent', 'Task']) {
+  test(`hook: the ${toolName} tool classifies as task`, () => {
+    const { spool } = run(HOOK, {
+      hook_event_name: 'PreToolUse',
+      session_id: '0123abcd',
+      tool_name: toolName,
+      tool_input: { prompt: CANARY, subagent_type: 'Explore' },
+    });
+    assert.ok(!spool.includes(CANARY), `canary leaked:\n${spool}`);
+    assert.equal(JSON.parse(spool.trim()).tool, 'task');
+  });
+}
+
 test('hook: a malformed payload exits 0 and writes nothing', () => {
   const home = mkdtempSync(join(tmpdir(), 'claude-pet-priv-'));
   const stdout = execFileSync('sh', [HOOK], {
