@@ -312,3 +312,14 @@ test('net: a streaming session is not dropped by the silent-turn cutoff', () => 
   assert.equal(s.state, 'THINKING');
   assert.ok(s.load >= 60, `a long measured think is real work, got ${s.load}`);
 });
+
+test('net: measured quiet mid-turn is a tool running, not THINKING', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111', ppid: 4242 }));
+  let s = engine.snapshot(0);
+  for (let now = 5_000; now <= 60_000; now += 5_000) {
+    engine.ingestNet('aaaa1111', 300, 5_000, now); // keepalives only, for a minute
+    s = engine.snapshot(now);
+  }
+  assert.equal(s.state, 'TOOL_CALL');
+});

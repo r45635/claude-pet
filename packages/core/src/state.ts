@@ -55,6 +55,8 @@ export type StateInputs = {
   previous?: PetState;
   /** Measured: a session's model is streaming right now (network sensor). */
   generating?: boolean;
+  /** Measured: open turns exist, and the sensor says none of them is streaming. */
+  measuredQuiet?: boolean;
 };
 
 export type StateConfig = {
@@ -114,8 +116,10 @@ export function resolveState(input: StateInputs, config: StateConfig): PetState 
     return 'TOOL_CALL';
   }
 
-  // 8. A turn is running with nothing observable in flight: the model is working.
-  if (input.turnActive) return 'THINKING';
+  // 8. A turn is running with nothing observable in flight. Measured quiet means the
+  //    model is not streaming, so something else (a tool) is running; unmeasured, the
+  //    best guess is the model working.
+  if (input.turnActive) return input.measuredQuiet ? 'TOOL_CALL' : 'THINKING';
 
   return 'IDLE';
 }

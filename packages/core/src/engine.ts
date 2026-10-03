@@ -362,6 +362,7 @@ export class Engine {
       this.#recent.reduce((acc, e) => acc + (e.isToolCall ? 1 : 0), 0) * perMinute,
     );
 
+    const measured = this.#workingTurns(nowMs).map(([sid]) => this.#generating(sid, nowMs));
     const state = resolveState(
       {
         nowMs,
@@ -375,7 +376,8 @@ export class Engine {
         dominant: this.#dominant,
         dominantAtMs: this.#dominantAtMs,
         previous: this.#previous,
-        generating: this.#workingTurns(nowMs).some(([sid]) => this.#generating(sid, nowMs) === true),
+        generating: measured.includes(true),
+        measuredQuiet: measured.length > 0 && measured.every((g) => g === false),
       },
       this.config,
     );

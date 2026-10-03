@@ -169,11 +169,27 @@ Differencing successive status-line samples gives a cost rate and an API-busy ra
 Documented and stable, but sampled at the status line's cadence, so bursts shorter than
 a sample interval are invisible.
 
-### 2.4 Process inspection ❌ rejected
+### 2.4 Process inspection — CPU ❌ rejected, network ✅ adopted (macOS)
 
-`pgrep claude`, CPU% of the node process, open file descriptors. Works, tells us nothing
-about *Claude's* activity (a `npm test` the agent launched dominates the CPU reading), and
-the brief explicitly says to prefer supported mechanisms. **Not implemented.**
+**CPU ❌.** Measured 2026-10-03 on the `claude` process itself (children excluded, so an
+agent-launched `npm test` does not pollute it): 10–20 ms/s while a tool ran, 0–40 ms/s while
+the model streamed text. Indistinguishable — in VS Code mode the process only relays
+tokens.
+
+**Network ✅.** The model's output — thinking and text — *is* a byte stream into the
+`claude` process, and the only real-time sign of it: no hook fires while the model thinks.
+`nettop -P -L 1 -p claude -J bytes_in,bytes_out -x` reads per-process byte counters, no
+root, no payload, no host. Measured on a real session: each API call shows ~1.9 MB out
+(the context) then a few KB in (the stream); a tool running shows 0/0; at rest, ~0.5 KB of
+keepalive every ~30 s.
+
+Cost decides the shape: continuous `nettop -L 0` burns **120–134 % CPU** (unusable); a
+one-shot `-L 1` costs ~30 ms CPU but takes ~5 s. So `packages/collector/src/net.ts` runs
+one-shots back to back **only while a turn is open** — ~0.9 % CPU for the daemon during a
+turn, nothing at rest — and maps a session to its process through `$PPID`, added to hook
+events for free and resolved by the daemon with a cached `ps` walk. Resolution is ~5 s;
+inertia covers it. Off macOS the sensor disables itself and the engine falls back to its
+turn-duration ramp.
 
 ---
 

@@ -90,7 +90,10 @@ export type EngineConfig = {
   net: {
     /** Below this inbound rate the process is idle (keepalives), bytes/s. */
     activeBytesPerSec: number;
-    /** A sample older than this no longer says anything, ms (samples come every ~5 s). */
+    /**
+     * A sample older than this no longer says anything, ms. Samples come every ~5.1 s;
+     * 8 s was measured to keep THINKING up ~10 s into a tool run.
+     */
     freshMs: number;
     /** Reservoir poured into the `generation` channel per KB received. */
     perKb: number;
@@ -135,7 +138,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   rateWindowMs: 60_000,
   sessionTtlMs: 30 * 60_000,
   // perKb: ~1 KB/s of streaming reads as THINKING (load ~70); ~3 KB/s and up as a storm.
-  net: { activeBytesPerSec: 250, freshMs: 8_000, perKb: 0.2, quietWorkFactor: 0.4 },
+  net: { activeBytesPerSec: 250, freshMs: 6_500, perKb: 0.2, quietWorkFactor: 0.4 },
 };
 
 /** Which reservoir an event type pours into. Absent => contributes no load. */
