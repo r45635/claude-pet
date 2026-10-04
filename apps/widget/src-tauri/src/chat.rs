@@ -21,7 +21,9 @@ use tauri::{AppHandle, Emitter};
 
 const PERSONA: &str = "You are speaking through claude-pet, a small creature on the user's \
 desktop. Your replies appear in a small speech bubble: keep them short unless asked for \
-detail, in the language the user writes in, plain text or light markdown.";
+detail, in the language the user writes in, plain text or light markdown. This is a quick \
+desktop chat: skip any session-start routine your instructions describe unless the user \
+asks for it.";
 
 /// One stream-json line → the event the page cares about, or None.
 pub fn parse_stream_line(line: &str) -> Option<Value> {
@@ -69,6 +71,11 @@ pub fn build_args(session: &Session, model: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--permission-mode", "auto", "--append-system-prompt", PERSONA,
+        // Skip *user* settings, i.e. the user's global hooks. Measured: a SessionStart hook
+        // (a git-pull memory sync) made every message take 24.8 s instead of 2.8 s, since
+        // each message is a fresh CLI process. Auth is unaffected (unlike --bare, which
+        // drops OAuth). The creature animates this session from the chat events instead.
+        "--setting-sources", "project,local",
     ]
     .iter()
     .map(|s| s.to_string())

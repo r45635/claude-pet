@@ -114,35 +114,51 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
   /* ---- chat panel ----------------------------------------------------------------
-     The creature keeps its place (window grows right and down from its top-left corner);
-     the bubble sits to its right, the input along the bottom. */
+     Rust's layout_panel grows the window toward the side with room and keeps the
+     creature's square fixed on screen; the page then places square and bubble from the
+     returned layout (above/below, right/left). */
   html.chat body { display: block; }
-  html.chat #pet { position: fixed; top: 15px; left: 15px; }
-  html.chat #drag { inset: auto; top: 0; left: 0;
-                    width: calc(var(--pet-size, 150px) + 30px); height: calc(var(--pet-size, 150px) + 30px); }
-  #chat { position: fixed; inset: 0; pointer-events: none; }
+  html.chat #pet { position: fixed; }
+  html.chat #drag { inset: auto; }
   #chat[hidden] { display: none; }
-  #chat > * { pointer-events: auto; }
-  #bubble { position: absolute; top: 10px; right: 10px; bottom: 76px;
-            left: calc(var(--pet-size, 150px) + 40px);
-            overflow-y: auto; padding: 10px 12px; border-radius: 14px;
-            background: rgba(22, 25, 34, .94); color: #e6edf3;
-            font: 13px/1.45 -apple-system, BlinkMacSystemFont, sans-serif;
-            box-shadow: 0 4px 18px rgba(0,0,0,.35); }
-  #bubble .you { color: #8b949e; margin-bottom: 6px; white-space: pre-wrap; }
-  #bubble pre { background: #0d1117; padding: 6px 8px; border-radius: 6px; overflow-x: auto;
-                font: 12px ui-monospace, Menlo, monospace; }
-  #bubble code { font: 12px ui-monospace, Menlo, monospace; background: #0d1117;
-                 padding: 0 3px; border-radius: 4px; }
-  #status { position: absolute; right: 14px; bottom: 58px; color: #8b949e;
-            font: 11px -apple-system, sans-serif; }
-  #ask { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; gap: 6px; }
-  #input { flex: 1; resize: none; height: 40px; padding: 10px 12px; border-radius: 12px;
-           border: 1px solid #30363d; background: rgba(13, 17, 23, .96); color: #e6edf3;
-           font: 13px -apple-system, BlinkMacSystemFont, sans-serif; outline: none; }
-  #input:focus { border-color: #7cc4ff; }
-  #stop { width: 40px; border: 0; border-radius: 12px; background: #ff6b81; color: #fff;
-          font-size: 14px; cursor: pointer; }
+  #bubble { position: fixed; left: 10px; right: 10px; display: flex; flex-direction: column;
+            background: rgba(24, 27, 36, .97); color: #e6edf3; border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, .09);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+            font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  /* The tail: a rotated square on the edge facing the creature, at its centre (--tail-x). */
+  #bubble::after { content: ""; position: absolute; left: var(--tail-x, 40px); width: 14px; height: 14px;
+                   margin-left: -7px; background: rgb(24, 27, 36); transform: rotate(45deg);
+                   border: 1px solid rgba(255, 255, 255, .09); }
+  .above #bubble::after { bottom: -8px; border-top: 0; border-left: 0; }
+  .below #bubble::after { top: -8px; border-bottom: 0; border-right: 0; }
+  #bubble header { display: flex; align-items: center; padding: 8px 10px 2px 14px;
+                   font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #8b949e; }
+  #who { flex: 1; }
+  #close { border: 0; background: none; color: #8b949e; font-size: 18px; line-height: 1;
+           cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+  #close:hover { background: rgba(255, 255, 255, .08); color: #e6edf3; }
+  #messages { flex: 1; overflow-y: auto; padding: 4px 14px 6px; display: flex;
+              flex-direction: column; gap: 8px; }
+  #messages:empty::before { content: "Ask me anything — I'm Claude, with my tools."; color: #6e7681; }
+  .you { align-self: flex-end; max-width: 85%; background: #2f81f7; color: #fff;
+         padding: 6px 11px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; }
+  .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; }
+  .claude.typing { color: #8b949e; }
+  .claude pre { background: #0d1117; padding: 7px 9px; border-radius: 8px; overflow-x: auto;
+                font: 12px/1.4 ui-monospace, Menlo, monospace; margin: 4px 0; }
+  .claude code { font: 12px ui-monospace, Menlo, monospace; background: rgba(110, 118, 129, .25);
+                 padding: 1px 4px; border-radius: 4px; }
+  #status { min-height: 15px; padding: 0 14px; color: #8b949e; font-size: 11px; }
+  #ask { display: flex; align-items: flex-end; gap: 6px; margin: 6px 10px 10px;
+         padding: 4px 4px 4px 12px; border-radius: 20px; background: rgba(255, 255, 255, .06);
+         border: 1px solid rgba(255, 255, 255, .1); }
+  #ask:focus-within { border-color: rgba(124, 196, 255, .6); }
+  #input { flex: 1; resize: none; border: 0; outline: none; background: none; color: #e6edf3;
+           font: inherit; padding: 5px 0; max-height: 90px; }
+  #send { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%;
+          background: #2f81f7; color: #fff; font-size: 15px; cursor: pointer; }
+  #send.stop { background: #ff6b81; font-size: 11px; }
 
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
@@ -177,12 +193,15 @@
 <div id="drag"></div>
 
 <div id="chat" hidden>
-  <div id="bubble"><div id="answer"></div></div>
-  <div id="status"></div>
-  <form id="ask">
-    <textarea id="input" rows="1" placeholder="Talk to Claude… (Enter to send, Esc to close)"></textarea>
-    <button id="stop" type="button" hidden title="Stop answering">■</button>
-  </form>
+  <div id="bubble">
+    <header><span id="who">Claude</span><button id="close" type="button" title="Close (Esc)">×</button></header>
+    <div id="messages"></div>
+    <div id="status"></div>
+    <form id="ask">
+      <textarea id="input" rows="1" placeholder="Ask Claude…"></textarea>
+      <button id="send" type="submit" title="Send (Enter)">↑</button>
+    </form>
+  </div>
 </div>
 
 <script type="module">
@@ -252,13 +271,12 @@
   const SIZES = { small: 110, medium: 150, large: 220 };
   let appliedWindow = '';
   function petPx() { return SIZES[prefs.size] ?? SIZES.medium; }
-  function fitWindow(focus = false) {
-    const px = petPx();
-    const [w, h] = chatOpen ? [px + 30 + 320, Math.max(px + 30, 300) + 70] : [px + 30, px + 30];
-    const key = `${w}x${h}`;
-    if (key === appliedWindow && !focus) return;
-    appliedWindow = key;
-    invoke('resize', { width: w, height: h, focus }).catch((err) => diag(`resize: ${err}`));
+  function fitWindow() {
+    if (chatOpen) return; // layout_panel owns the window while the chat is open
+    const sq = petPx() + 30;
+    if (String(sq) === appliedWindow) return;
+    appliedWindow = String(sq);
+    invoke('resize', { width: sq, height: sq }).catch((err) => diag(`resize: ${err}`));
   }
   function applyPrefs(p) {
     if (!p) return;
@@ -293,21 +311,51 @@
 
   // ---- chat -----------------------------------------------------------------------------
   const chatEl = document.getElementById('chat');
-  const answerEl = document.getElementById('answer');
+  const messagesEl = document.getElementById('messages');
   const statusEl = document.getElementById('status');
   const input = document.getElementById('input');
-  const stopBtn = document.getElementById('stop');
+  const sendBtn = document.getElementById('send');
+  const PANEL = { w: 340, h: 320 };
   let chatOpen = false;
-  let busy = false;
-  let answer = '';
-  let asked = '';
+  let chatBusy = false;
+  let current = null; // the .claude element being streamed into
 
-  function toggleChat(open = !chatOpen) {
+  // Where things go once Rust has laid the window out (see layout_panel in main.rs).
+  function place(layout) {
+    const sq = petPx() + 30;
+    const W = window.innerWidth; // the real window width, whatever Rust settled on
+    const root = document.documentElement;
+    root.classList.toggle('above', layout.above);
+    root.classList.toggle('below', !layout.above);
+    const petLeft = layout.right ? 0 : W - sq;
+    const petTop = layout.above ? PANEL.h : 0;
+    Object.assign(pet.style, { left: `${petLeft + 15}px`, top: `${petTop + 15}px` });
+    Object.assign(drag.style, { left: `${petLeft}px`, top: `${petTop}px`, width: `${sq}px`, height: `${sq}px` });
+    const bubble = document.getElementById('bubble');
+    Object.assign(bubble.style, layout.above
+      ? { top: '10px', bottom: `${sq + 4}px` }
+      : { top: `${sq + 4}px`, bottom: '10px' });
+    bubble.style.setProperty('--tail-x', `${petLeft + sq / 2 - 10}px`);
+  }
+
+  async function toggleChat(open = !chatOpen) {
     chatOpen = open;
+    const sq = petPx() + 30;
+    let layout = { above: true, right: true };
+    if (T) {
+      try {
+        layout = await invoke('layout_panel', { open, pet: sq, panelW: PANEL.w, panelH: PANEL.h });
+      } catch (err) { diag(`layout: ${err}`); }
+    }
     document.documentElement.classList.toggle('chat', open);
     chatEl.hidden = !open;
-    fitWindow(open);
-    if (open) setTimeout(() => input.focus(), 50);
+    if (open) {
+      place(layout);
+      setTimeout(() => input.focus(), 30);
+    } else {
+      pet.style.left = pet.style.top = '';
+      for (const k of ['left', 'top', 'width', 'height']) drag.style[k] = '';
+    }
   }
 
   const escapeHtml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -322,66 +370,119 @@
               .replace(/\n/g, '<br>')))
       .join('');
   }
-  function paint() {
-    answerEl.innerHTML = (asked ? `<div class="you">› ${escapeHtml(asked)}</div>` : '') +
-      (answer ? md(answer) : busy ? '…' : '');
-    const bubble = answerEl.parentElement;
-    bubble.scrollTop = bubble.scrollHeight;
+  function addMessage(cls, html) {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.innerHTML = html;
+    messagesEl.appendChild(el);
+    while (messagesEl.childElementCount > 20) messagesEl.firstChild.remove(); // memory only, bounded
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return el;
   }
   function setBusy(value) {
-    busy = value;
-    stopBtn.hidden = !value;
-    input.disabled = value;
-    if (!value) input.focus();
+    chatBusy = value;
+    sendBtn.classList.toggle('stop', value);
+    sendBtn.textContent = value ? '■' : '↑';
+    sendBtn.title = value ? 'Stop' : 'Send (Enter)';
+    last = ''; // re-render the creature now: its own Claude is (not) working
+    if (lastFrame) render(lastFrame);
   }
 
   function onChat(ev) {
     switch (ev.kind) {
       case 'open': toggleChat(true); break;
-      case 'reset': asked = ''; answer = ''; statusEl.textContent = 'new conversation'; paint(); break;
-      case 'start': answer = ''; statusEl.textContent = 'thinking…'; setBusy(true); paint(); break;
-      case 'delta': answer += ev.text; statusEl.textContent = 'writing…'; paint(); break;
-      case 'tool': statusEl.textContent = `⚙ ${ev.name}`; break;
+      case 'reset': messagesEl.replaceChildren(); statusEl.textContent = 'New conversation'; break;
+      case 'start':
+        current = addMessage('claude typing', '…');
+        current.dataset.text = '';
+        statusEl.textContent = 'Thinking…';
+        setBusy(true);
+        break;
+      case 'delta':
+        if (!current) break;
+        current.dataset.text += ev.text;
+        current.classList.remove('typing');
+        current.innerHTML = md(current.dataset.text);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        statusEl.textContent = 'Writing…';
+        break;
+      case 'tool': statusEl.textContent = `Using ${ev.name}…`; break;
       case 'done':
-        if (!answer) answer = ev.text;
+        if (current && !current.dataset.text) { current.classList.remove('typing'); current.innerHTML = md(ev.text); }
         statusEl.textContent = [
-          ev.isError ? 'error' : '',
+          ev.isError ? 'Error' : '',
           ev.durationMs != null ? `${(ev.durationMs / 1000).toFixed(1)} s` : '',
           ev.costUsd != null ? `$${ev.costUsd.toFixed(3)}` : '',
         ].filter(Boolean).join(' · ');
-        setBusy(false); paint(); break;
-      case 'error': statusEl.textContent = `⚠ ${ev.message}`; setBusy(false); paint(); break;
+        current = null;
+        setBusy(false);
+        break;
+      case 'error':
+        if (current && !current.dataset.text) current.remove();
+        current = null;
+        statusEl.textContent = `⚠ ${ev.message}`;
+        setBusy(false);
+        break;
     }
   }
   T?.event.listen('chat', (e) => onChat(e.payload));
 
   function send() {
+    if (chatBusy) { invoke('chat_cancel'); return; }
     const text = input.value.trim();
-    if (!text || busy) return;
-    asked = text;
+    if (!text) return;
+    addMessage('you', escapeHtml(text));
     input.value = '';
+    input.style.height = '';
     invoke('chat_ask', { text }).catch((err) => onChat({ kind: 'error', message: String(err) }));
   }
+  document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); send(); });
+  document.getElementById('close').addEventListener('click', () => toggleChat(false));
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 90)}px`;
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
-    if (e.key === 'Escape') toggleChat(false);
   });
-  stopBtn.addEventListener('click', () => invoke('chat_cancel'));
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && chatOpen) toggleChat(false); });
+
+  // Browser-harness demo, to review the design without a Tauri host:
+  //   index.html#demo=chat&layout=above-right  (or below-left, …)
+  if (params.get('demo') === 'chat') {
+    const [v, h] = (params.get('layout') ?? 'above-right').split('-');
+    chatOpen = true;
+    document.documentElement.classList.add('chat', 'widget');
+    document.body.style.background = '#3b4252';
+    chatEl.hidden = false;
+    place({ above: v === 'above', right: h === 'right' });
+    addMessage('you', 'tu peux me résumer le README du projet ?');
+    addMessage('claude', md("Bien sûr ! **claude-pet** est une créature de bureau qui visualise l'activité observable de Claude Code.\n\nPour lancer le daemon : `npm run daemon`"));
+    addMessage('you', 'et la commande pour les tests ?');
+    addMessage('claude typing', '…');
+    statusEl.textContent = 'Using Bash…';
+    chatBusy = true;
+    sendBtn.classList.add('stop');
+    sendBtn.textContent = '■';
+  }
 
   // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
   let last = '';
+  let lastFrame = null;
   function render(s) {
+    lastFrame = s;
     applyPrefs(s.prefs);
-    const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources, s.prefs,
+    const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => x.id + x.status),
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
     // Paused: render as asleep whatever the engine says (it keeps running underneath, so
     // resuming is accurate at once).
-    pet.dataset.visual = prefs.paused ? 'IDLE' : s.visual;
-    pet.dataset.state = prefs.paused ? 'IDLE' : s.state;
+    // Its own Claude answering is observable from right here (the run is ours), so it
+    // shows as thinking even though that session bypasses the hooks.
+    pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
+    pet.dataset.state = prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state;
     renderSessions(s.sessions ?? []);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';

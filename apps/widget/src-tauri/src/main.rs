@@ -111,15 +111,69 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value) 
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
-/// Resize from the page (size preference, chat panel), optionally taking keyboard focus.
+/// Resize from the page (size preference), keeping the window's top-left corner.
 #[tauri::command]
-fn resize(window: Window, width: f64, height: f64, focus: bool) -> Result<(), String> {
-    window.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
-    if focus {
-        window.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+fn resize(window: Window, width: f64, height: f64) -> Result<(), String> {
+    window.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())
 }
+
+/// Open or close the chat panel **without moving the creature on screen**. The window grows
+/// toward whichever side has room on the current monitor — bubble above or below, panel
+/// extending right or left — and is shifted so the creature's square stays exactly where
+/// it was. Returns the layout the page must draw.
+#[tauri::command]
+fn layout_panel(window: Window, open: bool, pet: f64, panel_w: f64, panel_h: f64) -> Result<Value, String> {
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?.to_logical::<f64>(scale);
+    let (mx, my, mw, mh) = match window.current_monitor().map_err(|e| e.to_string())? {
+        Some(m) => {
+            let a = m.work_area();
+            let p = a.position.to_logical::<f64>(scale);
+            let s = a.size.to_logical::<f64>(scale);
+            (p.x, p.y, s.width, s.height)
+        }
+        None => (0.0, 0.0, 1e6, 1e6),
+    };
+    let state: tauri::State<'_, PanelState> = window.state();
+    let mut layout = state.0.lock().map_err(|_| "lock")?;
+
+    // Where the creature's square is on screen right now. With the panel open it is
+    // derived from the *current* window position, so a drag while chatting is kept.
+    let (pet_x, pet_y) = match *layout {
+        Some(l) => (
+            if l.right { pos.x } else { pos.x + l.width - pet },
+            if l.above { pos.y + l.panel_h } else { pos.y },
+        ),
+        None => (pos.x, pos.y),
+    };
+    if !open {
+        *layout = None;
+        window.set_size(LogicalSize::new(pet, pet)).map_err(|e| e.to_string())?;
+        window.set_position(tauri::LogicalPosition::new(pet_x, pet_y)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::json!({ "open": false }));
+    }
+    let w = panel_w.max(pet);
+    let h = pet + panel_h;
+    let above = pet_y - panel_h >= my || pet_y + h > my + mh;
+    let right = pet_x + w <= mx + mw || pet_x + pet - w < mx;
+    let x = if right { pet_x } else { pet_x + pet - w };
+    let y = if above { pet_y - panel_h } else { pet_y };
+    window.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    window.set_position(tauri::LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
+    *layout = Some(Layout { above, right, width: w, panel_h });
+    Ok(serde_json::json!({ "open": true, "above": above, "right": right }))
+}
+
+/// The open panel's geometry, to find the creature's square again when it closes.
+#[derive(Clone, Copy)]
+struct Layout {
+    above: bool,
+    right: bool,
+    width: f64,
+    panel_h: f64,
+}
+struct PanelState(std::sync::Mutex<Option<Layout>>);
 
 fn on_menu(app: &AppHandle, id: &str) {
     let pet = app.state::<Pet>();
@@ -168,6 +222,7 @@ fn main() {
                 chat: chat::Chat::new(&root()),
                 daemon: token.map(|t| daemon::Daemon::new(&url, t)),
             });
+            app.manage(PanelState(std::sync::Mutex::new(None)));
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))
@@ -184,7 +239,7 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, show_menu, resize])
+        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, show_menu, resize, layout_panel])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }
