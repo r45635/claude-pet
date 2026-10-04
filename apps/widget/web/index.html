@@ -202,14 +202,24 @@
   const T = window.__TAURI__;
   let prefs = { temperament: 'normal', size: 'medium', showSessions: true, paused: false };
 
+  // A release webview has no console: report to the daemon log through a GET, the
+  // same kind of request as the SSE feed.
+  function diag(message) {
+    new Image().src = `${base}/log?token=${encodeURIComponent(token)}&m=${encodeURIComponent(message)}`;
+  }
+
   async function post(path, body) {
+    diag(`menu ${path} ${body === undefined ? '' : JSON.stringify(body)}`);
     try {
       const res = await fetch(`${base}${path}?token=${encodeURIComponent(token)}`, {
         method: 'POST',
         body: body === undefined ? undefined : JSON.stringify(body), // text/plain: no preflight
       });
-      if (res.ok && res.status !== 204) applyPrefs(await res.json());
-    } catch { /* daemon down: the menu simply does nothing */ }
+      if (!res.ok) diag(`POST ${path} -> ${res.status}`);
+      else if (res.status !== 204) applyPrefs(await res.json());
+    } catch (err) {
+      diag(`POST ${path} failed: ${err}`);
+    }
   }
 
   const SIZES = { small: 110, medium: 150, large: 220 };
@@ -249,7 +259,7 @@
         { item: 'Separator' },
         { text: 'Quit claude-pet', action: () => T.window.getCurrentWindow().close() },
       ] });
-      await menu.popup();
+      await menu.popup().catch((err) => diag(`menu popup failed: ${err}`));
     });
   }
 

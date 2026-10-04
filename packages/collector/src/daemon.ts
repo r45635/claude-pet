@@ -165,7 +165,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  // Widget diagnostics: the page reports menu actions and fetch failures here, since a
+  // release webview has no console. One short line in the daemon log, nothing stored.
+  if (url.pathname === '/log') {
+    const message = (url.searchParams.get('m') ?? '').replace(/[^\x20-\x7e]/g, '?').slice(0, 300);
+    process.stderr.write(`widget: ${message}\n`);
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (url.pathname === '/config' && req.method === 'POST') {
+    process.stderr.write(`config: POST from ${req.headers.origin ?? 'no origin'}\n`);
     void updateConfig(req, res);
     return;
   }
