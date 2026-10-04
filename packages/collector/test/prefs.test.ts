@@ -21,6 +21,7 @@ test('prefs: applying a patch keeps hand-tuned overrides untouched', () => {
   assert.deepEqual(next.smoothing, { releaseMs: 12_000 });
   assert.deepEqual(prefsOf(next), {
     temperament: 'nervous', chatModel: 'default', size: 'small', showSessions: true, paused: true,
+    stormThreshold: TEMPERAMENTS.nervous.highLoadThreshold, minStateSeconds: DEFAULT_CONFIG.minStateMs / 1000,
   });
 });
 
@@ -31,4 +32,26 @@ test('temperament: preset applies, and an explicit override still wins over it',
   const tuned = mergeConfig({ temperament: 'zen', highLoadThreshold: 90 });
   assert.equal(tuned.highLoadThreshold, 90);
   assert.equal((tuned as Record<string, unknown>).ui, undefined, 'ui prefs never leak into engine config');
+});
+
+test('settings panel: the storm threshold is an engine override, and null resets it', () => {
+  assert.ok('error' in validatePatch({ stormThreshold: 12 }), 'below range');
+  assert.ok('error' in validatePatch({ stormThreshold: 80.5 }), 'whole numbers only');
+  assert.ok('error' in validatePatch({ stormThreshold: '80' }));
+  const set = applyPatch({ temperament: 'zen' }, validatePatch({ stormThreshold: 60 }) as never);
+  assert.equal(set.highLoadThreshold, 60);
+  assert.equal(set.highLoadExitThreshold, 50, 'the storm ends 10 points lower');
+  assert.equal(mergeConfig(set).highLoadThreshold, 60, 'it wins over the temperament');
+  assert.equal(prefsOf(set).stormThreshold, 60);
+  const reset = applyPatch(set, validatePatch({ stormThreshold: null }) as never);
+  assert.equal(prefsOf(reset).stormThreshold, TEMPERAMENTS.zen.highLoadThreshold, 'back to the preset');
+});
+
+test('settings panel: the minimum time per state is stored in ms, shown in seconds', () => {
+  assert.ok('error' in validatePatch({ minStateSeconds: -1 }));
+  assert.ok('error' in validatePatch({ minStateSeconds: 31 }));
+  const set = applyPatch({}, validatePatch({ minStateSeconds: 4.5 }) as never);
+  assert.equal(set.minStateMs, 4_500);
+  assert.equal(prefsOf(set).minStateSeconds, 4.5);
+  assert.equal(prefsOf(applyPatch(set, { minStateSeconds: null })).minStateSeconds, DEFAULT_CONFIG.minStateMs / 1000);
 });

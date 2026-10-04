@@ -75,6 +75,12 @@ export type EngineConfig = {
   errorStickyMs: number;
   /** How long DONE stays on screen after a turn ends, ms. */
   doneStickyMs: number;
+  /**
+   * Shortest time a state stays on screen once shown, so a 1-second DONE or a READING
+   * between two tools can actually be seen. Never delays waking up, an ERROR or a
+   * WAITING, nor leaving WAITING once the human has answered. Settings panel: seconds.
+   */
+  minStateMs: number;
   /** No events for this long (and no turn running) => IDLE, ms. */
   idleAfterMs: number;
   /** Rolling window for the activity-rate figures, ms. */
@@ -134,6 +140,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   highLoadExitThreshold: 65,
   errorStickyMs: 4_000,
   doneStickyMs: 3_000,
+  minStateMs: 2_000,
   idleAfterMs: 20_000,
   rateWindowMs: 60_000,
   sessionTtlMs: 30 * 60_000,
