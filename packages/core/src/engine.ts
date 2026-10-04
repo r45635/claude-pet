@@ -156,6 +156,9 @@ export class Engine {
    */
   #turns = new Map<string, Turn>();
   #previous: PetState = 'IDLE';
+  /** What the creature shows, and since when: `minStateMs` holds it. */
+  #shown: PetState = 'IDLE';
+  #shownSinceMs = 0;
   /** Every session seen, for the per-session list. Insertion order = display order. */
   #sessions = new Map<string, SessionSeen>();
   /** Sessions blocked on a permission prompt. */
@@ -166,7 +169,6 @@ export class Engine {
   #lastActivityMs = 0;
   #lastErrorMs = 0;
   #lastError: PetReason | null = null;
-  #lastDoneMs = 0;
   #lastIdleSignalMs = 0;
   #lastMeterMs = 0;
 
@@ -276,14 +278,12 @@ export class Engine {
         // it finishes; a phantom one would fake a storm forever.
         this.#subagents.delete(sid);
         this.#pending.delete(sid);
-        this.#lastDoneMs = 0;
         this.#lastIdleSignalMs = 0;
         this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
         break;
       case 'TURN_COMPLETED':
         this.#turns.delete(sid);
         this.#pending.delete(sid);
-        this.#lastDoneMs = event.tsMs;
         lane.dominant = null;
         break;
       case 'PERMISSION_WAITING':
@@ -409,6 +409,32 @@ export class Engine {
     return out;
   }
 
+  /**
+   * The last turn completed by a session that has not started another. Another window
+   * submitting a prompt no longer wipes this one's DONE.
+   */
+  #lastDone(): number {
+    let last = 0;
+    for (const [sid, seen] of this.#sessions) {
+      if (!this.#turns.has(sid)) last = Math.max(last, seen.doneMs);
+    }
+    return last;
+  }
+
+  /** Keep the state on screen for at least `minStateMs`; see EngineConfig.minStateMs. */
+  #hold(next: PetState, nowMs: number): PetState {
+    const shown = this.#shown;
+    // Waking up, distress, a question for the human and a storm show at once.
+    const free = shown === 'IDLE' || shown === 'WAITING' ||
+      next === 'ERROR' || next === 'WAITING' || next === 'HIGH_LOAD';
+    if (next !== shown && !free && nowMs - this.#shownSinceMs < this.config.minStateMs) return shown;
+    if (next !== shown) {
+      this.#shown = next;
+      this.#shownSinceMs = nowMs;
+    }
+    return next;
+  }
+
   get #turnActive(): boolean {
     return this.#turns.size > 0;
   }
@@ -453,7 +479,7 @@ export class Engine {
     // turn this one's reading into thinking.
     const focusTrusted = focus !== null && this.#workingTurns(nowMs).some(([id]) => id === focus!.sid);
     const measured = focusTrusted ? this.#generating(focus!.sid, nowMs) : null;
-    const state = resolveState(
+    const raw = resolveState(
       {
         nowMs,
         load,
@@ -462,7 +488,7 @@ export class Engine {
         turnActive: this.#workingTurns(nowMs).length > 0,
         permissionPending: this.#pending.size > 0,
         lastErrorMs: this.#lastErrorMs,
-        lastDoneMs: this.#lastDoneMs,
+        lastDoneMs: this.#lastDone(),
         lastIdleSignalMs: this.#lastIdleSignalMs,
         dominant: lane?.dominant ?? null,
         dominantAtMs: lane?.dominantAtMs ?? 0,
@@ -472,7 +498,8 @@ export class Engine {
       },
       this.config,
     );
-    this.#previous = state;
+    this.#previous = raw;
+    const state = this.#hold(raw, nowMs);
 
     const meter = lane?.meter ?? null;
     const contextLoad =

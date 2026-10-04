@@ -204,6 +204,28 @@
           cursor: pointer; }
   #send.stop { background: var(--skin-bad); font-size: 11px; }
 
+  /* ---- settings, inside the bubble (gear in its header) ------------------------------
+     Both values are engine knobs: the page sends a patch through Rust, the daemon
+     validates it, writes config.json and the new values come back on the feed. */
+  #gear { width: 32px; height: 32px; border: 0; border-radius: 10px; background: none;
+          color: #9aa3b5; cursor: pointer; display: grid; place-items: center; }
+  #gear:hover, #bubble.settings #gear { background: rgba(255, 255, 255, .08); color: #eceff4; }
+  #settings { flex: 1; padding: 6px 16px 14px; display: flex; flex-direction: column; gap: 18px;
+              overflow-y: auto; }
+  #settings[hidden], #bubble.settings #messages, #bubble.settings #status,
+  #bubble.settings #ask { display: none; }
+  .setting { display: flex; flex-direction: column; gap: 6px; }
+  .setting label { display: flex; justify-content: space-between; align-items: baseline;
+                   font-weight: 600; }
+  .setting output { font-variant-numeric: tabular-nums; color: var(--skin-base); }
+  .setting input[type=range] { width: 100%; accent-color: var(--skin-base); margin: 2px 0; }
+  .setting p { margin: 0; font-size: 12px; line-height: 1.4; color: #9aa3b5; }
+  .setting .reset { align-self: flex-start; border: 0; background: none; padding: 0;
+                    color: #9aa3b5; font: inherit; font-size: 12px; text-decoration: underline;
+                    cursor: pointer; }
+  .setting .reset:hover { color: #eceff4; }
+  #settings-status { min-height: 16px; font-size: 12px; color: #9aa3b5; }
+
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
@@ -331,7 +353,30 @@
 
 <div id="chat" hidden>
   <div id="bubble">
-    <header><span id="who">Claude</span><button id="close" type="button" title="Close (Esc)">×</button></header>
+    <header><span id="who">Claude</span>
+      <button id="gear" type="button" title="Settings" aria-label="Settings" aria-pressed="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      </button>
+      <button id="close" type="button" title="Close (Esc)">×</button></header>
+    <div id="settings" hidden>
+      <div class="setting">
+        <label for="storm">Storm threshold <output id="storm-out" for="storm"></output></label>
+        <input id="storm" type="range" min="30" max="100" step="1" />
+        <p>Load at which the creature starts to storm. Higher = calmer. It calms down 10 points lower.</p>
+        <button class="reset" type="button" data-key="stormThreshold">Back to the temperament's value</button>
+      </div>
+      <div class="setting">
+        <label for="hold">Minimum time per state <output id="hold-out" for="hold"></output></label>
+        <input id="hold" type="range" min="0" max="10" step="0.5" />
+        <p>Each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once.</p>
+        <button class="reset" type="button" data-key="minStateSeconds">Back to default</button>
+      </div>
+      <div id="settings-status" role="status"></div>
+    </div>
     <div id="messages"></div>
     <div id="status"></div>
     <form id="ask">
@@ -455,6 +500,7 @@
   function applyPrefs(p) {
     if (!p) return;
     prefs = p;
+    renderSettings(p);
     pet.dataset.showSessions = String(p.showSessions);
     pet.dataset.paused = String(p.paused);
     document.documentElement.style.setProperty('--pet-size', `${petPx()}px`);
@@ -514,6 +560,7 @@
 
   async function toggleChat(open = !chatOpen) {
     chatOpen = open;
+    if (!open) showSettings(false); // it opens on the conversation next time
     const sq = petPx() + 30;
     let layout = { above: true, right: true };
     if (T) {
@@ -613,6 +660,51 @@
   }
   document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); send(); });
   document.getElementById('close').addEventListener('click', () => toggleChat(false));
+
+  // ---- settings ---------------------------------------------------------------------------
+  const bubbleEl = document.getElementById('bubble');
+  const gear = document.getElementById('gear');
+  const settingsEl = document.getElementById('settings');
+  const settingsStatus = document.getElementById('settings-status');
+  const SETTINGS = {
+    storm: { key: 'stormThreshold', input: document.getElementById('storm'),
+             out: document.getElementById('storm-out'), fmt: (v) => `${v}` },
+    hold: { key: 'minStateSeconds', input: document.getElementById('hold'),
+            out: document.getElementById('hold-out'), fmt: (v) => `${v} s` },
+  };
+  function showSettings(open) {
+    bubbleEl.classList.toggle('settings', open);
+    settingsEl.hidden = !open;
+    gear.setAttribute('aria-pressed', String(open));
+    document.getElementById('who').textContent = open ? 'Settings' : 'Claude';
+    settingsStatus.textContent = '';
+  }
+  gear.addEventListener('click', () => showSettings(!bubbleEl.classList.contains('settings')));
+  // Values come from the feed; a slider being dragged is not overwritten under the finger.
+  function renderSettings(p) {
+    for (const s of Object.values(SETTINGS)) {
+      const value = p[s.key];
+      if (typeof value !== 'number') continue;
+      if (document.activeElement !== s.input) s.input.value = String(value);
+      s.out.textContent = s.fmt(Number(s.input.value));
+    }
+  }
+  async function savePref(key, value) {
+    settingsStatus.textContent = 'Saving…';
+    try {
+      applyPrefs(await invoke('update_prefs', { patch: { [key]: value } }));
+      settingsStatus.textContent = 'Saved';
+    } catch (err) {
+      settingsStatus.textContent = `Not saved: ${err}`;
+    }
+  }
+  for (const s of Object.values(SETTINGS)) {
+    s.input.addEventListener('input', () => { s.out.textContent = s.fmt(Number(s.input.value)); });
+    s.input.addEventListener('change', () => { savePref(s.key, Number(s.input.value)); s.input.blur(); });
+  }
+  for (const button of settingsEl.querySelectorAll('.reset')) {
+    button.addEventListener('click', () => savePref(button.dataset.key, null));
+  }
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 90)}px`;

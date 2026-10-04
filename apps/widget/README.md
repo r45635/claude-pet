@@ -40,6 +40,13 @@ without the other: the widget reconnects on its own. To start both at login:
 | Advanced settings… | opens `~/.claude-pet/config.json` (yours to edit) next to `config.reference.jsonc` (read-only: every key, its effective value, what it does) |
 | Quit claude-pet | closes the widget until the next login (or `launchctl kickstart`) |
 
+## Settings (click the creature, then the gear)
+
+| Setting | Effect |
+|---|---|
+| Storm threshold (30–100) | load at which the creature storms; it calms down 10 points lower. Overrides the temperament until reset |
+| Minimum time per state (0–10 s) | each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once |
+
 Every choice is written by the daemon to `~/.claude-pet/config.json` and applied **live**,
 as are hand edits to that file. Explicit engine overrides in the file always win over the
 temperament preset.

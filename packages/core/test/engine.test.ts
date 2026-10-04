@@ -468,3 +468,30 @@ test('sessions: several calm windows do not add up to a storm', () => {
   assert.ok(one < DEFAULT_CONFIG.highLoadThreshold, 'the pace must be calm for one session');
   assert.equal(peak(['aaaaaaaa', 'bbbbbbbb', 'cccccccc']), one);
 });
+
+test('minStateMs: a short DONE stays on screen for the minimum time', () => {
+  const config = { ...DEFAULT_CONFIG, doneStickyMs: 1_000, minStateMs: 5_000 };
+  const engine = new Engine(0, config);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('FILE_READ', 500, { sid: 'aaaaaaaa', tool: 'read' }));
+  engine.ingest(event('TURN_COMPLETED', 1_000, { sid: 'aaaaaaaa' }));
+  for (let t = 1_000; t < 6_000; t += 100) {
+    assert.equal(engine.snapshot(t).state, 'DONE', `DONE must still show at ${t} ms`);
+  }
+  assert.notEqual(engine.snapshot(6_200).state, 'DONE');
+});
+
+test('minStateMs: never delays waking up, an error, a question or a storm', () => {
+  const config = { ...DEFAULT_CONFIG, minStateMs: 30_000 };
+  const engine = new Engine(0, config);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('FILE_READ', 100, { sid: 'aaaaaaaa', tool: 'read' }));
+  assert.equal(engine.snapshot(200).state, 'READING', 'waking up is immediate');
+  engine.ingest(event('PERMISSION_WAITING', 300, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(400).state, 'WAITING');
+  engine.ingest(event('FILE_WRITE', 500, { sid: 'aaaaaaaa', tool: 'edit' }));
+  assert.equal(engine.snapshot(600).state, 'CODING', 'the human answered: leave WAITING at once');
+  engine.ingest(event('ERROR', 700, { sid: 'aaaaaaaa', scope: 'tool', tool: 'bash' }));
+  assert.equal(engine.snapshot(800).state, 'ERROR');
+});
+
