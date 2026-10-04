@@ -49,8 +49,13 @@ tool events). Everything is scaled to fit the creature's usual square, never lar
 to 4 subagents are drawn per session, then `+n`; one in error or waiting on you is
 always among those drawn. Hover a small one for its agent type.
 
-Each session is a family: it breathes at its own session's pace and its subagents hop
-after their parent; a family where everyone sleeps is fully still. Background agents
+Each session is a family: the parent in the middle, its subagents wandering around it
+at random — each walks somewhere (little steps, leaning the way it goes, behind the
+parent or in front of it), stops to do the gesture of what it is doing (reading: nods,
+coding: taps, a tool: hammers, thinking: floats, done: a jump), then sets off again.
+The busier the session, the faster they walk and the shorter they pause. A family
+where everyone sleeps is fully still, with no timer running; the macOS "reduce motion"
+setting stops the walks and gestures. Background agents
 keep their creature while you chat and after the turn that launched them: the parent
 then shows it is waiting on them instead of falling asleep. The "why" bubble stays full
 size and floats above the family it is about, an agent's error first ("Explore: Bash
