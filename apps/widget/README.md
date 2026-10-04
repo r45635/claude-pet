@@ -49,6 +49,13 @@ tool events). Everything is scaled to fit the creature's usual square, never lar
 to 4 subagents are drawn per session, then `+n`; one in error or waiting on you is
 always among those drawn. Hover a small one for its agent type.
 
+Each session is a family: it breathes at its own session's pace and its subagents hop
+after their parent; a family where everyone sleeps is fully still. Background agents
+keep their creature while you chat and after the turn that launched them: the parent
+then shows it is waiting on them instead of falling asleep. The "why" bubble stays full
+size and floats above the family it is about, an agent's error first ("Explore: Bash
+failed"), then a session's error, then a storm.
+
 ## Settings (click the creature, then the gear)
 
 | Setting | Effect |

@@ -128,8 +128,21 @@
   #pet:not([data-why]) #why, #pet[data-why=""] #why { display: none !important; }
   /* A subagent's creature: drawn smaller; its type is in a tooltip. */
   .critter.mini .cheek { display: none; }
-  /* Several creatures: the session tray and the why bubble belong to the single one. */
-  #pet[data-multi="true"] #sessions, #pet[data-multi="true"] #why { display: none; }
+  /* Several creatures: the session tray belongs to the single one. */
+  #pet[data-multi="true"] #sessions { display: none; }
+
+  /* A family moves together. Each breathes at its own session's pace (--amp, --dur set
+     on the family); the kids hop after their parent one by one, like ducklings. A
+     family where everyone sleeps is fully still (the idle CPU budget, docs/RISKS.md #6). */
+  .critter.mini { transform-box: fill-box; transform-origin: 50% 100%;
+                  animation: hop var(--dur, 3.2s) ease-in-out infinite;
+                  animation-delay: calc(var(--i, 0) * .16s + .12s); }
+  .critter.mini[data-state="IDLE"] { animation: none; }
+  @keyframes hop {
+    0%, 55%, 100% { transform: translateY(0); }
+    25%           { transform: translateY(calc(-18px - var(--amp, .03) * 90px)); }
+  }
+  .family[data-still="true"] * { animation-play-state: paused !important; }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
@@ -355,7 +368,7 @@
   <g id="why">
     <rect y="-14" height="24" rx="12" />
     <circle cx="62" cy="16" r="3.2" /><circle cx="68" cy="24" r="2" />
-    <text x="80" y="2" text-anchor="middle"></text>
+    <text x="80" y="2" text-anchor="middle" lengthAdjust="spacingAndGlyphs"></text>
   </g>
 
   <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
@@ -475,26 +488,48 @@
     }
     return el;
   }
-  function placeCritter(el, x, y, size) {
-    el.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(size / 160).toFixed(4)})`);
-    crittersLayer.appendChild(el);
+  // A slot holds the position; the creature inside stays free to hop (a CSS transform on
+  // the same element would replace the position).
+  function placeCritter(family, el, x, y, size) {
+    const slot = document.createElementNS(SVG_NS, 'g');
+    slot.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(size / 160).toFixed(4)})`);
+    slot.appendChild(el);
+    family.appendChild(slot);
   }
   // Only MAX_MINIS fit: an agent in trouble or waiting on you must never be the one hidden.
   const URGENT = new Set(['ERROR', 'WAITING']);
   const urgentFirst = (agents) => [...agents.filter((a) => URGENT.has(a.state)),
                                    ...agents.filter((a) => !URGENT.has(a.state))];
+  // Speed per family, in the same three tiers as the single creature (changing --dur
+  // mid-animation makes it jump, so it only moves between tiers, with hysteresis).
+  const familyTiers = new Map();
+  function familyTier(id, load) {
+    let tier = familyTiers.get(id) ?? 0;
+    const up = [0, 35, 70];
+    while (tier < 2 && load >= up[tier + 1]) tier += 1;
+    while (tier > 0 && load < up[tier] - 8) tier -= 1;
+    familyTiers.set(id, tier);
+    return tier;
+  }
+  const familyEls = new Map();
+  /** Where each family's parent stands, for the why bubble's tail. */
+  let familyAnchors = new Map();
+
   function renderCritters(s, singleState) {
     const sessions = s.sessions ?? [];
     const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
     pet.dataset.multi = String(multi);
     const asleep = prefs.paused;
     const groups = multi
-      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, agents: urgentFirst(x.agents ?? []) }))
-      : [{ id: '', state: singleState, agents: [] }];
-    const key = JSON.stringify(groups.map((g) => [g.id, g.agents.map((a) => a.id)]));
+      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
+                               agents: urgentFirst(x.agents ?? []) }))
+      : [{ id: '', state: singleState, load: s.load, agents: [] }];
+    const key = JSON.stringify([multi, groups.map((g) => [g.id, g.agents.map((a) => a.id)])]);
     if (key !== crittersKey) {
       crittersKey = key;
       crittersLayer.replaceChildren();
+      familyEls.clear();
+      familyAnchors = new Map();
       const keep = new Set();
       const { size, rows, height } = multi ? layoutGroups(groups) : { size: 160, rows: [groups], height: 1 };
       let y = (160 - size * height) / 2;
@@ -502,20 +537,26 @@
         const rowW = row.reduce((a, g) => a + groupWidth(g), 0) + GAP * (row.length - 1);
         let x = (160 - size * rowW) / 2;
         for (const g of row) {
+          const family = document.createElementNS(SVG_NS, 'g');
+          family.setAttribute('class', 'family');
+          familyEls.set(g.id, family);
+          familyAnchors.set(g.id, { x: x + size * 0.42, y: y + size * 0.12 });
+          crittersLayer.appendChild(family);
           keep.add(`s:${g.id}`);
-          placeCritter(critter(`s:${g.id}`, false), x, y, size);
+          placeCritter(family, critter(`s:${g.id}`, false), x, y, size);
           g.agents.slice(0, MAX_MINIS).forEach((a, i) => {
             keep.add(`a:${g.id}:${a.id}`);
+            const el = critter(`a:${g.id}:${a.id}`, true, `Subagent: ${a.type ?? 'unknown type'}`);
+            el.style.setProperty('--i', String(i));
             const mx = x + size * (1 - MINI * 0.15) + i * size * MINI_STEP;
-            placeCritter(critter(`a:${g.id}:${a.id}`, true, `Subagent: ${a.type ?? 'unknown type'}`),
-                  mx - size * MINI * 0.5, y + size * (1 - MINI), size * MINI);
+            placeCritter(family, el, mx - size * MINI * 0.5, y + size * (1 - MINI), size * MINI);
           });
           if (g.agents.length > MAX_MINIS) {
             const more = document.createElementNS(SVG_NS, 'text');
             more.setAttribute('class', 'more');
             more.setAttribute('transform', `translate(${(x + size * (groupWidth(g) - 0.28)).toFixed(1)} ${(y + size * 0.95).toFixed(1)}) scale(${(size / 160).toFixed(4)})`);
             more.textContent = `+${g.agents.length - MAX_MINIS}`;
-            crittersLayer.appendChild(more);
+            family.appendChild(more);
           }
           x += size * (groupWidth(g) + GAP);
         }
@@ -525,7 +566,20 @@
     }
     for (const g of groups) {
       critterEls.get(`s:${g.id}`)?.setAttribute('data-state', g.state);
-      for (const a of g.agents) critterEls.get(`a:${g.id}:${a.id}`)?.setAttribute('data-state', asleep ? 'IDLE' : a.state);
+      const states = [g.state];
+      for (const a of g.agents) {
+        const state = asleep ? 'IDLE' : a.state;
+        states.push(state);
+        critterEls.get(`a:${g.id}:${a.id}`)?.setAttribute('data-state', state);
+      }
+      const family = familyEls.get(g.id);
+      if (!family) continue;
+      family.dataset.still = String(states.every((st) => st === 'IDLE'));
+      if (multi) {
+        // Each family at its own session's pace; the single creature keeps #pet's.
+        family.style.setProperty('--amp', (0.03 + 0.17 * g.load / 100).toFixed(3));
+        family.style.setProperty('--dur', ['3.2s', '1.4s', '0.7s'][familyTier(g.id, g.load)]);
+      }
     }
   }
 
@@ -536,31 +590,70 @@
                        mcp: 'An MCP tool' };
   const API_ERRORS = { rate_limit: 'Rate limited', overloaded: 'API overloaded',
                        server_error: 'API server error' };
-  function whyText(s) {
-    const r = s.reason;
+  // ctx: the counts the storm line can quote for that creature (unknown → generic words).
+  function reasonText(r, ctx) {
     if (!r) return '';
     if (r.kind === 'tool_failed') return `${TOOL_NAMES[r.tool] ?? 'A tool'} failed`;
     if (r.kind === 'api_error') return API_ERRORS[r.code] ?? 'API error';
     if (r.kind !== 'storm') return '';
     switch (r.driver) {
-      case 'tool': return s.tool_calls_per_minute > 0 ? `${s.tool_calls_per_minute} tool calls/min` : 'Lots of tool calls';
-      case 'agent': return s.active_subagents === 1 ? '1 subagent running'
-        : s.active_subagents > 1 ? `${s.active_subagents} subagents running` : 'Lots of subagents';
+      case 'tool': return ctx.toolRate > 0 ? `${ctx.toolRate} tool calls/min` : 'Lots of tool calls';
+      case 'agent': return ctx.agents === 1 ? '1 subagent running'
+        : ctx.agents > 1 ? `${ctx.agents} subagents running` : 'Lots of subagents';
       case 'file': return 'Lots of files at once';
-      case 'generation': return s.tokens_per_minute != null
-        ? `${Math.round(s.tokens_per_minute / 1000)}k tokens/min` : 'Writing a lot';
+      case 'generation': return ctx.tokens != null ? `${Math.round(ctx.tokens / 1000)}k tokens/min` : 'Writing a lot';
       default: return '';
     }
   }
+  const agentName = (type) => {
+    const t = (type ?? 'agent').replace(/[-_]+/g, ' ');
+    const short = t.length > 10 ? `${t.slice(0, 9)}…` : t;
+    return short.charAt(0).toUpperCase() + short.slice(1);
+  };
+  // One bubble, always full size: in a crowd, the most urgent message, its tail pointing
+  // at the family it is about. Errors (an agent's or a session's) before storms.
+  function whyMessage(s) {
+    const sessions = s.sessions ?? [];
+    const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
+    if (!multi) {
+      return { text: reasonText(s.reason, { toolRate: s.tool_calls_per_minute, agents: s.active_subagents,
+                                            tokens: s.tokens_per_minute }), family: '' };
+    }
+    for (const x of sessions) {
+      const a = (x.agents ?? []).find((ag) => ag.state === 'ERROR' && ag.reason);
+      if (a) return { text: `${agentName(a.type)}: ${reasonText(a.reason, {})}`, family: x.id };
+    }
+    const ctx = (x) => ({ toolRate: x.tool_calls_per_minute, tokens: null,
+                          agents: (x.agents ?? []).filter((a) => a.state !== 'DONE').length });
+    const bad = sessions.find((x) => x.state === 'ERROR' && x.reason);
+    if (bad) return { text: reasonText(bad.reason, ctx(bad)), family: bad.id };
+    const storm = sessions.find((x) => x.state === 'HIGH_LOAD' && x.reason);
+    if (storm) return { text: reasonText(storm.reason, ctx(storm)), family: storm.id };
+    return { text: '', family: '' };
+  }
   const whyBubble = document.getElementById('why');
-  function renderWhy(text) {
+  function renderWhy({ text, family }) {
     pet.dataset.why = text;
     if (!text) return;
-    whyBubble.querySelector('text').textContent = text;
-    const w = Math.min(150, Math.round(text.length * 6.6 + 22)); // display:none can't be measured
+    const label = whyBubble.querySelector('text');
+    label.textContent = text;
+    const natural = Math.round(text.length * 6.6); // display:none can't be measured
+    const w = Math.min(156, natural + 22);
+    if (natural > w - 22) label.setAttribute('textLength', String(w - 22));
+    else label.removeAttribute('textLength');
     const rect = whyBubble.querySelector('rect');
     rect.setAttribute('width', String(w));
     rect.setAttribute('x', String(80 - w / 2));
+    // The bubble floats just above the head it is about (a lower row's family gets it over
+    // the row above), its tail's two dots leading down to that head.
+    const anchor = familyAnchors.get(family) ?? { x: 66, y: 26 };
+    const dy = Math.min(Math.max(0, anchor.y - 26), 120);
+    whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
+    const [near, far] = whyBubble.querySelectorAll('circle');
+    near.setAttribute('cx', String((80 * 0.4 + anchor.x * 0.6).toFixed(1)));
+    near.setAttribute('cy', '16');
+    far.setAttribute('cx', String(anchor.x.toFixed(1)));
+    far.setAttribute('cy', '24');
   }
 
   // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
@@ -854,7 +947,8 @@
     lastFrame = s;
     applyPrefs(s.prefs);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
-                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, (x.agents ?? []).map((a) => a.id + a.state)]), s.focus,
+                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute,
+                                                             (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
@@ -865,7 +959,7 @@
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
     renderCritters(s, prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state);
     renderSessions(s.sessions ?? [], s.focus);
-    renderWhy(prefs.paused ? '' : whyText(s));
+    renderWhy(prefs.paused ? { text: '', family: '' } : whyMessage(s));
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 
