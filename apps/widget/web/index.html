@@ -149,6 +149,8 @@
   #dots .done    { fill: var(--c-done); }
   #dots .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* With several sessions, a ring marks the one the creature is showing. */
+  #dots .focus { stroke: #eceff4; stroke-width: 1.5; }
 
   /* ---- chat panel ----------------------------------------------------------------
      Rust's layout_panel grows the window toward the side with room and keeps the
@@ -348,7 +350,7 @@
 
   // Pastilles in a tray under the feet, centred, 12 px apart, in first-seen order so a
   // session keeps its place while others come and go.
-  function renderSessions(sessions) {
+  function renderSessions(sessions, focus) {
     const shown = sessions.slice(0, 7);
     while (dotsLayer.childElementCount > shown.length) dotsLayer.lastChild.remove();
     while (dotsLayer.childElementCount < shown.length) {
@@ -360,7 +362,8 @@
     shown.forEach((session, i) => {
       const dot = dotsLayer.children[i];
       dot.setAttribute('cx', (80 + (i - (shown.length - 1) / 2) * 12).toFixed(1));
-      dot.setAttribute('class', session.status);
+      const focused = shown.length > 1 && session.id === focus;
+      dot.setAttribute('class', focused ? `${session.status} focus` : session.status);
     });
     const w = shown.length ? shown.length * 12 + 4 : 0;
     tray.setAttribute('width', String(w));
@@ -645,7 +648,7 @@
     lastFrame = s;
     applyPrefs(s.prefs);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
-                                (s.sessions ?? []).map((x) => x.id + x.status),
+                                (s.sessions ?? []).map((x) => x.id + x.status), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
@@ -655,7 +658,7 @@
     // shows as thinking even though that session bypasses the hooks.
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
     pet.dataset.state = prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state;
-    renderSessions(s.sessions ?? []);
+    renderSessions(s.sessions ?? [], s.focus);
     renderWhy(prefs.paused ? '' : whyText(s));
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
