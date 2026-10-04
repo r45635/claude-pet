@@ -515,8 +515,8 @@ test("agents: each subagent shows its own activity, not the session's", () => {
   engine.ingest(event('FILE_WRITE', 500, { ...A, aid: 'ag2', tool: 'edit' }));
   const session = engine.snapshot(600).sessions[0]!;
   assert.deepEqual(session.agents, [
-    { id: 'ag1', type: 'explore', state: 'READING' },
-    { id: 'ag2', type: 'general-purpose', state: 'CODING' },
+    { id: 'ag1', type: 'explore', state: 'READING', reason: null },
+    { id: 'ag2', type: 'general-purpose', state: 'CODING', reason: null },
   ]);
   assert.equal(session.state, 'TOOL_CALL', 'the main thread is still waiting on its Agent tool');
 });
@@ -526,7 +526,9 @@ test("agents: a subagent's failure is its own, not its session's", () => {
   engine.ingest(event('ERROR', 400, { ...A, aid: 'ag1', scope: 'tool', tool: 'bash' }));
   const session = engine.snapshot(500).sessions[0]!;
   assert.equal(session.agents[0]!.state, 'ERROR');
+  assert.deepEqual(session.agents[0]!.reason, { kind: 'tool_failed', tool: 'bash' });
   assert.notEqual(session.state, 'ERROR');
+  assert.equal(session.reason, null);
 });
 
 test('agents: a finished subagent shows DONE for a moment, then leaves', () => {
@@ -559,4 +561,36 @@ test("agents: each session's creature resolves on its own events", () => {
   engine.ingest(event('PERMISSION_WAITING', 300, { sid: 'bbbbbbbb' }));
   const states = Object.fromEntries(engine.snapshot(400).sessions.map((s) => [s.id, s.state]));
   assert.deepEqual(states, { aaaaaaaa: 'READING', bbbbbbbb: 'WAITING' });
+});
+
+test("reason: each session says why it is in distress, on its own", () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('ERROR', 100, { sid: 'bbbbbbbb', scope: 'api', code: 'overloaded' }));
+  const reasons = Object.fromEntries(engine.snapshot(200).sessions.map((s) => [s.id, s.reason]));
+  assert.deepEqual(reasons, { aaaaaaaa: null, bbbbbbbb: { kind: 'api_error', code: 'overloaded' } });
+});
+
+// Background agents (seen live: 3 general-purpose agents running for 25 minutes while
+// the main thread had finished and the human kept chatting).
+test('agents: background agents survive prompts and idle_prompt, and keep the family awake', () => {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  for (const aid of ['bg1', 'bg2', 'bg3']) {
+    engine.ingest(event('SUBAGENT_STARTED', 100, { ...A, aid, agent: 'general-purpose' }));
+  }
+  engine.ingest(event('TURN_COMPLETED', 1_000, A)); // the main thread is done, they are not
+  const counts: number[] = [];
+  for (let t = 2_000; t <= 300_000; t += 1_000) {
+    if (t % 7_000 === 0) engine.ingest(event('FILE_READ', t, { ...A, aid: `bg${(t / 7_000) % 3 + 1}`, tool: 'read' }));
+    if (t === 60_000) engine.ingest(event('PROMPT_SUBMITTED', t, A));   // "tu en es où ?"
+    if (t === 62_000) engine.ingest(event('TURN_COMPLETED', t, A));
+    if (t === 130_000) engine.ingest(event('MODEL_IDLE', t, A));        // idle_prompt
+    const snap = engine.snapshot(t);
+    counts.push(snap.sessions[0]!.agents.length);
+    if (t > 10_000) assert.notEqual(snap.state, 'IDLE', `asleep at ${t} ms while 3 agents work`);
+  }
+  assert.deepEqual([...new Set(counts)], [3], 'always exactly 3 agents');
 });

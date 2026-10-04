@@ -81,6 +81,12 @@ export type EngineConfig = {
    * WAITING, nor leaving WAITING once the human has answered. Settings panel: seconds.
    */
   minStateMs: number;
+  /**
+   * A subagent with no event at all for this long is dropped. Agents are otherwise only
+   * removed by SubagentStop: background agents outlive their turn, the human's next
+   * prompt and idle_prompt. This is the net for one left behind by Esc.
+   */
+  agentStaleMs: number;
   /** No events for this long (and no turn running) => IDLE, ms. */
   idleAfterMs: number;
   /** Rolling window for the activity-rate figures, ms. */
@@ -141,6 +147,7 @@ export const DEFAULT_CONFIG: EngineConfig = {
   errorStickyMs: 4_000,
   doneStickyMs: 3_000,
   minStateMs: 2_000,
+  agentStaleMs: 300_000,
   idleAfterMs: 20_000,
   rateWindowMs: 60_000,
   sessionTtlMs: 30 * 60_000,

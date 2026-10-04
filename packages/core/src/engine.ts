@@ -92,6 +92,8 @@ export type AgentSummary = {
   type: string | null;
   /** What this agent is visibly doing, from its own tool events (agent_id). */
   state: PetState;
+  /** Set when it shows ERROR: which class of tool failed. */
+  reason: PetReason | null;
 };
 
 export type SessionSummary = {
@@ -106,6 +108,10 @@ export type SessionSummary = {
   load: number;
   /** Its subagents, running or just finished, in start order. */
   agents: AgentSummary[];
+  /** Why this session's creature storms or is in distress; null otherwise. */
+  reason: PetReason | null;
+  /** This session's tool calls per minute, for its storm line. Derived. */
+  tool_calls_per_minute: number;
 };
 
 /** A subagent, tracked from SubagentStart to SubagentStop by its agent_id. */
@@ -114,9 +120,12 @@ type Agent = {
   dominant: 'read' | 'write' | 'tool' | null;
   dominantAtMs: number;
   errorMs: number;
+  errorTool: ToolClass | null;
   waiting: boolean;
   /** SubagentStop time; the agent stays on screen as DONE for a moment, then goes. */
   doneMs: number;
+  /** Its last event, for agentStaleMs. */
+  lastMs: number;
   hold: Hold;
 };
 
@@ -150,10 +159,25 @@ type Lane = {
   activeMs: number;
   /** Main-thread error and sleep signals, for this session's own creature. */
   errorMs: number;
+  error: PetReason | null;
   idleMs: number;
   previous: PetState;
   hold: Hold;
 };
+
+/**
+ * A main thread with nothing of its own in flight while its subagents work is waiting on
+ * them, not asleep: background agents run long after the turn that launched them.
+ */
+function delegating(state: PetState, runningAgents: number): PetState {
+  return state === 'IDLE' && runningAgents > 0 ? 'TOOL_CALL' : state;
+}
+
+/** The load channel scoring highest: what a storm is "about". */
+function loudest(channels: Record<ChannelName, number>): ChannelName {
+  const names = Object.keys(channels) as ChannelName[];
+  return names.reduce((a, b) => (channels[b] > channels[a] ? b : a));
+}
 
 /** Load points another session needs above the shown one to take the creature over. */
 const FOCUS_MARGIN = 10;
@@ -226,6 +250,8 @@ export class Engine {
   }
 
   #bornMs: number;
+  /** The clock of the snapshot being built. */
+  #nowMs = 0;
   /** The session the creature showed last tick. */
   #focusSid: string | null = null;
 
@@ -233,7 +259,7 @@ export class Engine {
     let lane = this.#lanes.get(sid);
     if (!lane) {
       lane = { load: createLoadState(atMs), recent: [], meter: null, dominant: null, dominantAtMs: 0, lastMs: atMs,
-               activeMs: 0, errorMs: 0, idleMs: 0, previous: 'IDLE', hold: { shown: 'IDLE', sinceMs: 0 } };
+               activeMs: 0, errorMs: 0, error: null, idleMs: 0, previous: 'IDLE', hold: { shown: 'IDLE', sinceMs: 0 } };
       this.#lanes.set(sid, lane);
     }
     lane.lastMs = Math.max(lane.lastMs, atMs);
@@ -245,18 +271,29 @@ export class Engine {
     if (!agents) this.#agents.set(sid, (agents = new Map()));
     let agent = agents.get(aid);
     if (!agent) {
-      agent = { type, dominant: null, dominantAtMs: 0, errorMs: 0, waiting: false, doneMs: 0,
+      agent = { type, dominant: null, dominantAtMs: 0, errorMs: 0, errorTool: null, waiting: false, doneMs: 0, lastMs: atMs,
                 hold: { shown: 'IDLE', sinceMs: atMs } };
       agents.set(aid, agent);
     }
     if (type && !agent.type) agent.type = type;
+    agent.lastMs = Math.max(agent.lastMs, atMs);
     return agent;
+  }
+
+  /** Placeholder agents (no agent_id, older Claude Code) cannot be matched: drop them. */
+  #forgetAnonymousAgents(sid: string): void {
+    const agents = this.#agents.get(sid);
+    if (!agents) return;
+    for (const id of [...agents.keys()]) if (id.startsWith('~')) agents.delete(id);
+    if (agents.size === 0) this.#agents.delete(sid);
   }
 
   /** Subagents of a session still running (finished ones linger on screen as DONE). */
   #running(sid: string): number {
     let n = 0;
-    for (const a of this.#agents.get(sid)?.values() ?? []) if (a.doneMs === 0) n += 1;
+    for (const a of this.#agents.get(sid)?.values() ?? []) {
+      if (a.doneMs === 0 && this.#nowMs - a.lastMs <= this.config.agentStaleMs) n += 1;
+    }
     return n;
   }
 
@@ -328,10 +365,16 @@ export class Engine {
     if (actor !== lane) {
       const agent = actor as Agent;
       if (ACTIVITY_TYPES.has(event.type)) agent.waiting = false;
-      if (event.type === 'ERROR') agent.errorMs = event.tsMs;
+      if (event.type === 'ERROR') {
+        agent.errorMs = event.tsMs;
+        agent.errorTool = event.tool ?? null;
+      }
       if (event.type === 'PERMISSION_WAITING') agent.waiting = true;
     } else if (event.type === 'ERROR') {
       lane.errorMs = event.tsMs;
+      lane.error = event.scope === 'api'
+        ? { kind: 'api_error', code: event.code ?? null }
+        : { kind: 'tool_failed', tool: event.tool ?? null };
     }
 
     switch (event.type) {
@@ -342,11 +385,11 @@ export class Engine {
       case 'PROMPT_SUBMITTED':
         // A prompt typed mid-turn does not restart the turn.
         if (!this.#turns.has(sid)) this.#turns.set(sid, { startMs: event.tsMs, lastEventMs: event.tsMs });
-        // The human typing means no permission dialog is open, and Esc (no Stop, no
-        // SubagentStop) is the usual way to get back to the prompt: forget what this
-        // session had in flight. A subagent still running would be under-counted until
-        // it finishes; a phantom one would fake a storm forever.
-        this.#agents.delete(sid);
+        // The human typing means no permission dialog is open. Agents with an id stay:
+        // background agents keep working while the human chats (they end on their own
+        // SubagentStop, or agentStaleMs of silence). Anonymous ones cannot be told
+        // apart, so Esc's leftovers are cleared rather than faking a storm forever.
+        this.#forgetAnonymousAgents(sid);
         this.#pending.delete(sid);
         this.#lastIdleSignalMs = 0;
         lane.idleMs = 0;
@@ -390,9 +433,13 @@ export class Engine {
       case 'SESSION_ENDED':
         this.#turns.delete(sid);
         this.#pending.delete(sid);
-        this.#agents.delete(sid);
-        if (event.type === 'SESSION_ENDED') this.#lanes.delete(sid);
-        else lane.idleMs = event.tsMs;
+        if (event.type === 'SESSION_ENDED') {
+          this.#agents.delete(sid);
+          this.#lanes.delete(sid);
+        } else {
+          this.#forgetAnonymousAgents(sid);
+          lane.idleMs = event.tsMs;
+        }
         if (this.#turns.size === 0) this.#lastIdleSignalMs = event.tsMs;
         break;
       default:
@@ -465,7 +512,7 @@ export class Engine {
       : generating ? max : max * this.config.net.quietWorkFactor;
   }
 
-  #sessionList(nowMs: number, loads: Map<string, number>): SessionSummary[] {
+  #sessionList(nowMs: number, ticks: Map<string, ReturnType<typeof tickLoad>>): SessionSummary[] {
     const working = new Set(this.#workingTurns(nowMs).map(([, turn]) => turn));
     const out: SessionSummary[] = [];
     for (const [sid, seen] of this.#sessions) {
@@ -480,14 +527,22 @@ export class Engine {
         status = this.#generating(sid, nowMs) ? 'thinking' : 'working';
       }
       else if (seen.doneMs > 0 && nowMs - seen.doneMs < this.config.doneStickyMs) status = 'done';
-      const load = loads.get(sid) ?? 0;
+      const tick = ticks.get(sid);
+      const load = tick?.load ?? 0;
+      const state = this.#sessionState(sid, seen, load, turn !== undefined && working.has(turn), nowMs);
+      const recent = this.#lanes.get(sid)?.recent ?? [];
+      const perMinute = 60_000 / this.config.rateWindowMs;
       out.push({
         id: sid,
         status,
         turn_ms: turn ? Math.max(0, nowMs - turn.startMs) : null,
-        state: this.#sessionState(sid, seen, load, turn !== undefined && working.has(turn), nowMs),
+        state,
         load,
         agents: this.#agentList(sid, nowMs),
+        reason: state === 'ERROR' ? (this.#lanes.get(sid)?.error ?? null)
+          : state === 'HIGH_LOAD' && tick ? { kind: 'storm', driver: loudest(tick.channels) }
+          : null,
+        tool_calls_per_minute: Math.round(recent.filter((e) => e.isToolCall).length * perMinute),
       });
     }
     return out;
@@ -517,7 +572,7 @@ export class Engine {
       this.config,
     );
     lane.previous = raw;
-    return this.#hold(lane.hold, raw, nowMs);
+    return this.#hold(lane.hold, delegating(raw, this.#running(sid)), nowMs);
   }
 
   /** A session's subagents as their creatures show them; finished ones go after a moment. */
@@ -527,7 +582,8 @@ export class Engine {
     const linger = Math.max(this.config.doneStickyMs, this.config.minStateMs);
     const out: AgentSummary[] = [];
     for (const [id, a] of agents) {
-      if (a.doneMs > 0 && nowMs - a.doneMs >= linger) {
+      if ((a.doneMs > 0 && nowMs - a.doneMs >= linger) ||
+          (a.doneMs === 0 && nowMs - a.lastMs > this.config.agentStaleMs)) {
         agents.delete(id);
         continue;
       }
@@ -543,7 +599,8 @@ export class Engine {
       // DONE is final: the hold must not keep a finished agent looking busy.
       const state = raw === 'DONE' ? 'DONE' : this.#hold(a.hold, raw, nowMs);
       if (state === 'DONE') a.hold = { shown: 'DONE', sinceMs: a.doneMs };
-      out.push({ id, type: a.type, state });
+      out.push({ id, type: a.type, state,
+                 reason: state === 'ERROR' ? { kind: 'tool_failed', tool: a.errorTool } : null });
     }
     if (agents.size === 0) this.#agents.delete(sid);
     return out;
@@ -580,13 +637,14 @@ export class Engine {
   }
 
   snapshot(nowMs: number): PetSnapshot {
+    this.#nowMs = nowMs;
     // Tick every lane (they all decay), then follow the busiest: the creature shows one
     // session, the pastilles show them all. Ties go to the most recently active.
     const windowStart = nowMs - this.config.rateWindowMs;
     type Candidate = { sid: string; lane: Lane; work: number; tick: ReturnType<typeof tickLoad> };
     let focus: Candidate | null = null;
     let shown: Candidate | null = null;
-    const ticks = new Map<string, number>();
+    const ticks = new Map<string, ReturnType<typeof tickLoad>>();
     for (const [sid, lane] of this.#lanes) {
       if (nowMs - lane.lastMs > this.config.sessionTtlMs && !this.#turns.has(sid)) {
         this.#lanes.delete(sid);
@@ -601,7 +659,7 @@ export class Engine {
         focus = { sid, lane, work, tick };
       }
       if (sid === this.#focusSid) shown = { sid, lane, work, tick };
-      ticks.set(sid, tick.load);
+      ticks.set(sid, tick);
     }
     // Hysteresis: two sessions of about the same load would otherwise swap the creature
     // between them on every event. The one shown keeps it until another is clearly busier.
@@ -641,7 +699,9 @@ export class Engine {
       this.config,
     );
     this.#previous = raw;
-    const state = this.#hold(this.#shownHold, raw, nowMs);
+    let running = 0;
+    for (const sid of this.#agents.keys()) running += this.#running(sid);
+    const state = this.#hold(this.#shownHold, delegating(raw, running), nowMs);
 
     const meter = lane?.meter ?? null;
     const contextLoad =
@@ -656,11 +716,7 @@ export class Engine {
 
     let reason: PetReason | null = null;
     if (state === 'ERROR') reason = this.#lastError;
-    if (state === 'HIGH_LOAD') {
-      const names = Object.keys(channels) as ChannelName[];
-      const driver = names.reduce((a, b) => (channels[b] > channels[a] ? b : a));
-      reason = { kind: 'storm', driver };
-    }
+    if (state === 'HIGH_LOAD') reason = { kind: 'storm', driver: loudest(channels) };
 
     return {
       state,
