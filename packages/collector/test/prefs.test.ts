@@ -19,7 +19,9 @@ test('prefs: applying a patch keeps hand-tuned overrides untouched', () => {
   const user = { smoothing: { releaseMs: 12_000 }, ui: { size: 'small' } };
   const next = applyPatch(user, { temperament: 'nervous', paused: true });
   assert.deepEqual(next.smoothing, { releaseMs: 12_000 });
-  assert.deepEqual(prefsOf(next), { temperament: 'nervous', size: 'small', showSessions: true, paused: true });
+  assert.deepEqual(prefsOf(next), {
+    temperament: 'nervous', chatModel: 'default', size: 'small', showSessions: true, paused: true,
+  });
 });
 
 test('temperament: preset applies, and an explicit override still wins over it', () => {

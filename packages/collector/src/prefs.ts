@@ -17,8 +17,13 @@ import { CONFIG_FILE } from './paths.ts';
 export const SIZES = ['small', 'medium', 'large'] as const;
 export type Size = (typeof SIZES)[number];
 
+export const CHAT_MODELS = ['default', 'sonnet', 'haiku'] as const;
+export type ChatModel = (typeof CHAT_MODELS)[number];
+
 export type Prefs = {
   temperament: Temperament;
+  /** Model for the creature's own Claude (run by the widget). `default` = Claude Code's pick. */
+  chatModel: ChatModel;
   size: Size;
   showSessions: boolean;
   paused: boolean;
@@ -26,6 +31,7 @@ export type Prefs = {
 
 export const DEFAULT_PREFS: Prefs = {
   temperament: 'normal',
+  chatModel: 'default',
   size: 'medium',
   showSessions: true,
   paused: false,
@@ -46,6 +52,7 @@ export function prefsOf(user: UserFile): Prefs {
   const ui = user.ui ?? {};
   return {
     temperament: isTemperament(user.temperament) ? user.temperament : DEFAULT_PREFS.temperament,
+    chatModel: CHAT_MODELS.includes(ui.chatModel as ChatModel) ? (ui.chatModel as ChatModel) : DEFAULT_PREFS.chatModel,
     size: SIZES.includes(ui.size as Size) ? (ui.size as Size) : DEFAULT_PREFS.size,
     showSessions: typeof ui.showSessions === 'boolean' ? ui.showSessions : DEFAULT_PREFS.showSessions,
     paused: typeof ui.paused === 'boolean' ? ui.paused : DEFAULT_PREFS.paused,
@@ -59,6 +66,7 @@ export function validatePatch(raw: unknown): Partial<Prefs> | { error: string } 
   for (const [key, value] of Object.entries(raw)) {
     if (key === 'temperament' && isTemperament(value)) out.temperament = value;
     else if (key === 'size' && SIZES.includes(value as Size)) out.size = value as Size;
+    else if (key === 'chatModel' && CHAT_MODELS.includes(value as ChatModel)) out.chatModel = value as ChatModel;
     else if (key === 'showSessions' && typeof value === 'boolean') out.showSessions = value;
     else if (key === 'paused' && typeof value === 'boolean') out.paused = value;
     else return { error: `invalid key or value: ${key}` };
@@ -71,6 +79,7 @@ export function applyPatch(user: UserFile, patch: Partial<Prefs>): UserFile {
   const next: UserFile = { ...user, ui: { ...(user.ui ?? {}) } };
   if (patch.temperament !== undefined) next.temperament = patch.temperament;
   if (patch.size !== undefined) next.ui!.size = patch.size;
+  if (patch.chatModel !== undefined) next.ui!.chatModel = patch.chatModel;
   if (patch.showSessions !== undefined) next.ui!.showSessions = patch.showSessions;
   if (patch.paused !== undefined) next.ui!.paused = patch.paused;
   return next;

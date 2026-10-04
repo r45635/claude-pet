@@ -95,3 +95,19 @@ Documented fields are stable, but `v2.1.288` is a fast-moving product.
 - **Mitigation:** the closing check in `docs/CLAUDE_CODE_TELEMETRY.md`, run after upgrades.
 - **Guard:** `statusline` fields are read with `// null` fallbacks throughout; a missing
   field yields `null`, which the UI renders as "unknown".
+
+## 10. A full agent one click away — 🔴 high consequence
+
+Talking to the creature runs `claude -p --permission-mode auto`: it can edit files and run
+commands, with nobody there to answer a permission prompt.
+
+- **Rejected design:** a `POST /ask` route on the daemon. A localhost endpoint that starts a
+  full agent is a local code-execution surface for anything that learns the token — and the
+  daemon answers browsers (`access-control-allow-origin: *`) and used to print the token in
+  its log. Claude Code's own safety classifier refused to build it; that was right.
+- **Mitigation:** the widget spawns `claude` itself, behind Tauri IPC that only its own
+  webview can call. No port exposes the agent. The token is no longer logged (and was
+  rotated after the change).
+- **Guards:** `auto` mode (Claude Code's classifier) rather than `bypassPermissions`; one run
+  at a time; a stop button; a dedicated working folder `~/.claude-pet/chat` — which Bash
+  can still leave, so it is a default, not a sandbox.

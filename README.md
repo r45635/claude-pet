@@ -101,6 +101,14 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - `jq` (ships with macOS 26 at `/usr/bin/jq`)
 - Rust — **only** for Phase 3; see `apps/widget/README.md`
 
+## Talk to it
+
+Click the creature: a bubble opens; type (or use macOS dictation) and press Enter. The widget
+runs your own `claude` CLI headless in `~/.claude-pet/chat`, one continuous conversation,
+answer streamed into the bubble — and the creature animates from that session like any
+other. It is a **full agent** (`--permission-mode auto`): see `docs/RISKS.md` §10. Drag to
+move, right-click for the menu (New conversation, Chat model, Stop, …).
+
 ## Wiring into Claude Code
 
 ```bash

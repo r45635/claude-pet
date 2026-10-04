@@ -47,6 +47,13 @@ Defence in depth is the point: either layer alone would be enough on a good day.
 - there is no outbound HTTP anywhere in the codebase, and no analytics dependency;
 - `~/.claude-pet/` is `0700`; the spool is `0600`.
 
+## Talking to the creature
+
+The chat is the one place where content is involved — the user's own words, on purpose.
+What you type goes to your own `claude` CLI, run by the widget (not the daemon), and lands
+where any Claude Code conversation lands: its transcript under `~/.claude/projects/`. The
+daemon never sees the text. The widget keeps only the exchange on screen, in memory.
+
 ## Retention
 
 | File | Lifetime |

@@ -222,8 +222,9 @@ server.listen(PORT, '127.0.0.1', () => {
     JSON.stringify({ url: `http://127.0.0.1:${PORT}`, token: TOKEN }),
     { mode: 0o600 },
   );
-  process.stderr.write(`claude-pet daemon on http://127.0.0.1:${PORT} (token ${TOKEN})\n`);
-  process.stderr.write(`  curl -s "http://127.0.0.1:${PORT}/snapshot?token=${TOKEN}" | jq .\n`);
+  // The token is never logged: it lives in ~/.claude-pet/token (0600), nowhere else.
+  process.stderr.write(`claude-pet daemon on http://127.0.0.1:${PORT}\n`);
+  process.stderr.write(`  curl -s "http://127.0.0.1:${PORT}/snapshot?token=$(cat ~/.claude-pet/token)" | jq .\n`);
   schedule();
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
 });

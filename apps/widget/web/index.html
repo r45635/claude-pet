@@ -113,6 +113,37 @@
   #sessions .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
+  /* ---- chat panel ----------------------------------------------------------------
+     The creature keeps its place (window grows right and down from its top-left corner);
+     the bubble sits to its right, the input along the bottom. */
+  html.chat body { display: block; }
+  html.chat #pet { position: fixed; top: 15px; left: 15px; }
+  html.chat #drag { inset: auto; top: 0; left: 0;
+                    width: calc(var(--pet-size, 150px) + 30px); height: calc(var(--pet-size, 150px) + 30px); }
+  #chat { position: fixed; inset: 0; pointer-events: none; }
+  #chat[hidden] { display: none; }
+  #chat > * { pointer-events: auto; }
+  #bubble { position: absolute; top: 10px; right: 10px; bottom: 76px;
+            left: calc(var(--pet-size, 150px) + 40px);
+            overflow-y: auto; padding: 10px 12px; border-radius: 14px;
+            background: rgba(22, 25, 34, .94); color: #e6edf3;
+            font: 13px/1.45 -apple-system, BlinkMacSystemFont, sans-serif;
+            box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+  #bubble .you { color: #8b949e; margin-bottom: 6px; white-space: pre-wrap; }
+  #bubble pre { background: #0d1117; padding: 6px 8px; border-radius: 6px; overflow-x: auto;
+                font: 12px ui-monospace, Menlo, monospace; }
+  #bubble code { font: 12px ui-monospace, Menlo, monospace; background: #0d1117;
+                 padding: 0 3px; border-radius: 4px; }
+  #status { position: absolute; right: 14px; bottom: 58px; color: #8b949e;
+            font: 11px -apple-system, sans-serif; }
+  #ask { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  #input { flex: 1; resize: none; height: 40px; padding: 10px 12px; border-radius: 12px;
+           border: 1px solid #30363d; background: rgba(13, 17, 23, .96); color: #e6edf3;
+           font: 13px -apple-system, BlinkMacSystemFont, sans-serif; outline: none; }
+  #input:focus { border-color: #7cc4ff; }
+  #stop { width: 40px; border: 0; border-radius: 12px; background: #ff6b81; color: #fff;
+          font-size: 14px; cursor: pointer; }
+
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
@@ -142,7 +173,17 @@
 </svg>
 
 <div id="hud" hidden></div>
-<div id="drag" data-tauri-drag-region></div>
+<!-- Over the creature: click = talk, drag = move, right-click = menu. -->
+<div id="drag"></div>
+
+<div id="chat" hidden>
+  <div id="bubble"><div id="answer"></div></div>
+  <div id="status"></div>
+  <form id="ask">
+    <textarea id="input" rows="1" placeholder="Talk to Claude… (Enter to send, Esc to close)"></textarea>
+    <button id="stop" type="button" hidden title="Stop answering">■</button>
+  </form>
+</div>
 
 <script type="module">
   const pet = document.getElementById('pet');
@@ -175,7 +216,9 @@
   let debug = params.has('debug');
   const applyDebug = () => { hud.hidden = !debug; };
   applyDebug();
-  addEventListener('keydown', (e) => { if (e.key === 'd') { debug = !debug; applyDebug(); } });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'd' && e.target === document.body) { debug = !debug; applyDebug(); }
+  });
 
   // The widget host injects the endpoint; the browser harness passes it in the hash.
   const injected = window.__CLAUDE_PET__;
@@ -193,14 +236,12 @@
     return tier;
   }
 
-  // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
-  let last = '';
-  // ---- right-click menu (widget only) ------------------------------------------------
-  // Native macOS menu via Tauri's JS API. Each choice is POSTed to the daemon, which
-  // writes ~/.claude-pet/config.json and hot-reloads the engine; the new prefs come back
-  // in the next SSE frame, so the page never keeps its own copy as truth.
+  // ---- host bridge ---------------------------------------------------------------------
+  // Everything that writes or acts goes through Rust (Tauri IPC): the menu, preference
+  // writes to the daemon, the chat. The page itself only *reads* the daemon's SSE feed.
   const T = window.__TAURI__;
-  let prefs = { temperament: 'normal', size: 'medium', showSessions: true, paused: false };
+  const invoke = (cmd, args) => (T ? T.core.invoke(cmd, args) : Promise.reject(new Error('no host')));
+  let prefs = { temperament: 'normal', chatModel: 'default', size: 'medium', showSessions: true, paused: false };
 
   // A release webview has no console: report to the daemon log through a GET, the
   // same kind of request as the SSE feed.
@@ -208,61 +249,128 @@
     new Image().src = `${base}/log?token=${encodeURIComponent(token)}&m=${encodeURIComponent(message)}`;
   }
 
-  async function post(path, body) {
-    diag(`menu ${path} ${body === undefined ? '' : JSON.stringify(body)}`);
-    try {
-      const res = await fetch(`${base}${path}?token=${encodeURIComponent(token)}`, {
-        method: 'POST',
-        body: body === undefined ? undefined : JSON.stringify(body), // text/plain: no preflight
-      });
-      if (!res.ok) diag(`POST ${path} -> ${res.status}`);
-      else if (res.status !== 204) applyPrefs(await res.json());
-    } catch (err) {
-      diag(`POST ${path} failed: ${err}`);
-    }
-  }
-
   const SIZES = { small: 110, medium: 150, large: 220 };
-  let appliedSize = null;
+  let appliedWindow = '';
+  function petPx() { return SIZES[prefs.size] ?? SIZES.medium; }
+  function fitWindow(focus = false) {
+    const px = petPx();
+    const [w, h] = chatOpen ? [px + 30 + 320, Math.max(px + 30, 300) + 70] : [px + 30, px + 30];
+    const key = `${w}x${h}`;
+    if (key === appliedWindow && !focus) return;
+    appliedWindow = key;
+    invoke('resize', { width: w, height: h, focus }).catch((err) => diag(`resize: ${err}`));
+  }
   function applyPrefs(p) {
     if (!p) return;
     prefs = p;
     pet.dataset.showSessions = String(p.showSessions);
     pet.dataset.paused = String(p.paused);
-    const px = SIZES[p.size] ?? SIZES.medium;
-    document.documentElement.style.setProperty('--pet-size', `${px}px`);
-    if (T && appliedSize !== px) {
-      appliedSize = px;
-      const Size = (T.dpi ?? T.window).LogicalSize;
-      T.window.getCurrentWindow().setSize(new Size(px + 30, px + 30)).catch(() => {});
+    document.documentElement.style.setProperty('--pet-size', `${petPx()}px`);
+    fitWindow();
+  }
+
+  addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    invoke('show_menu', { prefs }).catch((err) => diag(`menu: ${err}`));
+  });
+
+  // ---- click to talk, drag to move ---------------------------------------------------------
+  const drag = document.getElementById('drag');
+  drag.addEventListener('mousedown', (down) => {
+    if (down.button !== 0) return;
+    let moved = false;
+    const move = (m) => {
+      if (Math.hypot(m.screenX - down.screenX, m.screenY - down.screenY) < 4) return;
+      moved = true;
+      cleanup();
+      T?.window.getCurrentWindow().startDragging().catch((err) => diag(`drag: ${err}`));
+    };
+    const up = () => { cleanup(); if (!moved) toggleChat(); };
+    const cleanup = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
+    addEventListener('mousemove', move);
+    addEventListener('mouseup', up);
+  });
+
+  // ---- chat -----------------------------------------------------------------------------
+  const chatEl = document.getElementById('chat');
+  const answerEl = document.getElementById('answer');
+  const statusEl = document.getElementById('status');
+  const input = document.getElementById('input');
+  const stopBtn = document.getElementById('stop');
+  let chatOpen = false;
+  let busy = false;
+  let answer = '';
+  let asked = '';
+
+  function toggleChat(open = !chatOpen) {
+    chatOpen = open;
+    document.documentElement.classList.toggle('chat', open);
+    chatEl.hidden = !open;
+    fitWindow(open);
+    if (open) setTimeout(() => input.focus(), 50);
+  }
+
+  const escapeHtml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Light markdown, on escaped text only: code blocks, inline code, bold, line breaks.
+  function md(text) {
+    return escapeHtml(text)
+      .split(/```(?:[\w-]*)\n?/)
+      .map((part, i) => (i % 2
+        ? `<pre>${part.replace(/\n$/, '')}</pre>`
+        : part.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+              .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+              .replace(/\n/g, '<br>')))
+      .join('');
+  }
+  function paint() {
+    answerEl.innerHTML = (asked ? `<div class="you">› ${escapeHtml(asked)}</div>` : '') +
+      (answer ? md(answer) : busy ? '…' : '');
+    const bubble = answerEl.parentElement;
+    bubble.scrollTop = bubble.scrollHeight;
+  }
+  function setBusy(value) {
+    busy = value;
+    stopBtn.hidden = !value;
+    input.disabled = value;
+    if (!value) input.focus();
+  }
+
+  function onChat(ev) {
+    switch (ev.kind) {
+      case 'open': toggleChat(true); break;
+      case 'reset': asked = ''; answer = ''; statusEl.textContent = 'new conversation'; paint(); break;
+      case 'start': answer = ''; statusEl.textContent = 'thinking…'; setBusy(true); paint(); break;
+      case 'delta': answer += ev.text; statusEl.textContent = 'writing…'; paint(); break;
+      case 'tool': statusEl.textContent = `⚙ ${ev.name}`; break;
+      case 'done':
+        if (!answer) answer = ev.text;
+        statusEl.textContent = [
+          ev.isError ? 'error' : '',
+          ev.durationMs != null ? `${(ev.durationMs / 1000).toFixed(1)} s` : '',
+          ev.costUsd != null ? `$${ev.costUsd.toFixed(3)}` : '',
+        ].filter(Boolean).join(' · ');
+        setBusy(false); paint(); break;
+      case 'error': statusEl.textContent = `⚠ ${ev.message}`; setBusy(false); paint(); break;
     }
   }
+  T?.event.listen('chat', (e) => onChat(e.payload));
 
-  if (T) {
-    addEventListener('contextmenu', async (e) => {
-      e.preventDefault();
-      const { Menu } = T.menu;
-      const radio = (key, options) => options.map(([value, text]) => ({
-        text, checked: prefs[key] === value, action: () => post('/config', { [key]: value }),
-      }));
-      const menu = await Menu.new({ items: [
-        { text: 'Temperament', items: radio('temperament',
-            [['zen', 'Zen'], ['normal', 'Normal'], ['nervous', 'Nervous']]) },
-        { text: 'Size', items: radio('size',
-            [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]) },
-        { text: 'Session pastilles', checked: prefs.showSessions,
-          action: () => post('/config', { showSessions: !prefs.showSessions }) },
-        { text: 'Pause (sleep)', checked: prefs.paused,
-          action: () => post('/config', { paused: !prefs.paused }) },
-        { item: 'Separator' },
-        { text: 'Advanced settings…', action: () => post('/open-config') },
-        { item: 'Separator' },
-        { text: 'Quit claude-pet', action: () => T.window.getCurrentWindow().close() },
-      ] });
-      await menu.popup().catch((err) => diag(`menu popup failed: ${err}`));
-    });
+  function send() {
+    const text = input.value.trim();
+    if (!text || busy) return;
+    asked = text;
+    input.value = '';
+    invoke('chat_ask', { text }).catch((err) => onChat({ kind: 'error', message: String(err) }));
   }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    if (e.key === 'Escape') toggleChat(false);
+  });
+  stopBtn.addEventListener('click', () => invoke('chat_cancel'));
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && chatOpen) toggleChat(false); });
 
+  // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
+  let last = '';
   function render(s) {
     applyPrefs(s.prefs);
     const key = JSON.stringify([s.visual, s.load, s.state, s.context_load, s.sources, s.prefs,
