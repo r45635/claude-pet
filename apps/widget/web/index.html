@@ -115,6 +115,13 @@
   [data-signal="none"] #bulb { stroke: var(--c-off); stroke-width: 2; }
   [data-signal="none"] #eyes { transform: none; }
 
+  /* The "why" bubble: in a storm or in distress, one short line saying what caused it,
+     built from closed values only (snapshot.reason). It sits above the head, in the
+     window's margin. */
+  #why rect, #why circle { fill: #f4f1ea; }
+  #why text { fill: var(--ink); font: 700 11px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  #pet:not([data-why]) #why, #pet[data-why=""] #why { display: none !important; }
+
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
   html.widget, html.widget body { background: transparent; overflow: hidden; }
   html.widget #pet { width: var(--pet-size, 150px); height: var(--pet-size, 150px); }
@@ -302,6 +309,12 @@
     <path d="M114 36 h16 v9 a8 8 0 0 1 -16 0 Z" /><path d="M118 29 v7 M126 29 v7" /><path d="M122 53 v8" />
   </g>
 
+  <g id="why" class="opt on-HIGH_LOAD on-ERROR">
+    <rect y="-14" height="24" rx="12" />
+    <circle cx="62" cy="16" r="3.2" /><circle cx="68" cy="24" r="2" />
+    <text x="80" y="2" text-anchor="middle"></text>
+  </g>
+
   <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
 </svg>
 
@@ -347,6 +360,40 @@
     const w = shown.length ? shown.length * 12 + 4 : 0;
     tray.setAttribute('width', String(w));
     tray.setAttribute('x', String(80 - w / 2));
+  }
+
+  // What the bubble says. Only closed values reach here (a tool class, an API error enum,
+  // a load channel, counts): unknown codes get a generic line, never their raw text.
+  const TOOL_NAMES = { bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit', search: 'Search',
+                       fetch: 'Web fetch', task: 'Subagent', todo: 'Todo list', notebook: 'Notebook',
+                       mcp: 'An MCP tool' };
+  const API_ERRORS = { rate_limit: 'Rate limited', overloaded: 'API overloaded',
+                       server_error: 'API server error' };
+  function whyText(s) {
+    const r = s.reason;
+    if (!r) return '';
+    if (r.kind === 'tool_failed') return `${TOOL_NAMES[r.tool] ?? 'A tool'} failed`;
+    if (r.kind === 'api_error') return API_ERRORS[r.code] ?? 'API error';
+    if (r.kind !== 'storm') return '';
+    switch (r.driver) {
+      case 'tool': return s.tool_calls_per_minute > 0 ? `${s.tool_calls_per_minute} tool calls/min` : 'Lots of tool calls';
+      case 'agent': return s.active_subagents === 1 ? '1 subagent running'
+        : s.active_subagents > 1 ? `${s.active_subagents} subagents running` : 'Lots of subagents';
+      case 'file': return 'Lots of files at once';
+      case 'generation': return s.tokens_per_minute != null
+        ? `${Math.round(s.tokens_per_minute / 1000)}k tokens/min` : 'Writing a lot';
+      default: return '';
+    }
+  }
+  const whyBubble = document.getElementById('why');
+  function renderWhy(text) {
+    pet.dataset.why = text;
+    if (!text) return;
+    whyBubble.querySelector('text').textContent = text;
+    const w = Math.min(150, Math.round(text.length * 6.6 + 22)); // display:none can't be measured
+    const rect = whyBubble.querySelector('rect');
+    rect.setAttribute('width', String(w));
+    rect.setAttribute('x', String(80 - w / 2));
   }
 
   // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
@@ -592,7 +639,7 @@
   function render(s) {
     lastFrame = s;
     applyPrefs(s.prefs);
-    const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.context_load, s.sources, s.prefs,
+    const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => x.id + x.status),
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
@@ -604,6 +651,7 @@
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
     pet.dataset.state = prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state;
     renderSessions(s.sessions ?? []);
+    renderWhy(prefs.paused ? '' : whyText(s));
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 
