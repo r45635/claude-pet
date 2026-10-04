@@ -476,6 +476,12 @@
   // and where kids may put their feet. Above parentFeet a kid is behind the parent.
   const CELL = { w: 180, h: 110, parent: { x: 55, y: 6, size: 70 }, kid: 36,
                  area: { x0: 22, x1: 158, y0: 48, y1: 102 }, parentFeet: 72 };
+  // Neighbouring cells overlap a little (step < size): a cell's edges are mostly empty, so
+  // packing them tighter brings the sessions closer without the families touching.
+  CELL.step = { x: CELL.w * 0.8, y: CELL.h * 0.8 };
+  // With no subagent anywhere there is no walking area to keep: just the parent, close-packed.
+  const COMPACT = { w: 80, h: 76, parent: { x: 5, y: 3, size: 70 }, step: { x: 66, y: 60 } };
+  const span = (n, size, step) => size + step * (n - 1);
   const WANDERS = new Set(['READING', 'CODING', 'TOOL_CALL', 'THINKING', 'HIGH_LOAD']);
   let crittersKey = '';
   const critterEls = new Map();
@@ -576,11 +582,11 @@
   const animating = () => animatingNow;
 
   // Try every number of columns; keep the one where families come out biggest.
-  function layoutCells(n) {
+  function layoutCells(n, G) {
     let best = { f: 0, cols: 1, rows: 1 };
     for (let cols = 1; cols <= n; cols += 1) {
       const rows = Math.ceil(n / cols);
-      const f = Math.min(160 / (cols * CELL.w), 160 / (rows * CELL.h));
+      const f = Math.min(160 / span(cols, G.w, G.step.x), 160 / span(rows, G.h, G.step.y));
       if (f > best.f) best = { f, cols, rows };
     }
     return best;
@@ -616,11 +622,12 @@
         keepCritters.add('s:');
         familyAnchors.set('', { x: 66, y: 26 });
       } else {
-        const { f, cols, rows } = layoutCells(groups.length);
-        const x0 = (160 - f * CELL.w * cols) / 2;
-        const y0 = (160 - f * CELL.h * rows) / 2;
+        const G = groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
+        const { f, cols, rows } = layoutCells(groups.length, G);
+        const x0 = (160 - f * span(cols, G.w, G.step.x)) / 2;
+        const y0 = (160 - f * span(rows, G.h, G.step.y)) / 2;
         groups.forEach((g, i) => {
-          const cell = { x: x0 + (i % cols) * CELL.w * f, y: y0 + Math.floor(i / cols) * CELL.h * f, f };
+          const cell = { x: x0 + (i % cols) * G.step.x * f, y: y0 + Math.floor(i / cols) * G.step.y * f, f };
           cells.set(g.id, cell);
           const family = document.createElementNS(SVG_NS, 'g');
           family.setAttribute('class', 'family');
@@ -628,7 +635,7 @@
           back.setAttribute('class', 'back');
           const front = document.createElementNS(SVG_NS, 'g');
           front.setAttribute('class', 'front');
-          const P = CELL.parent;
+          const P = G.parent;
           const parent = slotted(critter(`s:${g.id}`, false));
           parent.setAttribute('transform', `translate(${(cell.x + P.x * f).toFixed(2)} ${(cell.y + P.y * f).toFixed(2)}) scale(${(P.size * f / 160).toFixed(4)})`);
           family.append(back, parent, front);
