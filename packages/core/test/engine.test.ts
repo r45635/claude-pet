@@ -369,3 +369,43 @@ test('reason: null whenever the creature is not storming or in distress', () => 
   assert.equal(snapshot.reason, null);
   assert.equal(new Engine(0).snapshot(1_000).reason, null);
 });
+
+// Esc fires no Stop, no SubagentStop, no PermissionDenied: whatever was in flight has to
+// be cleared by the next sign of life, never left to haunt the creature.
+
+test('interrupt: subagents left running by Esc do not storm the next turn', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('SUBAGENT_STARTED', 500, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('SUBAGENT_STARTED', 600, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 300_000, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(300_100).active_subagents, 0, 'the new turn starts clean');
+});
+
+test('interrupt: idle_prompt clears a permission prompt dismissed with Esc', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PERMISSION_WAITING', 1_000, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(30_000).state, 'WAITING');
+  engine.ingest(event('MODEL_IDLE', 61_000, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(62_000).state, 'IDLE');
+});
+
+test('interrupt: a turn with no Stop falls asleep once it has gone stale', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('BASH_STARTED', 2_000, { sid: 'aaaaaaaa', tool: 'bash' }));
+  const staleAt = 2_000 + DEFAULT_CONFIG.work.staleAfterMs + 1_000;
+  assert.equal(engine.snapshot(staleAt).state, 'IDLE');
+});
+
+test('one session ending does not put a working one to sleep', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('SUBAGENT_STARTED', 100, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('SESSION_STARTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('SESSION_ENDED', 3_000, { sid: 'bbbbbbbb' }));
+  const snapshot = engine.snapshot(4_000);
+  assert.notEqual(snapshot.state, 'IDLE');
+  assert.equal(snapshot.active_subagents, 1, "another session's subagents survive");
+});
