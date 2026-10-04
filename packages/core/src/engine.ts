@@ -6,9 +6,9 @@
  * real session drives.
  */
 
-import type { EngineConfig } from './config.ts';
+import type { ChannelName, EngineConfig } from './config.ts';
 import { DEFAULT_CONFIG } from './config.ts';
-import type { MeterSample, PetEvent } from './events.ts';
+import type { MeterSample, PetEvent, ToolClass } from './events.ts';
 import type { LoadState } from './load.ts';
 import { clamp, createLoadState, ingestLoad, pourLoad, tickLoad } from './load.ts';
 import type { PetState } from './state.ts';
@@ -24,9 +24,21 @@ export type SnapshotSources = {
   otel: boolean;
 };
 
+/**
+ * Why the creature storms or is in distress, for the thought bubble. Closed values only:
+ * a tool class, an API error enum, a load channel — never text from the session.
+ */
+export type PetReason =
+  | { kind: 'tool_failed'; tool: ToolClass | null }
+  | { kind: 'api_error'; code: string | null }
+  /** The load channel scoring highest right now. Derived. */
+  | { kind: 'storm'; driver: ChannelName };
+
 export type PetSnapshot = {
   state: PetState;
   visual: VisualState;
+  /** Set in HIGH_LOAD and ERROR only; null otherwise. */
+  reason: PetReason | null;
   /** 0-100. Derived. Always listed in `estimated`. */
   load: number;
   /** 0..1 — how much of the weight model was backed by a live signal. */
@@ -127,6 +139,7 @@ export class Engine {
 
   #lastActivityMs = 0;
   #lastErrorMs = 0;
+  #lastError: PetReason | null = null;
   #lastDoneMs = 0;
   #lastIdleSignalMs = 0;
   #lastMeterMs = 0;
@@ -239,6 +252,10 @@ export class Engine {
         break;
       case 'ERROR':
         this.#lastErrorMs = event.tsMs;
+        this.#lastError =
+          event.scope === 'api'
+            ? { kind: 'api_error', code: event.code ?? null }
+            : { kind: 'tool_failed', tool: event.tool ?? null };
         break;
       case 'MODEL_IDLE':
         this.#lastIdleSignalMs = event.tsMs;
@@ -399,9 +416,18 @@ export class Engine {
         ? (meter.in_tokens ?? 0) + (meter.out_tokens ?? 0)
         : null;
 
+    let reason: PetReason | null = null;
+    if (state === 'ERROR') reason = this.#lastError;
+    if (state === 'HIGH_LOAD') {
+      const names = Object.keys(channels) as ChannelName[];
+      const driver = names.reduce((a, b) => (channels[b] > channels[a] ? b : a));
+      reason = { kind: 'storm', driver };
+    }
+
     return {
       state,
       visual: toVisualState(state),
+      reason,
       load,
       load_confidence: confidence,
       context_load: contextLoad,
@@ -424,7 +450,8 @@ export class Engine {
         transcript: this.#transcriptEnabled,
         otel: false,
       },
-      estimated: ['load', 'estimated_activity_rate', 'tool_calls_per_minute'],
+      estimated: ['load', 'estimated_activity_rate', 'tool_calls_per_minute',
+                  ...(reason?.kind === 'storm' ? ['reason'] : [])],
       last_activity_at:
         this.#lastActivityMs > 0 ? new Date(this.#lastActivityMs).toISOString() : null,
       updated_at: new Date(nowMs).toISOString(),

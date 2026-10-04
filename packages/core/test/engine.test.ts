@@ -323,3 +323,49 @@ test('net: measured quiet mid-turn is a tool running, not THINKING', () => {
   }
   assert.equal(s.state, 'TOOL_CALL');
 });
+
+test('reason: a failed tool says which class of tool, and nothing else', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('ERROR', 100, { sid: 'aaaaaaaa', scope: 'tool', tool: 'bash' }));
+  const snapshot = engine.snapshot(200);
+  assert.equal(snapshot.state, 'ERROR');
+  assert.deepEqual(snapshot.reason, { kind: 'tool_failed', tool: 'bash' });
+  assert.ok(!snapshot.estimated.includes('reason'), 'a failure is observed, not derived');
+});
+
+test('reason: an API failure carries its closed-enum code', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('ERROR', 100, { sid: 'aaaaaaaa', scope: 'api', code: 'rate_limit' }));
+  assert.deepEqual(engine.snapshot(200).reason, { kind: 'api_error', code: 'rate_limit' });
+});
+
+test('reason: a storm names its loudest load channel, as a derived field', () => {
+  const events = generateSession({ profile: 'heavy', durationMs: 10_000, seed: 7, startMs: 0 });
+  const engine = new Engine(0);
+  let cursor = 0;
+  let storms = 0;
+  for (let now = 0; now <= 10_000; now += 100) {
+    while (cursor < events.length && events[cursor]!.tsMs <= now) engine.ingest(events[cursor++]!);
+    const snapshot = engine.snapshot(now);
+    if (snapshot.state !== 'HIGH_LOAD') continue;
+    storms += 1;
+    assert.equal(snapshot.reason?.kind, 'storm');
+    const driver = (snapshot.reason as { driver: string }).driver;
+    const { work: _work, ...channels } = snapshot.debug.channels;
+    assert.equal(channels[driver], Math.max(...Object.values(channels)));
+    assert.ok(snapshot.estimated.includes('reason'));
+  }
+  assert.ok(storms > 0, 'the heavy profile must storm');
+});
+
+test('reason: null whenever the creature is not storming or in distress', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('FILE_READ', 100, { sid: 'aaaaaaaa', tool: 'read' }));
+  const snapshot = engine.snapshot(200);
+  assert.notEqual(snapshot.state, 'ERROR');
+  assert.notEqual(snapshot.state, 'HIGH_LOAD');
+  assert.equal(snapshot.reason, null);
+  assert.equal(new Engine(0).snapshot(1_000).reason, null);
+});
