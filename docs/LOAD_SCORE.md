@@ -151,7 +151,7 @@ estimated_activity_rate = events in the last 60 s        // measured, real, unit
 ## Published snapshot
 
 ```jsonc
-  "state": "CODING",
+{
   // HIGH_LOAD / ERROR only, closed values: {"kind":"storm","driver":"tool"},
   // {"kind":"tool_failed","tool":"bash"}, {"kind":"api_error","code":"rate_limit"}
   "reason": null,
