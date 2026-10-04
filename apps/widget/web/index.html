@@ -13,17 +13,32 @@
 -->
 <style>
   :root {
-    --bg: #11131a;
-    --skin: #7cc4ff;
+    --bg: #12141a;
+    --ink: #14161c;          /* eyes, mouth */
+    --skin-base: #8fb8ff;
     --skin-hot: #ff9f68;
     --skin-bad: #ff6b81;
-    --eye: #11131a;
+    /* One colour per kind of activity: the antenna bulb, the accessories, the pastilles. */
+    --c-sleep: #3a4152;
+    --c-think: #c9a2ff;
+    --c-read: #7cc4ff;
+    --c-act: #5fd4c4;        /* coding, tools */
+    --c-wait: #ffd166;
+    --c-done: #8bd17c;
+    --c-off: #6b7385;
   }
   html, body { margin: 0; height: 100%; background: var(--bg); color: #c9d1d9;
                font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   body { display: grid; place-items: center; gap: 14px; grid-auto-flow: row; }
   /* Transparent background in the real widget; the dev page paints one so it is visible. */
-  #pet { width: 160px; height: 160px; overflow: visible; }
+  #pet { width: 160px; height: 160px; overflow: visible; --skin: var(--skin-base); --bulb: var(--c-sleep); }
+  .skin { fill: var(--skin); transition: fill .8s ease; }
+  .skin-line { stroke: var(--skin); transition: stroke .8s ease; }
+  #bulb { fill: var(--bulb); transition: fill .4s ease; }
+  .ink { fill: var(--ink); }
+  .ink-line { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+  .glint { fill: #fff; }
+  .cheek { fill: #ff8fa3; opacity: .5; }
 
   /* Animation intensity is interpolated from load, never switched in steps:
      --dur and --amp are written by JS from the snapshot. */
@@ -31,49 +46,74 @@
     transform-origin: 50% 70%;
     animation: breathe var(--dur, 3.2s) ease-in-out infinite;
   }
-  #arms { animation: flail var(--dur, 3.2s) ease-in-out infinite; transform-origin: 50% 55%; }
-  #sparks { opacity: 0; transition: opacity .6s ease; }
-  #body { transition: fill .8s ease; }
-
   @keyframes breathe {
     0%, 100% { transform: scale(1, 1) translateY(0); }
     50%      { transform: scale(calc(1 + var(--amp, .03)), calc(1 - var(--amp, .03) * .6))
                           translateY(calc(var(--amp, .03) * -40px)); }
-  }
-  @keyframes flail {
-    0%, 100% { transform: rotate(calc(var(--amp, .03) * -60deg)); }
-    50%      { transform: rotate(calc(var(--amp, .03) * 60deg)); }
   }
   @keyframes shake {
     0%, 100% { transform: translate(0, 0) rotate(0); }
     25%      { transform: translate(-2px, 1px) rotate(-2deg); }
     75%      { transform: translate(2px, -1px) rotate(2deg); }
   }
+  @keyframes wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(10deg); } }
+  @keyframes ring { 0%, 100% { opacity: .15; } 50% { opacity: .7; } }
 
-  /* --- the four MVP visual states ----------------------------------------------- */
-  [data-visual="IDLE"] #body  { fill: var(--skin); }
-  [data-visual="IDLE"] .lid   { opacity: 1; }          /* eyes closed: sleeping */
+  /* --- one creature, ten looks ------------------------------------------------------
+     Every optional part is `.opt` (hidden) and lists the states that show it as
+     `on-<STATE>`. The antenna bulb carries the state's colour; the body only changes
+     colour when a human should look: storm (orange) and error (red). */
+  .opt { display: none; }
+  [data-state="IDLE"] .on-IDLE, [data-state="THINKING"] .on-THINKING,
+  [data-state="READING"] .on-READING, [data-state="CODING"] .on-CODING,
+  [data-state="TOOL_CALL"] .on-TOOL_CALL, [data-state="HIGH_LOAD"] .on-HIGH_LOAD,
+  [data-state="WAITING"] .on-WAITING, [data-state="DONE"] .on-DONE,
+  [data-state="ERROR"] .on-ERROR { display: inline; }
+
+  #pet[data-state="THINKING"]  { --bulb: var(--c-think); }
+  #pet[data-state="READING"]   { --bulb: var(--c-read); }
+  #pet[data-state="CODING"]    { --bulb: var(--c-act); }
+  #pet[data-state="TOOL_CALL"] { --bulb: var(--c-act); }
+  #pet[data-state="HIGH_LOAD"] { --bulb: var(--c-wait); --skin: var(--skin-hot); }
+  #pet[data-state="WAITING"]   { --bulb: var(--c-wait); }
+  #pet[data-state="DONE"]      { --bulb: var(--c-done); }
+  #pet[data-state="ERROR"]     { --bulb: #ffb3bf; --skin: var(--skin-bad); }
+
+  /* Eyes look where the work is: up and aside while thinking, down at the page while
+     reading. A tool running keeps them forward. */
+  #eyes { transition: transform .5s ease; }
+  [data-state="THINKING"] #eyes { transform: translate(3px, -4px); }
+  [data-state="READING"] #eyes  { transform: translate(0, 3px); }
+  [data-state="CODING"] #eyes   { transform: translate(0, 2px) scale(1, .75); transform-origin: 80px 88px; }
+
+  #thought circle:nth-child(2) { opacity: .75; }
+  #thought circle:nth-child(3) { opacity: .5; }
+  [data-state="THINKING"] #thought circle { animation: think 1.2s ease-in-out infinite; }
+  [data-state="THINKING"] #thought circle:nth-child(2) { animation-delay: .2s; }
+  [data-state="THINKING"] #thought circle:nth-child(3) { animation-delay: .4s; }
+  @keyframes think { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+  #arm-wait { transform-origin: 40px 94px; animation: wave 1.6s ease-in-out infinite; }
+  #bulb-ring { animation: ring 1.4s ease-in-out infinite; }
+
+  /* The visual tier (storm, distress) drives the shaking. */
+  #pet[data-visual="HIGH_LOAD"] { animation: shake .12s linear infinite; }
+  #pet[data-visual="ERROR"]     { animation: shake .4s linear infinite; }
+
   /* Asleep or disconnected = fully still. An always-visible window that animates while
      nothing happens costs ~8% CPU (measured): macOS recomposites the whole transparent
      window every frame. The idle budget is < 1% — see docs/RISKS.md #6. */
   [data-visual="IDLE"] *, [data-signal="none"] * { animation-play-state: paused !important; }
 
-  [data-visual="ACTIVE"] #body { fill: var(--skin); }
-  [data-visual="ACTIVE"] .lid  { opacity: 0; }         /* eyes open */
-
-  [data-visual="HIGH_LOAD"] #body   { fill: var(--skin-hot); }
-  [data-visual="HIGH_LOAD"] .lid    { opacity: 0; }
-  [data-visual="HIGH_LOAD"] #pet    { animation: shake .12s linear infinite; }
-  [data-visual="HIGH_LOAD"] #sparks { opacity: 1; }
-
-  [data-visual="ERROR"] #body { fill: var(--skin-bad); }
-  [data-visual="ERROR"] .lid  { opacity: 0; }
-  [data-visual="ERROR"] #pet  { animation: shake .4s linear infinite; }
-  [data-visual="ERROR"] #mouth { d: path("M 62 108 Q 80 94 98 108"); }  /* frown */
-
-  /* A disconnected creature must not look like a sleeping one. */
-  [data-signal="none"] #body { fill: #3a4050; }
-  [data-signal="none"] #pet  { opacity: .45; }
+  /* A disconnected creature must not look like a sleeping one: grey, dashed, unplugged. */
+  #pet[data-signal="none"] { --skin: #3a4050; --bulb: transparent; animation: none; }
+  [data-signal="none"] .opt { display: none !important; }
+  [data-signal="none"] .on-NOSIGNAL { display: inline !important; }
+  [data-signal="none"] .live-only { display: none; }
+  [data-signal="none"] #shell { fill: #262a35; stroke: var(--c-off); stroke-width: 2; stroke-dasharray: 6 5; }
+  [data-signal="none"] #antenna { stroke: #4a5163; }
+  [data-signal="none"] #bulb { stroke: var(--c-off); stroke-width: 2; }
+  [data-signal="none"] #eyes { transform: none; }
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
   html.widget, html.widget body { background: transparent; overflow: hidden; }
@@ -89,28 +129,16 @@
      attribute on the element actually clicked, not on its ancestors). */
   #drag { position: fixed; inset: 0; }
 
-  /* THINKING — measured: bytes are streaming into a `claude` process. Eyes up and to
-     the side, and a thought bubble whose dots light in turn. Distinct from a tool
-     running, which keeps the eyes forward. */
-  .eye { transition: transform .5s ease; }
-  #thought { opacity: 0; transition: opacity .4s ease; }
-  #thought circle { opacity: .25; }
-  [data-state="THINKING"] .eye { transform: translate(3px, -4px); }
-  [data-state="THINKING"] #thought { opacity: 1; }
-  [data-state="THINKING"] #thought circle { animation: think 1.2s ease-in-out infinite; }
-  [data-state="THINKING"] #thought circle:nth-child(2) { animation-delay: .2s; }
-  [data-state="THINKING"] #thought circle:nth-child(3) { animation-delay: .4s; }
-  @keyframes think { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
-
-  /* One pastille per live Claude Code session on this machine. The creature shows the
-     busiest session; the pastilles say how many there are and what each is doing. */
-  #sessions circle { stroke: var(--bg-ring, #11131a); stroke-width: 1.5;
-                     transition: fill .6s ease; }
-  #sessions .thinking { fill: #c9a2ff; animation: pulse .8s ease-in-out infinite; }
-  #sessions .working { fill: #7cc4ff; animation: pulse 1.6s ease-in-out infinite; }
-  #sessions .waiting { fill: #ffd166; }
-  #sessions .done    { fill: #8bd17c; }
-  #sessions .idle    { fill: #5a6273; }
+  /* One pastille per live Claude Code session on this machine, in a small tray under
+     the feet. The creature shows the busiest session; the pastilles say how many there
+     are and what each is doing. */
+  #tray { fill: rgba(20, 22, 28, .7); }
+  #dots circle { transition: fill .6s ease; }
+  #dots .thinking { fill: var(--c-think); animation: pulse .8s ease-in-out infinite; }
+  #dots .working { fill: var(--c-act); animation: pulse 1.6s ease-in-out infinite; }
+  #dots .waiting { fill: var(--c-wait); }
+  #dots .done    { fill: var(--c-done); }
+  #dots .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
   /* ---- chat panel ----------------------------------------------------------------
@@ -122,70 +150,159 @@
   html.chat #drag { inset: auto; }
   #chat[hidden] { display: none; }
   #bubble { position: fixed; left: 10px; right: 10px; display: flex; flex-direction: column;
-            background: rgba(24, 27, 36, .97); color: #e6edf3; border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, .09);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
-            font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+            background: rgba(27, 30, 39, .98); color: #eceff4; border-radius: 22px;
+            border: 1px solid #323745;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, .4);
+            font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   /* The tail: a rotated square on the edge facing the creature, at its centre (--tail-x). */
-  #bubble::after { content: ""; position: absolute; left: var(--tail-x, 40px); width: 14px; height: 14px;
-                   margin-left: -7px; background: rgb(24, 27, 36); transform: rotate(45deg);
-                   border: 1px solid rgba(255, 255, 255, .09); }
-  .above #bubble::after { bottom: -8px; border-top: 0; border-left: 0; }
-  .below #bubble::after { top: -8px; border-bottom: 0; border-right: 0; }
-  #bubble header { display: flex; align-items: center; padding: 8px 10px 2px 14px;
-                   font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #8b949e; }
+  #bubble::after { content: ""; position: absolute; left: var(--tail-x, 40px); width: 16px; height: 16px;
+                   margin-left: -8px; background: rgb(27, 30, 39); transform: rotate(45deg);
+                   border: 1px solid #323745; }
+  .above #bubble::after { bottom: -9px; border-top: 0; border-left: 0; }
+  .below #bubble::after { top: -9px; border-bottom: 0; border-right: 0; }
+  #bubble header { display: flex; align-items: center; gap: 10px; padding: 10px 8px 6px 16px;
+                   font-size: 14px; font-weight: 600; }
+  /* The dot mirrors the antenna: lavender while its own Claude is answering. */
+  #bubble header::before { content: ""; width: 10px; height: 10px; border-radius: 50%;
+                           background: #5a6273; transition: background .3s ease; }
+  #bubble.busy header::before { background: var(--c-think); }
   #who { flex: 1; }
-  #close { border: 0; background: none; color: #8b949e; font-size: 18px; line-height: 1;
-           cursor: pointer; padding: 2px 6px; border-radius: 6px; }
-  #close:hover { background: rgba(255, 255, 255, .08); color: #e6edf3; }
-  #messages { flex: 1; overflow-y: auto; padding: 4px 14px 6px; display: flex;
-              flex-direction: column; gap: 8px; }
-  #messages:empty::before { content: "Ask me anything — I'm Claude, with my tools."; color: #6e7681; }
-  .you { align-self: flex-end; max-width: 85%; background: #2f81f7; color: #fff;
-         padding: 6px 11px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; }
-  .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; }
-  .claude.typing { color: #8b949e; }
-  .claude pre { background: #0d1117; padding: 7px 9px; border-radius: 8px; overflow-x: auto;
+  #close { width: 32px; height: 32px; border: 0; background: none; color: #9aa3b5; font-size: 18px;
+           line-height: 1; cursor: pointer; border-radius: 10px; }
+  #close:hover { background: rgba(255, 255, 255, .08); color: #eceff4; }
+  #messages { flex: 1; overflow-y: auto; padding: 4px 16px 8px; display: flex;
+              flex-direction: column; gap: 10px; }
+  #messages:empty::before { content: "Ask me anything — I'm Claude, with my tools."; color: #8b93a7; }
+  .you { align-self: flex-end; max-width: 80%; background: var(--skin-base); color: var(--ink);
+         padding: 7px 13px; border-radius: 16px 16px 4px 16px; white-space: pre-wrap; }
+  .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; color: #dde2ea; }
+  .claude.typing { color: #8b93a7; }
+  .claude pre { background: #12141a; padding: 8px 10px; border-radius: 10px; overflow-x: auto;
                 font: 12px/1.4 ui-monospace, Menlo, monospace; margin: 4px 0; }
-  .claude code { font: 12px ui-monospace, Menlo, monospace; background: rgba(110, 118, 129, .25);
-                 padding: 1px 4px; border-radius: 4px; }
-  #status { min-height: 15px; padding: 0 14px; color: #8b949e; font-size: 11px; }
-  #ask { display: flex; align-items: flex-end; gap: 6px; margin: 6px 10px 10px;
-         padding: 4px 4px 4px 12px; border-radius: 20px; background: rgba(255, 255, 255, .06);
-         border: 1px solid rgba(255, 255, 255, .1); }
-  #ask:focus-within { border-color: rgba(124, 196, 255, .6); }
-  #input { flex: 1; resize: none; border: 0; outline: none; background: none; color: #e6edf3;
-           font: inherit; padding: 5px 0; max-height: 90px; }
-  #send { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%;
-          background: #2f81f7; color: #fff; font-size: 15px; cursor: pointer; }
-  #send.stop { background: #ff6b81; font-size: 11px; }
+  .claude code { font: 12.5px ui-monospace, Menlo, monospace; background: #2a2f3b;
+                 padding: 2px 6px; border-radius: 6px; }
+  #status { min-height: 16px; padding: 0 16px; color: #9aa3b5; font-size: 12px; }
+  #ask { display: flex; align-items: flex-end; gap: 8px; margin: 6px 10px 10px;
+         padding: 4px 4px 4px 14px; border-radius: 18px; background: #232733;
+         border: 1px solid #353b4a; }
+  #ask:focus-within { border-color: rgba(143, 184, 255, .7); }
+  #input { flex: 1; resize: none; border: 0; outline: none; background: none; color: #eceff4;
+           font: inherit; padding: 7px 0; max-height: 90px; }
+  #send { flex: none; width: 34px; height: 34px; border: 0; border-radius: 12px;
+          background: var(--skin-base); color: var(--ink); font-size: 16px; font-weight: 700;
+          cursor: pointer; }
+  #send.stop { background: var(--skin-bad); font-size: 11px; }
 
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
 
-<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-signal="none">
-  <g id="sparks" stroke="#ffd166" stroke-width="3" stroke-linecap="round">
-    <path d="M30 40 l-10 -10" /><path d="M130 40 l10 -10" />
-    <path d="M26 86 l-13 0" /><path d="M134 86 l13 0" />
+<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-state="IDLE" data-signal="none">
+  <ellipse cx="80" cy="144" rx="36" ry="5" fill="#000" opacity=".35" />
+
+  <!-- behind the body: arms, storm sparks -->
+  <path id="arm-wait" class="opt on-WAITING skin-line" d="M40 94 Q24 80 28 62"
+        fill="none" stroke-width="9" stroke-linecap="round" />
+  <path class="opt on-TOOL_CALL skin-line" d="M120 92 Q134 82 132 64"
+        fill="none" stroke-width="9" stroke-linecap="round" />
+  <g class="opt on-HIGH_LOAD" stroke="var(--c-wait)" stroke-width="3" stroke-linecap="round">
+    <path d="M28 48 l-10 -10" /><path d="M24 76 l-13 0" /><path d="M136 76 l13 0" /><path d="M30 112 l-10 6" />
   </g>
-  <g id="arms" stroke="#4a90c2" stroke-width="7" stroke-linecap="round">
-    <path d="M44 92 L18 112" /><path d="M116 92 L142 112" />
-  </g>
-  <g id="sessions"></g>
-  <g id="thought" fill="#c9d1d9">
-    <circle cx="116" cy="50" r="3.2" /><circle cx="127" cy="44" r="3.2" /><circle cx="138" cy="38" r="3.2" />
-  </g>
+
+  <!-- antenna: the bulb is the state's colour -->
+  <line id="antenna" class="skin-line" x1="80" y1="44" x2="80" y2="27" stroke-width="3" stroke-linecap="round" />
+  <circle id="bulb-ring" class="opt on-WAITING" cx="80" cy="22" r="11" fill="none" stroke="var(--c-wait)" stroke-width="2" />
+  <circle id="bulb" cx="80" cy="22" r="6" />
+
   <g id="body">
-    <ellipse cx="80" cy="92" rx="44" ry="40" />
-    <circle class="eye" cx="64" cy="84" r="6" fill="var(--eye)" />
-    <circle class="eye" cx="96" cy="84" r="6" fill="var(--eye)" />
-    <g class="lid" stroke="var(--eye)" stroke-width="3" stroke-linecap="round">
-      <path d="M57 84 h14" /><path d="M89 84 h14" />
+    <ellipse class="skin" cx="62" cy="137" rx="11" ry="6" />
+    <ellipse class="skin" cx="98" cy="137" rx="11" ry="6" />
+    <path id="shell" class="skin" d="M80 42 C113 42 126 68 126 96 C126 124 107 138 80 138 C53 138 34 124 34 96 C34 68 47 42 80 42 Z" />
+    <ellipse class="live-only" cx="80" cy="114" rx="24" ry="15" fill="#fff" opacity=".14" />
+    <g class="live-only">
+      <ellipse class="cheek" cx="54" cy="100" rx="6" ry="3.5" />
+      <ellipse class="cheek" cx="106" cy="100" rx="6" ry="3.5" />
     </g>
-    <path id="mouth" d="M66 106 Q80 114 94 106" fill="none"
-          stroke="var(--eye)" stroke-width="3" stroke-linecap="round" />
+
+    <!-- eyes -->
+    <g id="eyes" class="opt on-THINKING on-READING on-CODING on-TOOL_CALL on-WAITING on-ERROR">
+      <ellipse class="ink" cx="66" cy="88" rx="5.5" ry="7" />
+      <ellipse class="ink" cx="94" cy="88" rx="5.5" ry="7" />
+      <circle class="glint" cx="68" cy="85" r="1.8" />
+      <circle class="glint" cx="96" cy="85" r="1.8" />
+    </g>
+    <path class="opt on-CODING ink-line" d="M59 82 h14 M87 82 h14" />
+    <path class="opt on-ERROR ink-line" d="M57 76 l13 5 M103 76 l-13 5" />
+    <path class="opt on-IDLE ink-line" d="M59 89 Q66 94 73 89 M87 89 Q94 94 101 89" />
+    <path class="opt on-DONE ink-line" d="M59 91 Q66 82 73 91 M87 91 Q94 82 101 91" stroke-width="3.5" />
+    <g class="opt on-HIGH_LOAD">
+      <ellipse cx="66" cy="87" rx="8" ry="9" fill="#fff" />
+      <ellipse cx="94" cy="87" rx="8" ry="9" fill="#fff" />
+      <circle class="ink" cx="66" cy="88" r="3.6" />
+      <circle class="ink" cx="94" cy="88" r="3.6" />
+    </g>
+    <path class="opt on-NOSIGNAL" d="M60 89 h12 M88 89 h12" stroke="var(--c-off)" stroke-width="3" stroke-linecap="round" />
+
+    <!-- mouths -->
+    <path class="opt on-IDLE ink-line" d="M76 106 Q80 108 84 106" />
+    <circle class="opt on-THINKING ink" cx="83" cy="106" r="2.6" />
+    <path class="opt on-READING ink-line" d="M77 104 Q80 106 83 104" />
+    <g class="opt on-CODING">
+      <path class="ink-line" d="M73 105 Q80 109 87 105" />
+      <circle cx="85" cy="109" r="2.6" fill="#ff8fa3" />
+    </g>
+    <path class="opt on-TOOL_CALL ink" d="M72 103 Q80 112 88 103 Z" />
+    <path class="opt on-HIGH_LOAD ink-line" d="M69 108 q5.5 -5 11 0 q5.5 5 11 0" />
+    <ellipse class="opt on-WAITING ink" cx="80" cy="106" rx="3.5" ry="4" />
+    <path class="opt on-DONE ink" d="M70 102 Q80 115 90 102 Z" />
+    <path class="opt on-ERROR ink-line" d="M70 111 Q80 102 90 111" />
+    <path class="opt on-NOSIGNAL" d="M75 106 h10" stroke="var(--c-off)" stroke-width="3" stroke-linecap="round" />
+
+    <!-- held: the page being read -->
+    <g class="opt on-READING">
+      <path d="M50 112 L80 118 L110 112 L110 132 L80 138 L50 132 Z" fill="#f4f1ea" />
+      <line x1="80" y1="118" x2="80" y2="138" stroke="#c9c3b5" stroke-width="1.5" />
+      <path d="M57 120 l16 3 M57 126 l16 3 M87 123 l16 -3 M87 129 l16 -3" stroke="#b3ac9c" stroke-width="1.6" stroke-linecap="round" />
+    </g>
   </g>
+
+  <!-- floating accessories: what kind of work, at a glance -->
+  <g class="opt on-IDLE" fill="var(--c-off)" font-family="ui-monospace, Menlo, monospace" font-weight="700">
+    <text x="112" y="50" font-size="15">z</text><text x="124" y="36" font-size="11">z</text>
+  </g>
+  <g id="thought" class="opt on-THINKING" fill="var(--c-think)">
+    <circle cx="116" cy="50" r="3.5" /><circle cx="128" cy="39" r="4.5" /><circle cx="142" cy="26" r="6" />
+  </g>
+  <text class="opt on-CODING" x="104" y="48" fill="var(--c-act)" font-family="ui-monospace, Menlo, monospace"
+        font-size="18" font-weight="700">&lt;/&gt;</text>
+  <g class="opt on-TOOL_CALL" fill="none" stroke-linecap="round">
+    <g stroke="#d9dee7" stroke-width="5"><path d="M131 60 L142 38" /><path d="M137 30 a7 7 0 1 0 12 4" /></g>
+    <path d="M148 52 l6 2 M146 60 l6 4" stroke="var(--c-act)" stroke-width="2.5" />
+  </g>
+  <path class="opt on-HIGH_LOAD" d="M118 52 q7 10 0 15 q-7 -5 0 -15 Z" fill="#9fd8ff" />
+  <g class="opt on-WAITING" fill="var(--c-wait)">
+    <rect x="106" y="20" width="36" height="30" rx="10" />
+    <path d="M112 48 l-5 10 l13 -8 Z" />
+    <text x="124" y="42" text-anchor="middle" fill="var(--ink)" font-family="-apple-system, sans-serif"
+          font-size="20" font-weight="700">?</text>
+  </g>
+  <g class="opt on-DONE">
+    <circle cx="124" cy="42" r="13" fill="var(--c-done)" />
+    <path d="M118 42 l4 4.5 l8 -9" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <rect x="26" y="40" width="6" height="6" rx="1.5" fill="var(--c-wait)" transform="rotate(20 29 43)" />
+    <rect x="36" y="22" width="5" height="5" rx="1.5" fill="var(--c-think)" transform="rotate(-15 38 24)" />
+    <rect x="140" y="70" width="5" height="5" rx="1.5" fill="var(--c-read)" transform="rotate(30 142 72)" />
+  </g>
+  <g class="opt on-ERROR">
+    <circle cx="124" cy="42" r="13" fill="var(--ink)" stroke="var(--skin-bad)" stroke-width="3" />
+    <text x="124" y="49" text-anchor="middle" fill="var(--skin-bad)" font-family="-apple-system, sans-serif"
+          font-size="19" font-weight="700">!</text>
+  </g>
+  <g class="opt on-NOSIGNAL" fill="none" stroke="#8b93a7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M114 36 h16 v9 a8 8 0 0 1 -16 0 Z" /><path d="M118 29 v7 M126 29 v7" /><path d="M122 53 v8" />
+  </g>
+
+  <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
 </svg>
 
 <div id="hud" hidden></div>
@@ -207,27 +324,29 @@
 <script type="module">
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
-  const sessionsLayer = document.getElementById('sessions');
+  const dotsLayer = document.getElementById('dots');
+  const tray = document.getElementById('tray');
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
-  // Pastilles on an arc above the head, centred, 16° apart, in first-seen order so a
+  // Pastilles in a tray under the feet, centred, 12 px apart, in first-seen order so a
   // session keeps its place while others come and go.
   function renderSessions(sessions) {
     const shown = sessions.slice(0, 7);
-    while (sessionsLayer.childElementCount > shown.length) sessionsLayer.lastChild.remove();
-    while (sessionsLayer.childElementCount < shown.length) {
+    while (dotsLayer.childElementCount > shown.length) dotsLayer.lastChild.remove();
+    while (dotsLayer.childElementCount < shown.length) {
       const dot = document.createElementNS(SVG_NS, 'circle');
-      dot.setAttribute('r', '4.5');
-      sessionsLayer.appendChild(dot);
+      dot.setAttribute('r', '4');
+      dot.setAttribute('cy', '154');
+      dotsLayer.appendChild(dot);
     }
     shown.forEach((session, i) => {
-      const deg = -90 + (i - (shown.length - 1) / 2) * 16;
-      const rad = (deg * Math.PI) / 180;
-      const dot = sessionsLayer.children[i];
-      dot.setAttribute('cx', (80 + 60 * Math.cos(rad)).toFixed(1));
-      dot.setAttribute('cy', (92 + 60 * Math.sin(rad)).toFixed(1));
+      const dot = dotsLayer.children[i];
+      dot.setAttribute('cx', (80 + (i - (shown.length - 1) / 2) * 12).toFixed(1));
       dot.setAttribute('class', session.status);
     });
+    const w = shown.length ? shown.length * 12 + 4 : 0;
+    tray.setAttribute('width', String(w));
+    tray.setAttribute('x', String(80 - w / 2));
   }
 
   // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
@@ -381,6 +500,7 @@
   }
   function setBusy(value) {
     chatBusy = value;
+    document.getElementById('bubble').classList.toggle('busy', value);
     sendBtn.classList.toggle('stop', value);
     sendBtn.textContent = value ? '■' : '↑';
     sendBtn.title = value ? 'Stop' : 'Send (Enter)';
