@@ -6,9 +6,9 @@
  * real session drives.
  */
 
-import type { EngineConfig } from './config.ts';
+import type { ChannelName, EngineConfig } from './config.ts';
 import { DEFAULT_CONFIG } from './config.ts';
-import type { MeterSample, PetEvent } from './events.ts';
+import type { MeterSample, PetEvent, ToolClass } from './events.ts';
 import type { LoadState } from './load.ts';
 import { clamp, createLoadState, ingestLoad, pourLoad, tickLoad } from './load.ts';
 import type { PetState } from './state.ts';
@@ -24,9 +24,21 @@ export type SnapshotSources = {
   otel: boolean;
 };
 
+/**
+ * Why the creature storms or is in distress, for the thought bubble. Closed values only:
+ * a tool class, an API error enum, a load channel — never text from the session.
+ */
+export type PetReason =
+  | { kind: 'tool_failed'; tool: ToolClass | null }
+  | { kind: 'api_error'; code: string | null }
+  /** The load channel scoring highest right now. Derived. */
+  | { kind: 'storm'; driver: ChannelName };
+
 export type PetSnapshot = {
   state: PetState;
   visual: VisualState;
+  /** Set in HIGH_LOAD and ERROR only; null otherwise. */
+  reason: PetReason | null;
   /** 0-100. Derived. Always listed in `estimated`. */
   load: number;
   /** 0..1 — how much of the weight model was backed by a live signal. */
@@ -123,10 +135,12 @@ export class Engine {
   #sessions = new Map<string, SessionSeen>();
   /** Sessions blocked on a permission prompt. */
   #pending = new Set<string>();
-  #activeSubagents = 0;
+  /** Running subagents, per session: one session ending or idling must not reset another's. */
+  #subagents = new Map<string, number>();
 
   #lastActivityMs = 0;
   #lastErrorMs = 0;
+  #lastError: PetReason | null = null;
   #lastDoneMs = 0;
   #lastIdleSignalMs = 0;
   #lastMeterMs = 0;
@@ -215,6 +229,12 @@ export class Engine {
       case 'PROMPT_SUBMITTED':
         // A prompt typed mid-turn does not restart the turn.
         if (!this.#turns.has(sid)) this.#turns.set(sid, { startMs: event.tsMs, lastEventMs: event.tsMs });
+        // The human typing means no permission dialog is open, and Esc (no Stop, no
+        // SubagentStop) is the usual way to get back to the prompt: forget what this
+        // session had in flight. A subagent still running would be under-counted until
+        // it finishes; a phantom one would fake a storm forever.
+        this.#subagents.delete(sid);
+        this.#pending.delete(sid);
         this.#lastDoneMs = 0;
         this.#lastIdleSignalMs = 0;
         this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
@@ -232,22 +252,30 @@ export class Engine {
         this.#pending.delete(sid);
         break;
       case 'SUBAGENT_STARTED':
-        this.#activeSubagents += 1;
+        this.#subagents.set(sid, (this.#subagents.get(sid) ?? 0) + 1);
         break;
-      case 'SUBAGENT_FINISHED':
-        this.#activeSubagents = Math.max(0, this.#activeSubagents - 1);
+      case 'SUBAGENT_FINISHED': {
+        const left = (this.#subagents.get(sid) ?? 0) - 1;
+        if (left > 0) this.#subagents.set(sid, left);
+        else this.#subagents.delete(sid);
         break;
+      }
       case 'ERROR':
         this.#lastErrorMs = event.tsMs;
+        this.#lastError =
+          event.scope === 'api'
+            ? { kind: 'api_error', code: event.code ?? null }
+            : { kind: 'tool_failed', tool: event.tool ?? null };
         break;
+      // Claude Code waiting on a new prompt (idle_prompt, ~60 s) or gone: whatever this
+      // session had in flight is over, even when Esc meant no Stop ever came. The global
+      // sleep signal only fires once no other session is still in a turn.
       case 'MODEL_IDLE':
-        this.#lastIdleSignalMs = event.tsMs;
-        break;
       case 'SESSION_ENDED':
         this.#turns.delete(sid);
         this.#pending.delete(sid);
-        this.#activeSubagents = 0;
-        this.#lastIdleSignalMs = event.tsMs;
+        this.#subagents.delete(sid);
+        if (this.#turns.size === 0) this.#lastIdleSignalMs = event.tsMs;
         break;
       default:
         break;
@@ -342,6 +370,12 @@ export class Engine {
     return out;
   }
 
+  get #activeSubagents(): number {
+    let total = 0;
+    for (const n of this.#subagents.values()) total += n;
+    return total;
+  }
+
   get #turnActive(): boolean {
     return this.#turns.size > 0;
   }
@@ -373,7 +407,8 @@ export class Engine {
         nowMs,
         load,
         lastActivityMs: this.#lastActivityMs,
-        turnActive: this.#turnActive,
+        // Only trusted turns: one gone silent (Esc fires no Stop) must not keep it awake.
+        turnActive: this.#workingTurns(nowMs).length > 0,
         permissionPending: this.#pending.size > 0,
         lastErrorMs: this.#lastErrorMs,
         lastDoneMs: this.#lastDoneMs,
@@ -399,9 +434,18 @@ export class Engine {
         ? (meter.in_tokens ?? 0) + (meter.out_tokens ?? 0)
         : null;
 
+    let reason: PetReason | null = null;
+    if (state === 'ERROR') reason = this.#lastError;
+    if (state === 'HIGH_LOAD') {
+      const names = Object.keys(channels) as ChannelName[];
+      const driver = names.reduce((a, b) => (channels[b] > channels[a] ? b : a));
+      reason = { kind: 'storm', driver };
+    }
+
     return {
       state,
       visual: toVisualState(state),
+      reason,
       load,
       load_confidence: confidence,
       context_load: contextLoad,
@@ -424,7 +468,8 @@ export class Engine {
         transcript: this.#transcriptEnabled,
         otel: false,
       },
-      estimated: ['load', 'estimated_activity_rate', 'tool_calls_per_minute'],
+      estimated: ['load', 'estimated_activity_rate', 'tool_calls_per_minute',
+                  ...(reason?.kind === 'storm' ? ['reason'] : [])],
       last_activity_at:
         this.#lastActivityMs > 0 ? new Date(this.#lastActivityMs).toISOString() : null,
       updated_at: new Date(nowMs).toISOString(),
