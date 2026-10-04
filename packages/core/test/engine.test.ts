@@ -495,3 +495,68 @@ test('minStateMs: never delays waking up, an error, a question or a storm', () =
   assert.equal(engine.snapshot(800).state, 'ERROR');
 });
 
+
+// One creature per subagent: each shows what ITS agent does, from the agent_id on its
+// own tool events, grouped under its session.
+
+function agentSession() {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  engine.ingest(event('TOOL_STARTED', 100, { ...A, tool: 'task' }));
+  engine.ingest(event('SUBAGENT_STARTED', 200, { ...A, aid: 'ag1', agent: 'explore' }));
+  engine.ingest(event('SUBAGENT_STARTED', 300, { ...A, aid: 'ag2', agent: 'general-purpose' }));
+  return { engine, A };
+}
+
+test("agents: each subagent shows its own activity, not the session's", () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('FILE_READ', 400, { ...A, aid: 'ag1', tool: 'read' }));
+  engine.ingest(event('FILE_WRITE', 500, { ...A, aid: 'ag2', tool: 'edit' }));
+  const session = engine.snapshot(600).sessions[0]!;
+  assert.deepEqual(session.agents, [
+    { id: 'ag1', type: 'explore', state: 'READING' },
+    { id: 'ag2', type: 'general-purpose', state: 'CODING' },
+  ]);
+  assert.equal(session.state, 'TOOL_CALL', 'the main thread is still waiting on its Agent tool');
+});
+
+test("agents: a subagent's failure is its own, not its session's", () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('ERROR', 400, { ...A, aid: 'ag1', scope: 'tool', tool: 'bash' }));
+  const session = engine.snapshot(500).sessions[0]!;
+  assert.equal(session.agents[0]!.state, 'ERROR');
+  assert.notEqual(session.state, 'ERROR');
+});
+
+test('agents: a finished subagent shows DONE for a moment, then leaves', () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('SUBAGENT_FINISHED', 1_000, { ...A, aid: 'ag1', agent: 'explore' }));
+  const linger = Math.max(DEFAULT_CONFIG.doneStickyMs, DEFAULT_CONFIG.minStateMs);
+  assert.equal(engine.snapshot(1_100).sessions[0]!.agents[0]!.state, 'DONE');
+  assert.equal(engine.snapshot(1_100).active_subagents, 1, 'only ag2 still runs');
+  assert.deepEqual(engine.snapshot(1_000 + linger).sessions[0]!.agents.map((a) => a.id), ['ag2']);
+});
+
+test('agents: without an agent_id (older Claude Code) they are still counted and ended', () => {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  engine.ingest(event('SUBAGENT_STARTED', 100, { ...A, agent: 'explore' }));
+  engine.ingest(event('SUBAGENT_STARTED', 200, { ...A, agent: 'plan' }));
+  assert.equal(engine.snapshot(300).sessions[0]!.agents.length, 2);
+  engine.ingest(event('SUBAGENT_FINISHED', 400, { ...A, agent: 'plan' }));
+  const agents = engine.snapshot(500).sessions[0]!.agents;
+  assert.deepEqual(agents.map((a) => [a.type, a.state]), [['explore', 'THINKING'], ['plan', 'DONE']]);
+});
+
+test("agents: each session's creature resolves on its own events", () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 100, { sid: 'aaaaaaaa', tool: 'read' }));
+  engine.ingest(event('FILE_WRITE', 200, { sid: 'bbbbbbbb', tool: 'edit' }));
+  engine.ingest(event('PERMISSION_WAITING', 300, { sid: 'bbbbbbbb' }));
+  const states = Object.fromEntries(engine.snapshot(400).sessions.map((s) => [s.id, s.state]));
+  assert.deepEqual(states, { aaaaaaaa: 'READING', bbbbbbbb: 'WAITING' });
+});

@@ -221,3 +221,17 @@ test('statusline: a null context reports null, never 0%', () => {
   assert.equal(meter.context_used_pct, null);
   assert.equal(meter.in_tokens, null, 'absent must stay absent, not become 0');
 });
+
+test('agent_id reaches the spool only as a short opaque id of safe characters', () => {
+  const { spool } = run(HOOK, {
+    hook_event_name: 'PreToolUse',
+    session_id: '0123abcd',
+    tool_name: 'Read',
+    agent_id: `../${CANARY}/x;rm -rf`,
+    agent_type: 'Explore',
+    tool_input: { file_path: CANARY },
+  });
+  const line = JSON.parse(spool.trim());
+  assert.match(line.aid, /^[A-Za-z0-9_-]{1,12}$/);
+  assert.ok(!spool.includes('/') && !spool.includes(';'), 'no path or shell characters survive');
+});
