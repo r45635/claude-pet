@@ -97,8 +97,9 @@
   #bulb-ring { animation: ring 1.4s ease-in-out infinite; }
 
   /* The visual tier (storm, distress) drives the shaking. */
-  #pet[data-visual="HIGH_LOAD"] { animation: shake .12s linear infinite; }
-  #pet[data-visual="ERROR"]     { animation: shake .4s linear infinite; }
+  /* Only the creature shakes: the "why" bubble and the pastilles must stay readable. */
+  #pet[data-visual="HIGH_LOAD"] #shaker { animation: shake .12s linear infinite; }
+  #pet[data-visual="ERROR"] #shaker     { animation: shake .4s linear infinite; }
 
   /* Asleep or disconnected = fully still. An always-visible window that animates while
      nothing happens costs ~8% CPU (measured): macOS recomposites the whole transparent
@@ -106,7 +107,8 @@
   [data-visual="IDLE"] *, [data-signal="none"] * { animation-play-state: paused !important; }
 
   /* A disconnected creature must not look like a sleeping one: grey, dashed, unplugged. */
-  #pet[data-signal="none"] { --skin: #3a4050; --bulb: transparent; animation: none; }
+  #pet[data-signal="none"] { --skin: #3a4050; --bulb: transparent; }
+  #pet[data-signal="none"] #shaker { animation: none; }
   [data-signal="none"] .opt { display: none !important; }
   [data-signal="none"] .on-NOSIGNAL { display: inline !important; }
   [data-signal="none"] .live-only { display: none; }
@@ -205,6 +207,7 @@
 </style>
 
 <svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-state="IDLE" data-signal="none">
+  <g id="shaker">
   <ellipse cx="80" cy="144" rx="36" ry="5" fill="#000" opacity=".35" />
 
   <!-- behind the body: arms, storm sparks -->
@@ -307,6 +310,8 @@
   </g>
   <g class="opt on-NOSIGNAL" fill="none" stroke="#8b93a7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
     <path d="M114 36 h16 v9 a8 8 0 0 1 -16 0 Z" /><path d="M118 29 v7 M126 29 v7" /><path d="M122 53 v8" />
+  </g>
+
   </g>
 
   <g id="why" class="opt on-HIGH_LOAD on-ERROR">
