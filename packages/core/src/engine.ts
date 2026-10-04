@@ -84,13 +84,44 @@ type Turn = { startMs: number; lastEventMs: number };
 
 /** One Claude Code session, as the per-session pastilles show it. */
 export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle';
+/** One subagent, as its own small creature shows it. */
+export type AgentSummary = {
+  /** Claude Code's agent_id, cut to 12 safe characters: opaque. */
+  id: string;
+  /** Agent type, lowercased (`explore`, `general-purpose`, …); null if unknown. */
+  type: string | null;
+  /** What this agent is visibly doing, from its own tool events (agent_id). */
+  state: PetState;
+};
+
 export type SessionSummary = {
   /** First 8 chars of the session UUID: opaque, carries nothing about the user. */
   id: string;
   status: SessionStatus;
   /** ms since this session's current turn started; null outside a turn. */
   turn_ms: number | null;
+  /** This session's main thread, resolved on its own events only. */
+  state: PetState;
+  /** This session's load, 0-100. Derived. */
+  load: number;
+  /** Its subagents, running or just finished, in start order. */
+  agents: AgentSummary[];
 };
+
+/** A subagent, tracked from SubagentStart to SubagentStop by its agent_id. */
+type Agent = {
+  type: string | null;
+  dominant: 'read' | 'write' | 'tool' | null;
+  dominantAtMs: number;
+  errorMs: number;
+  waiting: boolean;
+  /** SubagentStop time; the agent stays on screen as DONE for a moment, then goes. */
+  doneMs: number;
+  hold: Hold;
+};
+
+/** What a creature shows and since when: `minStateMs` keeps it on screen. */
+type Hold = { shown: PetState; sinceMs: number };
 type SessionSeen = {
   firstMs: number;
   lastMs: number;
@@ -117,6 +148,11 @@ type Lane = {
   /** Hook events only, to break load ties: a status line refreshing on its own timer
    *  must not move the creature from one idle session to another. */
   activeMs: number;
+  /** Main-thread error and sleep signals, for this session's own creature. */
+  errorMs: number;
+  idleMs: number;
+  previous: PetState;
+  hold: Hold;
 };
 
 /** Load points another session needs above the shown one to take the creature over. */
@@ -156,15 +192,18 @@ export class Engine {
    */
   #turns = new Map<string, Turn>();
   #previous: PetState = 'IDLE';
-  /** What the creature shows, and since when: `minStateMs` holds it. */
-  #shown: PetState = 'IDLE';
-  #shownSinceMs = 0;
+  /** What the single (focus) creature shows, and since when: `minStateMs` holds it. */
+  #shownHold: Hold = { shown: 'IDLE', sinceMs: 0 };
   /** Every session seen, for the per-session list. Insertion order = display order. */
   #sessions = new Map<string, SessionSeen>();
   /** Sessions blocked on a permission prompt. */
   #pending = new Set<string>();
-  /** Running subagents, per session: one session ending or idling must not reset another's. */
-  #subagents = new Map<string, number>();
+  /**
+   * Subagents per session, by agent_id: one session ending or idling must not reset
+   * another's. Without an agent_id (older Claude Code) a placeholder id is made up.
+   */
+  #agents = new Map<string, Map<string, Agent>>();
+  #anonAgents = 0;
 
   #lastActivityMs = 0;
   #lastErrorMs = 0;
@@ -194,11 +233,31 @@ export class Engine {
     let lane = this.#lanes.get(sid);
     if (!lane) {
       lane = { load: createLoadState(atMs), recent: [], meter: null, dominant: null, dominantAtMs: 0, lastMs: atMs,
-               activeMs: 0 };
+               activeMs: 0, errorMs: 0, idleMs: 0, previous: 'IDLE', hold: { shown: 'IDLE', sinceMs: 0 } };
       this.#lanes.set(sid, lane);
     }
     lane.lastMs = Math.max(lane.lastMs, atMs);
     return lane;
+  }
+
+  #agent(sid: string, aid: string, type: string | null, atMs: number): Agent {
+    let agents = this.#agents.get(sid);
+    if (!agents) this.#agents.set(sid, (agents = new Map()));
+    let agent = agents.get(aid);
+    if (!agent) {
+      agent = { type, dominant: null, dominantAtMs: 0, errorMs: 0, waiting: false, doneMs: 0,
+                hold: { shown: 'IDLE', sinceMs: atMs } };
+      agents.set(aid, agent);
+    }
+    if (type && !agent.type) agent.type = type;
+    return agent;
+  }
+
+  /** Subagents of a session still running (finished ones linger on screen as DONE). */
+  #running(sid: string): number {
+    let n = 0;
+    for (const a of this.#agents.get(sid)?.values() ?? []) if (a.doneMs === 0) n += 1;
+    return n;
   }
 
   setConfig(config: EngineConfig): void {
@@ -254,20 +313,31 @@ export class Engine {
       lane.recent.push({ tsMs: event.tsMs, isToolCall: TOOL_TYPES.has(event.type) });
     }
 
-    if (READ_TYPES.has(event.type)) {
-      lane.dominant = 'read';
-      lane.dominantAtMs = event.tsMs;
-    } else if (WRITE_TYPES.has(event.type)) {
-      lane.dominant = 'write';
-      lane.dominantAtMs = event.tsMs;
-    } else if (TOOL_TYPES.has(event.type)) {
-      lane.dominant = 'tool';
-      lane.dominantAtMs = event.tsMs;
+    // What a creature is doing comes from its own events: a subagent's Read makes ITS
+    // creature read, not the session's main one (which is waiting on the Agent tool).
+    const actor = event.aid && event.type !== 'SUBAGENT_STARTED' && event.type !== 'SUBAGENT_FINISHED'
+      ? this.#agent(sid, event.aid, null, event.tsMs)
+      : lane;
+    const kind = READ_TYPES.has(event.type) ? 'read'
+      : WRITE_TYPES.has(event.type) ? 'write'
+      : TOOL_TYPES.has(event.type) ? 'tool' : null;
+    if (kind) {
+      actor.dominant = kind;
+      actor.dominantAtMs = event.tsMs;
+    }
+    if (actor !== lane) {
+      const agent = actor as Agent;
+      if (ACTIVITY_TYPES.has(event.type)) agent.waiting = false;
+      if (event.type === 'ERROR') agent.errorMs = event.tsMs;
+      if (event.type === 'PERMISSION_WAITING') agent.waiting = true;
+    } else if (event.type === 'ERROR') {
+      lane.errorMs = event.tsMs;
     }
 
     switch (event.type) {
       case 'SESSION_STARTED':
         this.#lastIdleSignalMs = 0;
+        lane.idleMs = 0;
         break;
       case 'PROMPT_SUBMITTED':
         // A prompt typed mid-turn does not restart the turn.
@@ -276,9 +346,10 @@ export class Engine {
         // SubagentStop) is the usual way to get back to the prompt: forget what this
         // session had in flight. A subagent still running would be under-counted until
         // it finishes; a phantom one would fake a storm forever.
-        this.#subagents.delete(sid);
+        this.#agents.delete(sid);
         this.#pending.delete(sid);
         this.#lastIdleSignalMs = 0;
+        lane.idleMs = 0;
         this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
         break;
       case 'TURN_COMPLETED':
@@ -293,12 +364,16 @@ export class Engine {
         this.#pending.delete(sid);
         break;
       case 'SUBAGENT_STARTED':
-        this.#subagents.set(sid, (this.#subagents.get(sid) ?? 0) + 1);
+        this.#agent(sid, event.aid ?? `~${++this.#anonAgents}`, event.agent ?? null, event.tsMs);
         break;
       case 'SUBAGENT_FINISHED': {
-        const left = (this.#subagents.get(sid) ?? 0) - 1;
-        if (left > 0) this.#subagents.set(sid, left);
-        else this.#subagents.delete(sid);
+        // By id; without one, the oldest running agent of that type, else the oldest.
+        const agents = [...(this.#agents.get(sid) ?? new Map<string, Agent>()).entries()]
+          .filter(([, a]) => a.doneMs === 0);
+        const match = agents.find(([id]) => id === event.aid)
+          ?? agents.find(([, a]) => event.agent !== undefined && a.type === event.agent)
+          ?? agents[0];
+        if (match) match[1].doneMs = event.tsMs;
         break;
       }
       case 'ERROR':
@@ -315,8 +390,9 @@ export class Engine {
       case 'SESSION_ENDED':
         this.#turns.delete(sid);
         this.#pending.delete(sid);
-        this.#subagents.delete(sid);
+        this.#agents.delete(sid);
         if (event.type === 'SESSION_ENDED') this.#lanes.delete(sid);
+        else lane.idleMs = event.tsMs;
         if (this.#turns.size === 0) this.#lastIdleSignalMs = event.tsMs;
         break;
       default:
@@ -389,7 +465,7 @@ export class Engine {
       : generating ? max : max * this.config.net.quietWorkFactor;
   }
 
-  #sessionList(nowMs: number): SessionSummary[] {
+  #sessionList(nowMs: number, loads: Map<string, number>): SessionSummary[] {
     const working = new Set(this.#workingTurns(nowMs).map(([, turn]) => turn));
     const out: SessionSummary[] = [];
     for (const [sid, seen] of this.#sessions) {
@@ -404,8 +480,72 @@ export class Engine {
         status = this.#generating(sid, nowMs) ? 'thinking' : 'working';
       }
       else if (seen.doneMs > 0 && nowMs - seen.doneMs < this.config.doneStickyMs) status = 'done';
-      out.push({ id: sid, status, turn_ms: turn ? Math.max(0, nowMs - turn.startMs) : null });
+      const load = loads.get(sid) ?? 0;
+      out.push({
+        id: sid,
+        status,
+        turn_ms: turn ? Math.max(0, nowMs - turn.startMs) : null,
+        state: this.#sessionState(sid, seen, load, turn !== undefined && working.has(turn), nowMs),
+        load,
+        agents: this.#agentList(sid, nowMs),
+      });
     }
+    return out;
+  }
+
+  /** One session's main creature: the same rules as the focus one, on its own events. */
+  #sessionState(sid: string, seen: SessionSeen, load: number, trusted: boolean, nowMs: number): PetState {
+    const lane = this.#lanes.get(sid);
+    if (!lane) return 'IDLE';
+    const generating = trusted ? this.#generating(sid, nowMs) : null;
+    const raw = resolveState(
+      {
+        nowMs,
+        load,
+        lastActivityMs: lane.activeMs,
+        turnActive: trusted,
+        permissionPending: this.#pending.has(sid),
+        lastErrorMs: lane.errorMs,
+        lastDoneMs: this.#turns.has(sid) ? 0 : seen.doneMs,
+        lastIdleSignalMs: lane.idleMs,
+        dominant: lane.dominant,
+        dominantAtMs: lane.dominantAtMs,
+        previous: lane.previous,
+        generating: generating === true,
+        measuredQuiet: generating === false,
+      },
+      this.config,
+    );
+    lane.previous = raw;
+    return this.#hold(lane.hold, raw, nowMs);
+  }
+
+  /** A session's subagents as their creatures show them; finished ones go after a moment. */
+  #agentList(sid: string, nowMs: number): AgentSummary[] {
+    const agents = this.#agents.get(sid);
+    if (!agents) return [];
+    const linger = Math.max(this.config.doneStickyMs, this.config.minStateMs);
+    const out: AgentSummary[] = [];
+    for (const [id, a] of agents) {
+      if (a.doneMs > 0 && nowMs - a.doneMs >= linger) {
+        agents.delete(id);
+        continue;
+      }
+      let raw: PetState;
+      if (a.doneMs > 0) raw = 'DONE';
+      else if (a.errorMs > 0 && nowMs - a.errorMs < this.config.errorStickyMs) raw = 'ERROR';
+      else if (a.waiting) raw = 'WAITING';
+      else if (a.dominant && nowMs - a.dominantAtMs < this.config.idleAfterMs) {
+        raw = a.dominant === 'read' ? 'READING' : a.dominant === 'write' ? 'CODING' : 'TOOL_CALL';
+      }
+      // Running, no tool in flight: its model is working (the main thread's rule 8).
+      else raw = 'THINKING';
+      // DONE is final: the hold must not keep a finished agent looking busy.
+      const state = raw === 'DONE' ? 'DONE' : this.#hold(a.hold, raw, nowMs);
+      if (state === 'DONE') a.hold = { shown: 'DONE', sinceMs: a.doneMs };
+      out.push({ id, type: a.type, state });
+    }
+    if (agents.size === 0) this.#agents.delete(sid);
     return out;
   }
 
@@ -422,15 +562,15 @@ export class Engine {
   }
 
   /** Keep the state on screen for at least `minStateMs`; see EngineConfig.minStateMs. */
-  #hold(next: PetState, nowMs: number): PetState {
-    const shown = this.#shown;
+  #hold(hold: Hold, next: PetState, nowMs: number): PetState {
+    const shown = hold.shown;
     // Waking up, distress, a question for the human and a storm show at once.
     const free = shown === 'IDLE' || shown === 'WAITING' ||
       next === 'ERROR' || next === 'WAITING' || next === 'HIGH_LOAD';
-    if (next !== shown && !free && nowMs - this.#shownSinceMs < this.config.minStateMs) return shown;
+    if (next !== shown && !free && nowMs - hold.sinceMs < this.config.minStateMs) return shown;
     if (next !== shown) {
-      this.#shown = next;
-      this.#shownSinceMs = nowMs;
+      hold.shown = next;
+      hold.sinceMs = nowMs;
     }
     return next;
   }
@@ -446,6 +586,7 @@ export class Engine {
     type Candidate = { sid: string; lane: Lane; work: number; tick: ReturnType<typeof tickLoad> };
     let focus: Candidate | null = null;
     let shown: Candidate | null = null;
+    const ticks = new Map<string, number>();
     for (const [sid, lane] of this.#lanes) {
       if (nowMs - lane.lastMs > this.config.sessionTtlMs && !this.#turns.has(sid)) {
         this.#lanes.delete(sid);
@@ -453,13 +594,14 @@ export class Engine {
       }
       while (lane.recent.length > 0 && lane.recent[0]!.tsMs < windowStart) lane.recent.shift();
       const work = this.#work(sid, nowMs);
-      const tick = tickLoad(lane.load, nowMs, this.#subagents.get(sid) ?? 0, this.config, work,
+      const tick = tickLoad(lane.load, nowMs, this.#running(sid), this.config, work,
                             this.#turns.has(sid));
       if (!focus || tick.load > focus.tick.load ||
           (tick.load === focus.tick.load && lane.activeMs > focus.lane.activeMs)) {
         focus = { sid, lane, work, tick };
       }
       if (sid === this.#focusSid) shown = { sid, lane, work, tick };
+      ticks.set(sid, tick.load);
     }
     // Hysteresis: two sessions of about the same load would otherwise swap the creature
     // between them on every event. The one shown keeps it until another is clearly busier.
@@ -499,7 +641,7 @@ export class Engine {
       this.config,
     );
     this.#previous = raw;
-    const state = this.#hold(raw, nowMs);
+    const state = this.#hold(this.#shownHold, raw, nowMs);
 
     const meter = lane?.meter ?? null;
     const contextLoad =
@@ -530,8 +672,8 @@ export class Engine {
       estimated_activity_rate: activityRate,
       tokens_per_minute: this.#tokensPerMinute,
       tool_calls_per_minute: toolRate,
-      active_subagents: focus ? (this.#subagents.get(focus.sid) ?? 0) : 0,
-      sessions: this.#sessionList(nowMs),
+      active_subagents: focus ? this.#running(focus.sid) : 0,
+      sessions: this.#sessionList(nowMs, ticks),
       focus: focus?.sid ?? null,
       session: {
         tokens,

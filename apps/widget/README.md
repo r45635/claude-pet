@@ -40,6 +40,15 @@ without the other: the widget reconnects on its own. To start both at login:
 | Advanced settings… | opens `~/.claude-pet/config.json` (yours to edit) next to `config.reference.jsonc` (read-only: every key, its effective value, what it does) |
 | Quit claude-pet | closes the widget until the next login (or `launchctl kickstart`) |
 
+## One creature per agent
+
+With one Claude Code session and no subagent, there is one creature, as before. Otherwise
+each session gets its own creature, and each of its subagents a smaller one at its feet,
+showing what *that* agent is doing (from the `agent_id` Claude Code puts on a subagent's
+tool events). Everything is scaled to fit the creature's usual square, never larger. Up
+to 4 subagents are drawn per session, then `+n`; one in error or waiting on you is
+always among those drawn. Hover a small one for its agent type.
+
 ## Settings (click the creature, then the gear)
 
 | Setting | Effect |
