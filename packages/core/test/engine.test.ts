@@ -409,3 +409,62 @@ test('one session ending does not put a working one to sleep', () => {
   assert.notEqual(snapshot.state, 'IDLE');
   assert.equal(snapshot.active_subagents, 1, "another session's subagents survive");
 });
+
+// Several Claude Code windows share one spool. The creature follows the busiest
+// session; nothing one session does may leak into how another one looks.
+
+test('sessions: two windows doing different things do not flicker the creature', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  // Reading in one, coding in the other, at the same calm pace: the creature must stick
+  // with one of them, not alternate READING / CODING with every event.
+  const shown: string[] = [];
+  for (let t = 1_000; t <= 40_000; t += 100) {
+    if (t % 4_000 === 0) engine.ingest(event('FILE_READ', t, { sid: 'aaaaaaaa', tool: 'read' }));
+    if (t % 4_000 === 2_000) engine.ingest(event('FILE_WRITE', t, { sid: 'bbbbbbbb', tool: 'edit' }));
+    const s = engine.snapshot(t);
+    if (s.state === 'READING' || s.state === 'CODING') shown.push(s.state);
+  }
+  const switches = shown.filter((s, i) => i > 0 && s !== shown[i - 1]).length;
+  assert.ok(switches <= 1, `the creature switched ${switches} times between the two windows`);
+});
+
+test('sessions: one window finishing does not change what another is shown doing', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 1_000, { sid: 'bbbbbbbb', tool: 'read' }));
+  assert.equal(engine.snapshot(1_500).state, 'READING');
+  engine.ingest(event('TURN_COMPLETED', 2_000, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(2_100).state, 'READING');
+});
+
+test("sessions: the context gauge is the shown session's, not the last status line's", () => {
+  const engine = new Engine(0);
+  for (let t = 0; t < 6_000; t += 1_000) {
+    const [sid, pct] = t % 2_000 ? ['bbbbbbbb', 12] : ['aaaaaaaa', 88];
+    engine.ingest(event('METER_SAMPLE', t, { sid, meter: { context_used_pct: pct } }));
+  }
+  engine.ingest(event('PROMPT_SUBMITTED', 6_000, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 6_100, { sid: 'bbbbbbbb', tool: 'read' }));
+  const snapshot = engine.snapshot(7_000);
+  assert.equal(snapshot.focus, 'bbbbbbbb');
+  assert.equal(snapshot.context_load, 12);
+});
+
+test('sessions: several calm windows do not add up to a storm', () => {
+  const peak = (sids: string[]) => {
+    const engine = new Engine(0);
+    for (const sid of sids) engine.ingest(event('PROMPT_SUBMITTED', 0, { sid }));
+    let max = 0;
+    for (let t = 0; t <= 30_000; t += 100) {
+      if (t % 8_000 === 0) for (const sid of sids) engine.ingest(event('FILE_READ', t, { sid, tool: 'read' }));
+      max = Math.max(max, engine.snapshot(t).load);
+    }
+    return max;
+  };
+  const one = peak(['aaaaaaaa']);
+  assert.ok(one < DEFAULT_CONFIG.highLoadThreshold, 'the pace must be calm for one session');
+  assert.equal(peak(['aaaaaaaa', 'bbbbbbbb', 'cccccccc']), one);
+});

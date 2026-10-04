@@ -53,6 +53,11 @@ export type PetSnapshot = {
   active_subagents: number;
   /** One entry per live Claude Code session on this machine; the creature shows the busiest. */
   sessions: SessionSummary[];
+  /**
+   * The session the creature is showing: the busiest by load. Load, rates, subagents,
+   * the context gauge and `session` all describe this one. null before any event.
+   */
+  focus: string | null;
   session: {
     tokens: number | null;
     cost_usd: number | null;
@@ -96,6 +101,27 @@ type SessionSeen = {
   net?: { bytesPerSec: number; atMs: number };
 };
 
+/**
+ * Everything that describes ONE session's activity. Several Claude Code windows share one
+ * spool; mixing their reads, writes, gauges and load made the creature flicker between
+ * them and storm on the sum of calm sessions. The creature shows the busiest lane.
+ */
+type Lane = {
+  load: LoadState;
+  recent: RecentEvent[];
+  meter: MeterSample | null;
+  dominant: 'read' | 'write' | 'tool' | null;
+  dominantAtMs: number;
+  /** Any event, status-line samples included: for expiry. */
+  lastMs: number;
+  /** Hook events only, to break load ties: a status line refreshing on its own timer
+   *  must not move the creature from one idle session to another. */
+  activeMs: number;
+};
+
+/** Load points another session needs above the shown one to take the creature over. */
+const FOCUS_MARGIN = 10;
+
 const READ_TYPES: ReadonlySet<string> = new Set(['FILE_READ', 'SEARCH']);
 const WRITE_TYPES: ReadonlySet<string> = new Set(['FILE_WRITE']);
 const TOOL_TYPES: ReadonlySet<string> = new Set(['TOOL_STARTED', 'BASH_STARTED']);
@@ -120,9 +146,8 @@ export class Engine {
   /** Swappable at runtime (menu → daemon → setConfig); state is kept across a swap. */
   config: EngineConfig;
 
-  #load: LoadState;
-  #recent: RecentEvent[] = [];
-  #meter: MeterSample | null = null;
+  /** One lane per session id, statusline-only sessions included. */
+  #lanes = new Map<string, Lane>();
 
   /**
    * Open turns, per session. Several Claude Code windows share one spool: a Stop in one
@@ -145,8 +170,6 @@ export class Engine {
   #lastIdleSignalMs = 0;
   #lastMeterMs = 0;
 
-  #dominant: 'read' | 'write' | 'tool' | null = null;
-  #dominantAtMs = 0;
 
   #netSeen = false;
   #eventsSeen = 0;
@@ -158,7 +181,22 @@ export class Engine {
 
   constructor(nowMs: number, config: EngineConfig = DEFAULT_CONFIG) {
     this.config = config;
-    this.#load = createLoadState(nowMs);
+    this.#bornMs = nowMs;
+  }
+
+  #bornMs: number;
+  /** The session the creature showed last tick. */
+  #focusSid: string | null = null;
+
+  #lane(sid: string, atMs: number): Lane {
+    let lane = this.#lanes.get(sid);
+    if (!lane) {
+      lane = { load: createLoadState(atMs), recent: [], meter: null, dominant: null, dominantAtMs: 0, lastMs: atMs,
+               activeMs: 0 };
+      this.#lanes.set(sid, lane);
+    }
+    lane.lastMs = Math.max(lane.lastMs, atMs);
+    return lane;
   }
 
   setConfig(config: EngineConfig): void {
@@ -185,16 +223,19 @@ export class Engine {
   ingest(event: PetEvent): void {
     this.#eventsSeen += 1;
 
+    const sid = event.sid ?? '';
+    const lane = this.#lane(sid, event.tsMs);
+
     if (event.type === 'METER_SAMPLE') {
-      this.#meter = event.meter ?? null;
+      lane.meter = event.meter ?? null;
       this.#lastMeterMs = event.tsMs;
       return; // A gauge never contributes to load.
     }
 
     this.#sawHookEvent = true;
-    ingestLoad(this.#load, event, this.config);
+    lane.activeMs = Math.max(lane.activeMs, event.tsMs);
+    ingestLoad(lane.load, event, this.config);
 
-    const sid = event.sid ?? '';
     const seen = this.#sessions.get(sid);
     if (seen) seen.lastMs = Math.max(seen.lastMs, event.tsMs);
     else this.#sessions.set(sid, { firstMs: event.tsMs, lastMs: event.tsMs, doneMs: 0 });
@@ -208,18 +249,18 @@ export class Engine {
 
     if (ACTIVITY_TYPES.has(event.type)) {
       this.#lastActivityMs = Math.max(this.#lastActivityMs, event.tsMs);
-      this.#recent.push({ tsMs: event.tsMs, isToolCall: TOOL_TYPES.has(event.type) });
+      lane.recent.push({ tsMs: event.tsMs, isToolCall: TOOL_TYPES.has(event.type) });
     }
 
     if (READ_TYPES.has(event.type)) {
-      this.#dominant = 'read';
-      this.#dominantAtMs = event.tsMs;
+      lane.dominant = 'read';
+      lane.dominantAtMs = event.tsMs;
     } else if (WRITE_TYPES.has(event.type)) {
-      this.#dominant = 'write';
-      this.#dominantAtMs = event.tsMs;
+      lane.dominant = 'write';
+      lane.dominantAtMs = event.tsMs;
     } else if (TOOL_TYPES.has(event.type)) {
-      this.#dominant = 'tool';
-      this.#dominantAtMs = event.tsMs;
+      lane.dominant = 'tool';
+      lane.dominantAtMs = event.tsMs;
     }
 
     switch (event.type) {
@@ -243,7 +284,7 @@ export class Engine {
         this.#turns.delete(sid);
         this.#pending.delete(sid);
         this.#lastDoneMs = event.tsMs;
-        this.#dominant = null;
+        lane.dominant = null;
         break;
       case 'PERMISSION_WAITING':
         this.#pending.add(sid);
@@ -275,6 +316,7 @@ export class Engine {
         this.#turns.delete(sid);
         this.#pending.delete(sid);
         this.#subagents.delete(sid);
+        if (event.type === 'SESSION_ENDED') this.#lanes.delete(sid);
         if (this.#turns.size === 0) this.#lastIdleSignalMs = event.tsMs;
         break;
       default:
@@ -304,7 +346,7 @@ export class Engine {
     seen.net = { bytesPerSec, atMs: nowMs };
     this.#netSeen = true;
     if (bytesPerSec >= this.config.net.activeBytesPerSec) {
-      pourLoad(this.#load, 'generation', (bytesIn / 1000) * this.config.net.perKb);
+      pourLoad(this.#lane(sid, nowMs).load, 'generation', (bytesIn / 1000) * this.config.net.perKb);
       seen.lastMs = Math.max(seen.lastMs, nowMs);
       const turn = this.#turns.get(sid);
       if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, nowMs);
@@ -337,17 +379,14 @@ export class Engine {
    * network: full while streaming, reduced while a tool runs. Unmeasured ones fall back
    * to a ramp on turn duration. See EngineConfig.work / EngineConfig.net.
    */
-  #work(nowMs: number): number {
+  #work(sid: string, nowMs: number): number {
     const { max, rampMs } = this.config.work;
-    let work = 0;
-    for (const [sid, turn] of this.#workingTurns(nowMs)) {
-      const generating = this.#generating(sid, nowMs);
-      const value = generating === null
-        ? max * (1 - Math.exp(-Math.max(0, nowMs - turn.startMs) / rampMs))
-        : generating ? max : max * this.config.net.quietWorkFactor;
-      work = Math.max(work, value);
-    }
-    return work;
+    const turn = this.#workingTurns(nowMs).find(([id]) => id === sid)?.[1];
+    if (!turn) return 0;
+    const generating = this.#generating(sid, nowMs);
+    return generating === null
+      ? max * (1 - Math.exp(-Math.max(0, nowMs - turn.startMs) / rampMs))
+      : generating ? max : max * this.config.net.quietWorkFactor;
   }
 
   #sessionList(nowMs: number): SessionSummary[] {
@@ -370,38 +409,50 @@ export class Engine {
     return out;
   }
 
-  get #activeSubagents(): number {
-    let total = 0;
-    for (const n of this.#subagents.values()) total += n;
-    return total;
-  }
-
   get #turnActive(): boolean {
     return this.#turns.size > 0;
   }
 
   snapshot(nowMs: number): PetSnapshot {
-    const work = this.#work(nowMs);
-    const { load, confidence, channels } = tickLoad(
-      this.#load,
-      nowMs,
-      this.#activeSubagents,
-      this.config,
-      work,
-      this.#turnActive,
-    );
-
+    // Tick every lane (they all decay), then follow the busiest: the creature shows one
+    // session, the pastilles show them all. Ties go to the most recently active.
     const windowStart = nowMs - this.config.rateWindowMs;
-    while (this.#recent.length > 0 && this.#recent[0].tsMs < windowStart) {
-      this.#recent.shift();
+    type Candidate = { sid: string; lane: Lane; work: number; tick: ReturnType<typeof tickLoad> };
+    let focus: Candidate | null = null;
+    let shown: Candidate | null = null;
+    for (const [sid, lane] of this.#lanes) {
+      if (nowMs - lane.lastMs > this.config.sessionTtlMs && !this.#turns.has(sid)) {
+        this.#lanes.delete(sid);
+        continue;
+      }
+      while (lane.recent.length > 0 && lane.recent[0]!.tsMs < windowStart) lane.recent.shift();
+      const work = this.#work(sid, nowMs);
+      const tick = tickLoad(lane.load, nowMs, this.#subagents.get(sid) ?? 0, this.config, work,
+                            this.#turns.has(sid));
+      if (!focus || tick.load > focus.tick.load ||
+          (tick.load === focus.tick.load && lane.activeMs > focus.lane.activeMs)) {
+        focus = { sid, lane, work, tick };
+      }
+      if (sid === this.#focusSid) shown = { sid, lane, work, tick };
     }
-    const perMinute = 60_000 / this.config.rateWindowMs;
-    const activityRate = Math.round(this.#recent.length * perMinute);
-    const toolRate = Math.round(
-      this.#recent.reduce((acc, e) => acc + (e.isToolCall ? 1 : 0), 0) * perMinute,
-    );
+    // Hysteresis: two sessions of about the same load would otherwise swap the creature
+    // between them on every event. The one shown keeps it until another is clearly busier.
+    if (shown && focus && focus.tick.load < shown.tick.load + FOCUS_MARGIN) focus = shown;
+    this.#focusSid = focus?.sid ?? null;
+    const idleLane = focus ? null : createLoadState(this.#bornMs);
+    const { load, confidence, channels } = focus?.tick ?? tickLoad(idleLane!, nowMs, 0, this.config);
+    const work = focus?.work ?? 0;
+    const lane = focus?.lane;
 
-    const measured = this.#workingTurns(nowMs).map(([sid]) => this.#generating(sid, nowMs));
+    const perMinute = 60_000 / this.config.rateWindowMs;
+    const recent = lane?.recent ?? [];
+    const activityRate = Math.round(recent.length * perMinute);
+    const toolRate = Math.round(recent.reduce((acc, e) => acc + (e.isToolCall ? 1 : 0), 0) * perMinute);
+
+    // Streaming is read on the focused session only: another window's stream must not
+    // turn this one's reading into thinking.
+    const focusTrusted = focus !== null && this.#workingTurns(nowMs).some(([id]) => id === focus!.sid);
+    const measured = focusTrusted ? this.#generating(focus!.sid, nowMs) : null;
     const state = resolveState(
       {
         nowMs,
@@ -413,17 +464,17 @@ export class Engine {
         lastErrorMs: this.#lastErrorMs,
         lastDoneMs: this.#lastDoneMs,
         lastIdleSignalMs: this.#lastIdleSignalMs,
-        dominant: this.#dominant,
-        dominantAtMs: this.#dominantAtMs,
+        dominant: lane?.dominant ?? null,
+        dominantAtMs: lane?.dominantAtMs ?? 0,
         previous: this.#previous,
-        generating: measured.includes(true),
-        measuredQuiet: measured.length > 0 && measured.every((g) => g === false),
+        generating: measured === true,
+        measuredQuiet: measured === false,
       },
       this.config,
     );
     this.#previous = state;
 
-    const meter = this.#meter;
+    const meter = lane?.meter ?? null;
     const contextLoad =
       meter && meter.context_used_pct !== null
         ? Math.round(clamp(meter.context_used_pct, 0, 100))
@@ -452,8 +503,9 @@ export class Engine {
       estimated_activity_rate: activityRate,
       tokens_per_minute: this.#tokensPerMinute,
       tool_calls_per_minute: toolRate,
-      active_subagents: this.#activeSubagents,
+      active_subagents: focus ? (this.#subagents.get(focus.sid) ?? 0) : 0,
       sessions: this.#sessionList(nowMs),
+      focus: focus?.sid ?? null,
       session: {
         tokens,
         cost_usd: meter?.cost_usd ?? null,
