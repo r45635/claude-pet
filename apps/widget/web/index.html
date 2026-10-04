@@ -131,18 +131,40 @@
   /* Several creatures: the session tray belongs to the single one. */
   #pet[data-multi="true"] #sessions { display: none; }
 
-  /* A family moves together. Each breathes at its own session's pace (--amp, --dur set
-     on the family); the kids hop after their parent one by one, like ducklings. A
-     family where everyone sleeps is fully still (the idle CPU budget, docs/RISKS.md #6). */
-  .critter.mini { transform-box: fill-box; transform-origin: 50% 100%;
-                  animation: hop var(--dur, 3.2s) ease-in-out infinite;
-                  animation-delay: calc(var(--i, 0) * .16s + .12s); }
-  .critter.mini[data-state="IDLE"] { animation: none; }
-  @keyframes hop {
-    0%, 55%, 100% { transform: translateY(0); }
-    25%           { transform: translateY(calc(-18px - var(--amp, .03) * 90px)); }
-  }
+  /* A family: the parent in the middle, its subagents wandering around it at random
+     (JS picks where; the slot's CSS transition walks them there). Walking = quick little
+     steps leaning the way they go; stopped = the gesture of what they do. --k is the
+     family's tempo (from its session's load). A family where everyone sleeps is fully
+     still: no timer, no animation (the idle CPU budget, docs/RISKS.md #6). */
+  .kid-slot { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
+  .critter.mini { transform-box: fill-box; transform-origin: 50% 100%; }
+  /* Same colour as the parent: a dark rim keeps a kid readable when it walks past it. */
+  .critter.mini .shell { stroke: rgba(20, 22, 28, .6); stroke-width: 7; paint-order: stroke; }
+  .critter.mini.walking.lean-l { animation: step-l calc(.3s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini.walking.lean-r { animation: step-r calc(.3s * var(--k, 1)) ease-in-out infinite; }
+  @keyframes step-l { 0%, 100% { transform: rotate(-9deg) translateY(0) scale(1.06, .94); }
+                      50% { transform: rotate(-9deg) translateY(-22px) scale(.96, 1.05); } }
+  @keyframes step-r { 0%, 100% { transform: rotate(9deg) translateY(0) scale(1.06, .94); }
+                      50% { transform: rotate(9deg) translateY(-22px) scale(.96, 1.05); } }
+  .critter.mini:not(.walking)[data-state="READING"] { animation: nod calc(2.4s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini:not(.walking)[data-state="CODING"] { animation: tap calc(.36s * var(--k, 1)) cubic-bezier(.3, 0, .3, 1) infinite; }
+  .critter.mini:not(.walking)[data-state="TOOL_CALL"] { animation: hammer calc(.8s * var(--k, 1)) cubic-bezier(.6, 0, .2, 1) infinite; }
+  .critter.mini:not(.walking)[data-state="THINKING"] { animation: float calc(2.6s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini:not(.walking)[data-state="DONE"] { animation: cheer calc(1.6s * var(--k, 1)) cubic-bezier(.3, 0, .25, 1) infinite; }
+  @keyframes nod { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(6deg) translateY(4px); }
+                   50% { transform: rotate(-3deg); } 80% { transform: rotate(5deg); } }
+  @keyframes tap { 0%, 100% { transform: translateY(0) scale(1.07, .93); } 45% { transform: translateY(-24px) scale(.96, 1.05); } }
+  @keyframes hammer { 0%, 100% { transform: rotate(0); } 40% { transform: rotate(-16deg); }
+                      55% { transform: rotate(9deg) scale(1.06, .94); } 70% { transform: rotate(0); } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-30px); } }
+  @keyframes cheer { 0%, 100% { transform: translateY(0) scale(1, 1); } 14% { transform: scale(1.18, .82); }
+                     40% { transform: translateY(-90px) scale(.9, 1.12); } 58% { transform: translateY(-90px) rotate(360deg); }
+                     74% { transform: translateY(0) scale(1.14, .86) rotate(360deg); } 86% { transform: rotate(360deg); } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
+  @media (prefers-reduced-motion: reduce) {
+    .critter.mini { animation: none !important; }
+    .kid-slot { transition-duration: 0s !important; }
+  }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
@@ -444,35 +466,31 @@
 
   // ---- creatures ---------------------------------------------------------------------
   // One creature, as long as there is one session and no subagent: exactly as before.
-  // Otherwise one group per session — its main thread full size, each subagent as a
-  // smaller creature at its feet — all scaled to fit the same square, never larger.
+  // Otherwise one family per session, each in its own square cell: the parent in the
+  // middle and its subagents wandering around it at random (see Motion — E · balade).
+  // All cells together fit the creature's usual square, never larger.
   const crittersLayer = document.getElementById('critters');
   const proto = document.getElementById('critter-proto');
-  const MINI = 0.55;        // a subagent's creature, relative to its session's
-  const MINI_STEP = 0.48;   // they overlap a little, like a family photo
-  const MAX_MINIS = 4;      // beyond, a "+n"
-  const GAP = 0.14;         // between sessions, in creature widths
+  const MAX_KIDS = 4;       // beyond, a "+n"
+  // A family cell, in the units of the mock-up (a family is wider than tall): parent box
+  // and where kids may put their feet. Above parentFeet a kid is behind the parent.
+  const CELL = { w: 180, h: 110, parent: { x: 55, y: 6, size: 70 }, kid: 36,
+                 area: { x0: 22, x1: 158, y0: 48, y1: 102 }, parentFeet: 72 };
+  const WANDERS = new Set(['READING', 'CODING', 'TOOL_CALL', 'THINKING', 'HIGH_LOAD']);
   let crittersKey = '';
   const critterEls = new Map();
+  const familyEls = new Map();
+  /** Where each family's parent stands, for the why bubble's tail. */
+  let familyAnchors = new Map();
+  /** Each kid's walk, kept across re-layouts: position in cell units, timer, mode. */
+  const walkers = new Map();
+  let cells = new Map();     // family id → { x, y, f } (cell origin and scale, viewBox units)
 
-  function groupWidth(g) {
-    const shown = Math.min(g.agents.length, MAX_MINIS);
-    return 1 + (shown ? (shown - 1) * MINI_STEP + MINI * 0.85 : 0) + (g.agents.length > MAX_MINIS ? 0.3 : 0);
-  }
-  // Try every number of rows and keep the one where creatures come out biggest.
-  function layoutGroups(groups) {
-    let best = { size: 0, rows: [] };
-    for (let r = 1; r <= groups.length; r += 1) {
-      const per = Math.ceil(groups.length / r);
-      const rows = [];
-      for (let i = 0; i < groups.length; i += per) rows.push(groups.slice(i, i + per));
-      const rowW = Math.max(...rows.map((row) => row.reduce((a, g) => a + groupWidth(g), 0) + GAP * (row.length - 1)));
-      const height = rows.length + GAP * (rows.length - 1);
-      const size = Math.min(160 / rowW, 160 / height, 160);
-      if (size > best.size) best = { size, rows, height };
-    }
-    return best;
-  }
+  // Only MAX_KIDS fit: an agent in trouble or waiting on you must never be the one hidden.
+  const URGENT = new Set(['ERROR', 'WAITING']);
+  const urgentFirst = (agents) => [...agents.filter((a) => URGENT.has(a.state)),
+                                   ...agents.filter((a) => !URGENT.has(a.state))];
+
   function critter(id, mini, title) {
     let el = critterEls.get(id);
     if (!el) {
@@ -488,18 +506,195 @@
     }
     return el;
   }
-  // A slot holds the position; the creature inside stays free to hop (a CSS transform on
-  // the same element would replace the position).
-  function placeCritter(family, el, x, y, size) {
+  function slotted(el, cls) {
     const slot = document.createElementNS(SVG_NS, 'g');
-    slot.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(size / 160).toFixed(4)})`);
+    if (cls) slot.setAttribute('class', cls);
     slot.appendChild(el);
-    family.appendChild(slot);
+    return slot;
   }
-  // Only MAX_MINIS fit: an agent in trouble or waiting on you must never be the one hidden.
-  const URGENT = new Set(['ERROR', 'WAITING']);
-  const urgentFirst = (agents) => [...agents.filter((a) => URGENT.has(a.state)),
-                                   ...agents.filter((a) => !URGENT.has(a.state))];
+
+  // ---- the walk -------------------------------------------------------------------------
+  function kidTransform(cell, w) {
+    const t = (w.y - CELL.area.y0) / (CELL.area.y1 - CELL.area.y0);
+    const depth = 0.72 + 0.38 * t;               // smaller behind, bigger in front
+    const s = cell.f * (CELL.kid / 160) * depth;
+    // Scale around the feet: the creature's feet are at (80, 146) in its own drawing.
+    return `translate(${(cell.x + w.x * cell.f).toFixed(2)}px, ${(cell.y + w.y * cell.f).toFixed(2)}px) ` +
+           `scale(${s.toFixed(4)}) translate(-80px, -146px)`;
+  }
+  function familyPace(famId) {
+    const load = familyLoads.get(famId) ?? 0;
+    return 0.6 + load / 100;                      // 0.6 calm … 1.6 storm
+  }
+  function stopWalker(w) {
+    clearTimeout(w.timer);
+    w.timer = 0;
+  }
+  function schedule(key, ms) {
+    const w = walkers.get(key);
+    if (!w) return;
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => walk(key), ms);
+  }
+  function walk(key) {
+    const w = walkers.get(key);
+    if (!w || !w.slot || !w.el) return;
+    const cell = cells.get(w.family);
+    if (!cell || !WANDERS.has(w.el.dataset.state) || !animating()) { w.timer = 0; return; }
+    const { x0, x1, y0, y1 } = CELL.area;
+    // Somewhere around the parent, but not standing right in front of its belly.
+    let nx;
+    let ny;
+    do {
+      nx = x0 + Math.random() * (x1 - x0);
+      ny = y0 + Math.random() * (y1 - y0);
+    } while (Math.abs(nx - 90) < 34 && ny >= CELL.parentFeet && ny < CELL.parentFeet + 22);
+    const pace = familyPace(w.family);
+    const dur = Math.max(0.5, Math.hypot(nx - w.x, ny - w.y) / (40 * pace));
+    // Behind or in front of the parent is decided at the start, while standing still: a
+    // DOM move during a transition would make it jump.
+    const front = ny >= CELL.parentFeet;
+    const layer = familyEls.get(w.family)?.querySelector(front ? '.front' : '.back');
+    if (layer && w.slot.parentNode !== layer) {
+      layer.appendChild(w.slot);
+      w.slot.getBoundingClientRect(); // settle the old position before the new one
+    }
+    w.el.classList.add('walking');
+    w.el.classList.toggle('lean-l', nx < w.x);
+    w.el.classList.toggle('lean-r', nx >= w.x);
+    w.x = nx;
+    w.y = ny;
+    w.slot.style.transitionDuration = `${dur.toFixed(2)}s`;
+    w.slot.style.transform = kidTransform(cell, w);
+    w.timer = setTimeout(() => {
+      w.el.classList.remove('walking');
+      schedule(key, (900 + Math.random() * 2400) / pace);
+    }, dur * 1000);
+  }
+  const familyLoads = new Map();
+  let animatingNow = false;
+  const animating = () => animatingNow;
+
+  // Try every number of columns; keep the one where families come out biggest.
+  function layoutCells(n) {
+    let best = { f: 0, cols: 1, rows: 1 };
+    for (let cols = 1; cols <= n; cols += 1) {
+      const rows = Math.ceil(n / cols);
+      const f = Math.min(160 / (cols * CELL.w), 160 / (rows * CELL.h));
+      if (f > best.f) best = { f, cols, rows };
+    }
+    return best;
+  }
+
+  function renderCritters(s, singleState) {
+    const sessions = s.sessions ?? [];
+    const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
+    pet.dataset.multi = String(multi);
+    const asleep = prefs.paused;
+    animatingNow = !asleep && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
+    const groups = multi
+      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
+                               agents: urgentFirst(x.agents ?? []) }))
+      : [{ id: '', state: singleState, load: s.load, agents: [] }];
+    for (const g of groups) familyLoads.set(g.id, g.load);
+
+    const key = JSON.stringify([multi, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    if (key !== crittersKey) {
+      crittersKey = key;
+      crittersLayer.replaceChildren();
+      familyEls.clear();
+      familyAnchors = new Map();
+      cells = new Map();
+      const keepCritters = new Set();
+      const keepWalkers = new Set();
+      if (!multi) {
+        const family = document.createElementNS(SVG_NS, 'g');
+        family.setAttribute('class', 'family');
+        familyEls.set('', family);
+        family.appendChild(slotted(critter('s:', false)));
+        crittersLayer.appendChild(family);
+        keepCritters.add('s:');
+        familyAnchors.set('', { x: 66, y: 26 });
+      } else {
+        const { f, cols, rows } = layoutCells(groups.length);
+        const x0 = (160 - f * CELL.w * cols) / 2;
+        const y0 = (160 - f * CELL.h * rows) / 2;
+        groups.forEach((g, i) => {
+          const cell = { x: x0 + (i % cols) * CELL.w * f, y: y0 + Math.floor(i / cols) * CELL.h * f, f };
+          cells.set(g.id, cell);
+          const family = document.createElementNS(SVG_NS, 'g');
+          family.setAttribute('class', 'family');
+          const back = document.createElementNS(SVG_NS, 'g');
+          back.setAttribute('class', 'back');
+          const front = document.createElementNS(SVG_NS, 'g');
+          front.setAttribute('class', 'front');
+          const P = CELL.parent;
+          const parent = slotted(critter(`s:${g.id}`, false));
+          parent.setAttribute('transform', `translate(${(cell.x + P.x * f).toFixed(2)} ${(cell.y + P.y * f).toFixed(2)}) scale(${(P.size * f / 160).toFixed(4)})`);
+          family.append(back, parent, front);
+          familyEls.set(g.id, family);
+          familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * 0.45) * f, y: cell.y + (P.y + 6) * f });
+          crittersLayer.appendChild(family);
+          keepCritters.add(`s:${g.id}`);
+
+          g.agents.slice(0, MAX_KIDS).forEach((a, k) => {
+            const id = `a:${g.id}:${a.id}`;
+            keepCritters.add(id);
+            keepWalkers.add(id);
+            const el = critter(id, true, `Subagent: ${a.type ?? 'unknown type'}`);
+            let w = walkers.get(id);
+            if (!w) {
+              // A newcomer starts at a random spot around its parent.
+              const { x0: ax, x1: bx, y0: ay, y1: by } = CELL.area;
+              w = { family: g.id, x: ax + Math.random() * (bx - ax), y: ay + Math.random() * (by - ay), timer: 0 };
+              walkers.set(id, w);
+            }
+            stopWalker(w);
+            el.classList.remove('walking');
+            w.el = el;
+            w.slot = slotted(el, 'kid-slot');
+            w.slot.style.transitionDuration = '0s';
+            w.slot.style.transform = kidTransform(cell, w);
+            (w.y >= CELL.parentFeet ? front : back).appendChild(w.slot);
+            schedule(id, 300 + k * 450);
+          });
+          if (g.agents.length > MAX_KIDS) {
+            const more = document.createElementNS(SVG_NS, 'text');
+            more.setAttribute('class', 'more');
+            more.setAttribute('transform', `translate(${(cell.x + 150 * f).toFixed(1)} ${(cell.y + 30 * f).toFixed(1)}) scale(${(f * 0.8).toFixed(4)})`);
+            more.textContent = `+${g.agents.length - MAX_KIDS}`;
+            front.appendChild(more);
+          }
+        });
+      }
+      for (const id of [...critterEls.keys()]) if (!keepCritters.has(id)) critterEls.delete(id);
+      for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); }
+    }
+
+    for (const g of groups) {
+      critterEls.get(`s:${g.id}`)?.setAttribute('data-state', g.state);
+      const states = [g.state];
+      for (const a of g.agents.slice(0, MAX_KIDS)) {
+        const state = asleep ? 'IDLE' : a.state;
+        states.push(state);
+        const id = `a:${g.id}:${a.id}`;
+        critterEls.get(id)?.setAttribute('data-state', state);
+        // A kid that starts doing something again sets off on its next walk.
+        const w = walkers.get(id);
+        if (w && !w.timer && WANDERS.has(state) && animatingNow) schedule(id, 400 + Math.random() * 800);
+      }
+      const family = familyEls.get(g.id);
+      if (!family) continue;
+      family.dataset.still = String(states.every((st) => st === 'IDLE'));
+      if (multi) {
+        // Each family at its own session's pace; the single creature keeps #pet's.
+        family.style.setProperty('--amp', (0.03 + 0.17 * g.load / 100).toFixed(3));
+        family.style.setProperty('--dur', ['3.2s', '1.4s', '0.7s'][familyTier(g.id, g.load)]);
+        family.style.setProperty('--k', (1.4 - 0.8 * g.load / 100).toFixed(2)); // calm 1.4 … storm 0.6
+      }
+    }
+  }
+
   // Speed per family, in the same three tiers as the single creature (changing --dur
   // mid-animation makes it jump, so it only moves between tiers, with hysteresis).
   const familyTiers = new Map();
@@ -510,77 +705,6 @@
     while (tier > 0 && load < up[tier] - 8) tier -= 1;
     familyTiers.set(id, tier);
     return tier;
-  }
-  const familyEls = new Map();
-  /** Where each family's parent stands, for the why bubble's tail. */
-  let familyAnchors = new Map();
-
-  function renderCritters(s, singleState) {
-    const sessions = s.sessions ?? [];
-    const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
-    pet.dataset.multi = String(multi);
-    const asleep = prefs.paused;
-    const groups = multi
-      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
-                               agents: urgentFirst(x.agents ?? []) }))
-      : [{ id: '', state: singleState, load: s.load, agents: [] }];
-    const key = JSON.stringify([multi, groups.map((g) => [g.id, g.agents.map((a) => a.id)])]);
-    if (key !== crittersKey) {
-      crittersKey = key;
-      crittersLayer.replaceChildren();
-      familyEls.clear();
-      familyAnchors = new Map();
-      const keep = new Set();
-      const { size, rows, height } = multi ? layoutGroups(groups) : { size: 160, rows: [groups], height: 1 };
-      let y = (160 - size * height) / 2;
-      for (const row of rows) {
-        const rowW = row.reduce((a, g) => a + groupWidth(g), 0) + GAP * (row.length - 1);
-        let x = (160 - size * rowW) / 2;
-        for (const g of row) {
-          const family = document.createElementNS(SVG_NS, 'g');
-          family.setAttribute('class', 'family');
-          familyEls.set(g.id, family);
-          familyAnchors.set(g.id, { x: x + size * 0.42, y: y + size * 0.12 });
-          crittersLayer.appendChild(family);
-          keep.add(`s:${g.id}`);
-          placeCritter(family, critter(`s:${g.id}`, false), x, y, size);
-          g.agents.slice(0, MAX_MINIS).forEach((a, i) => {
-            keep.add(`a:${g.id}:${a.id}`);
-            const el = critter(`a:${g.id}:${a.id}`, true, `Subagent: ${a.type ?? 'unknown type'}`);
-            el.style.setProperty('--i', String(i));
-            const mx = x + size * (1 - MINI * 0.15) + i * size * MINI_STEP;
-            placeCritter(family, el, mx - size * MINI * 0.5, y + size * (1 - MINI), size * MINI);
-          });
-          if (g.agents.length > MAX_MINIS) {
-            const more = document.createElementNS(SVG_NS, 'text');
-            more.setAttribute('class', 'more');
-            more.setAttribute('transform', `translate(${(x + size * (groupWidth(g) - 0.28)).toFixed(1)} ${(y + size * 0.95).toFixed(1)}) scale(${(size / 160).toFixed(4)})`);
-            more.textContent = `+${g.agents.length - MAX_MINIS}`;
-            family.appendChild(more);
-          }
-          x += size * (groupWidth(g) + GAP);
-        }
-        y += size * (1 + GAP);
-      }
-      for (const id of [...critterEls.keys()]) if (!keep.has(id)) critterEls.delete(id);
-    }
-    for (const g of groups) {
-      critterEls.get(`s:${g.id}`)?.setAttribute('data-state', g.state);
-      const states = [g.state];
-      for (const a of g.agents) {
-        const state = asleep ? 'IDLE' : a.state;
-        states.push(state);
-        critterEls.get(`a:${g.id}:${a.id}`)?.setAttribute('data-state', state);
-      }
-      const family = familyEls.get(g.id);
-      if (!family) continue;
-      family.dataset.still = String(states.every((st) => st === 'IDLE'));
-      if (multi) {
-        // Each family at its own session's pace; the single creature keeps #pet's.
-        family.style.setProperty('--amp', (0.03 + 0.17 * g.load / 100).toFixed(3));
-        family.style.setProperty('--dur', ['3.2s', '1.4s', '0.7s'][familyTier(g.id, g.load)]);
-      }
-    }
   }
 
   // What the bubble says. Only closed values reach here (a tool class, an API error enum,
