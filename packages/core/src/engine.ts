@@ -369,6 +369,9 @@ export class Engine {
     if (n > 0) {
       pourLoad(lane.load, 'generation', n * this.config.transcript.perToken);
       this.#tokens.push({ tsMs: signal.atMs, n });
+      // Trimmed here too: with no widget connected, no snapshot ever trims it.
+      const from = signal.atMs - this.config.rateWindowMs;
+      while (this.#tokens.length > 0 && this.#tokens[0]!.tsMs < from) this.#tokens.shift();
     }
     lane.lastMs = Math.max(lane.lastMs, signal.atMs);
     const seen = this.#sessions.get(signal.sid);

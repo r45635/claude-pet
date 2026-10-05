@@ -108,6 +108,8 @@ let timer: NodeJS.Timeout | undefined;
 let lastEventAt = 0;
 
 function tick(): void {
+  // The watcher can die on its own (directory removed): the engine must not keep trusting it.
+  if (prefs.readTranscripts && !transcript.running) runtime.engine.enableTranscriptSource(false);
   const read = runtime.pump() + transcript.drain((signal) => runtime.engine.ingestTranscript(signal));
   if (read > 0) {
     quietTicks = 0;

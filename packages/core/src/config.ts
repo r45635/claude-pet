@@ -166,7 +166,9 @@ export const DEFAULT_CONFIG: EngineConfig = {
   // perKb: ~1 KB/s of streaming reads as THINKING (load ~70); ~3 KB/s and up as a storm.
   net: { activeBytesPerSec: 250, freshMs: 6_500, perKb: 0.2, quietWorkFactor: 0.4 },
   // A streamed token is ~30 bytes on the wire (SSE framing included): 0.006/token ≈ net.perKb.
-  transcript: { perToken: 0.006, staleMs: 600_000 },
+  // staleMs = work.staleAfterMs: after Esc (no Stop; Claude Code writes an "interrupted"
+  // user line) the creature gives up on "working" no later than an unmeasured turn would.
+  transcript: { perToken: 0.006, staleMs: 120_000 },
 };
 
 /** Which reservoir an event type pours into. Absent => contributes no load. */
