@@ -65,8 +65,8 @@ What is and is not available from Claude Code — and how each claim was verifie
 
 - ✅ **documented:** tool/subagent/prompt/turn/error events (hooks), context-window %,
   token totals, cost, durations (status line)
-- ⚠️ **indirect:** real per-message token counts exist in the transcript JSONL, whose
-  schema is internal → opt-in, off by default
+- ⚠️ **indirect:** the transcript JSONL (internal schema) gives per-thread activity and
+  real token counts → opt-in, off by default (settings → *Read conversation files*)
 - ❌ **unavailable:** per-tool-call token counts in a hook payload, a streaming token-rate
   API, any explicit "thinking" signal
 - 🧮 **derived:** `load_score`, which is a visualization index and says so
@@ -112,7 +112,10 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
   `Bash failed`, `Rate limited`).
 - **Settings** (gear icon in the chat bubble): storm threshold and minimum time per state,
-  applied live. Size, temperament and the rest are in the right-click menu.
+  applied live, and *Read conversation files* (off by default): each subagent then shows
+  its own model working or its tool running, and token counts are real. Only line kinds
+  and token counts are kept, never text — see [`PRIVACY.md`](docs/PRIVACY.md). Size,
+  temperament and the rest are in the right-click menu.
 
 ## Talk to it
 
