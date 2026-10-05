@@ -24,7 +24,7 @@ Fully local. No cloud, no telemetry, no outbound network call anywhere in the co
 | 2 | state engine + tests | ✅ |
 | 3 | Tauri widget | ✅ transparent window, ~0.2% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
-| 5 | refinement | ⬜ |
+| 5 | refinement | 🟡 launch at login, sizes, one creature per session and subagent, settings, usage-limit gauge |
 
 ## Try it without Claude Code
 
