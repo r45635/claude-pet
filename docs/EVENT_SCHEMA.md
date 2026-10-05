@@ -60,6 +60,9 @@ contributes to `load_score`; it feeds `context_load` and the session statistics.
     "wall_ms": 450000,             // cost.total_duration_ms
     "lines_added": 156, "lines_removed": 23,
     "rate_5h_pct": 23.5,           // rate_limits.five_hour.used_percentage
+    "rate_5h_resets": 1791219600,  // rate_limits.five_hour.resets_at (unix seconds)
+    "rate_7d_pct": 47,             // rate_limits.seven_day.used_percentage
+    "rate_7d_resets": 1791450000,  // rate_limits.seven_day.resets_at
     "effort": "high",
     "model": "claude-opus-5"
   }

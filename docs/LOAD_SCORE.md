@@ -167,6 +167,9 @@ estimated_activity_rate = events in the last 60 s        // measured, real, unit
   // busier. load, rates, subagents, context_load and session all describe this one.
   "focus": "a1b2c3d4",
   "session": { "tokens": 115000, "cost_usd": 1.23, "lines_added": 156, "lines_removed": 23 },
+  // Account-wide plan limits, latest sample from any session. null when unknown or reset.
+  "rate_limits": { "five_hour": { "used_pct": 23, "resets_at": "2026-10-05T17:00:00.000Z" },
+                   "seven_day": { "used_pct": 47, "resets_at": "2026-10-08T09:00:00.000Z" } },
   "sources": { "hooks": true, "statusline": true, "transcript": false, "otel": false },
   "estimated": ["load", "estimated_activity_rate"],
   "last_activity_at": "2026-10-03T15:40:00-04:00",

@@ -594,3 +594,31 @@ test('agents: background agents survive prompts and idle_prompt, and keep the fa
   }
   assert.deepEqual([...new Set(counts)], [3], 'always exactly 3 agents');
 });
+
+test('rate limits: account-wide, latest sample wins, a keyless session changes nothing', () => {
+  const engine = new Engine(0);
+  assert.deepEqual(engine.snapshot(0).rate_limits, { five_hour: null, seven_day: null });
+
+  const reset5h = 3_600; // unix seconds
+  const reset7d = 86_400;
+  engine.ingest(event('METER_SAMPLE', 100, { sid: 'aaaaaaaa', meter: {
+    rate_5h_pct: 23.4, rate_5h_resets: reset5h, rate_7d_pct: 47, rate_7d_resets: reset7d } }));
+  engine.ingest(event('METER_SAMPLE', 200, { sid: 'bbbbbbbb', meter: { rate_5h_pct: 25, rate_5h_resets: reset5h } }));
+  // An API-key session has no rate_limits at all: it must not erase what is known.
+  engine.ingest(event('METER_SAMPLE', 300, { sid: 'cccccccc', meter: { context_used_pct: 10 } }));
+
+  assert.deepEqual(engine.snapshot(400).rate_limits, {
+    five_hour: { used_pct: 25, resets_at: new Date(reset5h * 1000).toISOString() },
+    seven_day: { used_pct: 47, resets_at: new Date(reset7d * 1000).toISOString() },
+  });
+});
+
+test('rate limits: past its reset a window is unknown, not its old percentage', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('METER_SAMPLE', 100, { meter: {
+    rate_5h_pct: 90, rate_5h_resets: 10, rate_7d_pct: 40, rate_7d_resets: 1_000 } }));
+  assert.equal(engine.snapshot(9_000).rate_limits.five_hour?.used_pct, 90);
+  const after = engine.snapshot(10_000).rate_limits;
+  assert.equal(after.five_hour, null);
+  assert.equal(after.seven_day?.used_pct, 40);
+});

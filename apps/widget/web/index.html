@@ -192,6 +192,15 @@
   #dots .done    { fill: var(--c-done); }
   #dots .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* The plan's usage limits, one line under the tray: used % and time to reset for each
+     window. Sized in px (see renderLimits) so it fits the window margin at every size. */
+  #limits rect { fill: rgba(20, 22, 28, .7); }
+  #limits text { fill: #c9cfdb; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+                 font-weight: 600; }
+  #limits .warn { fill: var(--c-wait); }
+  #limits .full { fill: var(--skin-bad); }
+  #limits .sep { fill: #5a6273; }
+  #pet:not([data-limits]) #limits { display: none; }
   /* With several sessions, a ring marks the one the creature is showing. */
   #dots .focus { stroke: #eceff4; stroke-width: 1.5; }
 
@@ -394,6 +403,7 @@
   </g>
 
   <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
+  <g id="limits"><rect /><text text-anchor="middle"></text></g>
 </svg>
 
 <div id="hud" hidden></div>
@@ -462,6 +472,57 @@
     const w = shown.length ? shown.length * 12 + 4 : 0;
     tray.setAttribute('width', String(w));
     tray.setAttribute('x', String(80 - w / 2));
+  }
+
+  // ---- usage limits --------------------------------------------------------------------
+  // "5h 23% 1h12 · 7d 47% 2d5h": each window's use and the time left before it resets.
+  // Account-wide, so it is the same whichever session the creature shows. A window the
+  // engine reports as null (API key, no sample yet, or just reset) is simply left out.
+  const limitsEl = document.getElementById('limits');
+  const limitsText = limitsEl.querySelector('text');
+  const limitsBox = limitsEl.querySelector('rect');
+  function untilReset(iso, nowMs) {
+    if (!iso) return '';
+    const min = Math.max(0, Math.round((Date.parse(iso) - nowMs) / 60_000));
+    if (min < 60) return `${min}m`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `${h}h${String(min % 60).padStart(2, '0')}`;
+    return `${Math.floor(h / 24)}d${h % 24}h`;
+  }
+  let limitsKey = '';
+  function renderLimits(rate, px) {
+    const now = Date.now();
+    const parts = [['5h', rate?.five_hour], ['7d', rate?.seven_day]]
+      .filter(([, w]) => w)
+      .map(([label, w]) => ({ label, pct: w.used_pct, left: untilReset(w.resets_at, now) }));
+    const key = JSON.stringify([parts, px]);
+    if (key === limitsKey) return;
+    limitsKey = key;
+    if (!parts.length) { delete pet.dataset.limits; return; }
+    pet.dataset.limits = '';
+    // viewBox units per screen px: keep a 9 px line in the 15 px margin under the square.
+    const k = 160 / px;
+    limitsText.setAttribute('font-size', (9 * k).toFixed(2));
+    limitsText.setAttribute('x', '80');
+    limitsText.setAttribute('y', (160 + 11 * k).toFixed(2));
+    limitsText.replaceChildren(...parts.flatMap((p, i) => {
+      const span = document.createElementNS(SVG_NS, 'tspan');
+      span.textContent = `${p.label} ${p.pct}%${p.left ? ` ${p.left}` : ''}`;
+      if (p.pct >= 90) span.setAttribute('class', 'full');
+      else if (p.pct >= 70) span.setAttribute('class', 'warn');
+      if (i === 0) return [span];
+      const sep = document.createElementNS(SVG_NS, 'tspan');
+      sep.setAttribute('class', 'sep');
+      sep.textContent = ' · ';
+      return [sep, span];
+    }));
+    const box = limitsText.getBBox();
+    const pad = 4 * k;
+    limitsBox.setAttribute('x', (box.x - pad).toFixed(2));
+    limitsBox.setAttribute('y', (box.y - k).toFixed(2));
+    limitsBox.setAttribute('width', (box.width + 2 * pad).toFixed(2));
+    limitsBox.setAttribute('height', (box.height + 2 * k).toFixed(2));
+    limitsBox.setAttribute('rx', ((box.height + 2 * k) / 2).toFixed(2));
   }
 
   // ---- creatures ---------------------------------------------------------------------
@@ -1077,6 +1138,7 @@
   function render(s) {
     lastFrame = s;
     applyPrefs(s.prefs);
+    renderLimits(s.rate_limits, petPx());
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
