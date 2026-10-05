@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/engine.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
+import { DEFAULT_CONFIG, mergeConfig } from '../src/config.ts';
 import { parsePetEvent, type PetEvent } from '../src/events.ts';
 import { generateSession } from '../../simulator/src/generate.ts';
 import type { ProfileName } from '../../simulator/src/profiles.ts';
@@ -170,20 +170,70 @@ test('a null context_used_pct stays null — unknown is not 0%', () => {
 
 test('tokens_per_minute stays null until the opt-in transcript source is enabled', () => {
   const engine = new Engine(0);
-  engine.setTokensPerMinute(14_500);
-  assert.equal(
-    engine.snapshot(100).tokens_per_minute,
-    null,
-    'a token rate must not appear while the source is off',
-  );
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  const line = { sid: 'aaaaaaaa', aid: null, atMs: 50, kind: 'text', outTokens: 240 } as const;
+  engine.ingestTranscript(line);
+  assert.equal(engine.snapshot(100).tokens_per_minute, null,
+    'a token rate must not appear while the source is off');
 
   engine.enableTranscriptSource(true);
-  engine.setTokensPerMinute(14_500);
-  assert.equal(engine.snapshot(200).tokens_per_minute, 14_500);
+  engine.ingestTranscript({ ...line, atMs: 150 });
+  assert.equal(engine.snapshot(200).tokens_per_minute, 240);
   assert.equal(engine.snapshot(200).sources.transcript, true);
+  assert.equal(engine.snapshot(61_000).tokens_per_minute, 0, 'outside the window it is gone');
 
   engine.enableTranscriptSource(false);
-  assert.equal(engine.snapshot(300).tokens_per_minute, null, 'disabling must clear it');
+  assert.equal(engine.snapshot(61_100).tokens_per_minute, null, 'disabling must clear it');
+});
+
+test('transcript: the main thread works between an input and its next tool_use', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  const sid = 'aaaaaaaa';
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid }));
+  engine.ingestTranscript({ sid, aid: null, atMs: 10, kind: 'input' });
+  engine.ingest(event('FILE_READ', 3_000, { sid, tool: 'read' }));
+  engine.ingestTranscript({ sid, aid: null, atMs: 3_000, kind: 'tool_use', outTokens: 80 });
+  // The tool runs: no longer "generating", so the read shows.
+  assert.equal(engine.snapshot(3_100).state, 'READING');
+  // The tool result is in: the model is working again, at once, whatever ran before.
+  engine.ingestTranscript({ sid, aid: null, atMs: 3_200, kind: 'input' });
+  assert.equal(engine.snapshot(5_500).state, 'THINKING');
+  // A covered session needs no network sampling.
+  assert.deepEqual(engine.sessionsToSample(), []);
+});
+
+test('transcript: each subagent shows its own model working or its tool running', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  const sid = 'aaaaaaaa';
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid }));
+  engine.ingest(event('SUBAGENT_STARTED', 10, { sid, aid: 'agentone0000', agent: 'explore' }));
+  engine.ingest(event('SUBAGENT_STARTED', 10, { sid, aid: 'agenttwo0000', agent: 'explore' }));
+  // One reads, then its result comes back: its model works. The other's tool is running.
+  engine.ingest(event('FILE_READ', 1_000, { sid, aid: 'agentone0000', tool: 'read' }));
+  engine.ingestTranscript({ sid, aid: 'agentone0000', atMs: 1_100, kind: 'input' });
+  engine.ingestTranscript({ sid, aid: 'agenttwo0000', atMs: 1_100, kind: 'tool_use' });
+  const agents = engine.snapshot(4_000).sessions[0]!.agents;
+  const state = (id: string) => agents.find((a) => a.id === id)?.state;
+  assert.equal(state('agentone0000'), 'THINKING', 'its tool is done: back to its model');
+  assert.equal(state('agenttwo0000'), 'TOOL_CALL', 'its file says a tool has it');
+});
+
+test('transcript: a line for an unknown or finished thread changes nothing', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  const sid = 'aaaaaaaa';
+  engine.ingestTranscript({ sid, aid: null, atMs: 10, kind: 'input' });
+  assert.deepEqual(engine.snapshot(20).sessions, [], 'no hooks yet: no session is invented');
+
+  engine.ingest(event('PROMPT_SUBMITTED', 100, { sid }));
+  engine.ingest(event('SUBAGENT_STARTED', 110, { sid, aid: 'agentone0000' }));
+  engine.ingest(event('SUBAGENT_FINISHED', 200, { sid, aid: 'agentone0000' }));
+  engine.ingestTranscript({ sid, aid: 'agentone0000', atMs: 300, kind: 'input' });
+  engine.ingestTranscript({ sid, aid: 'ghost0000000', atMs: 300, kind: 'input' });
+  const agents = engine.snapshot(400).sessions[0]!.agents;
+  assert.deepEqual(agents.map((a) => [a.id, a.state]), [['agentone0000', 'DONE']]);
 });
 
 test('activity rates are measured over the rolling window, then expire', () => {
@@ -621,4 +671,38 @@ test('rate limits: past its reset a window is unknown, not its old percentage', 
   const after = engine.snapshot(10_000).rate_limits;
   assert.equal(after.five_hour, null);
   assert.equal(after.seven_day?.used_pct, 40);
+});
+
+test('transcript: a tool that quick is still seen for minStateMs before THINKING', () => {
+  // No storm here: this is about which activity shows, not how loud it is.
+  const engine = new Engine(0, mergeConfig({ highLoadThreshold: 101, highLoadExitThreshold: 100 }));
+  engine.enableTranscriptSource(true);
+  const sid = 'aaaaaaaa';
+  const hold = DEFAULT_CONFIG.minStateMs;
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid }));
+  engine.ingest(event('SUBAGENT_STARTED', 10, { sid, aid: 'agentone0000' }));
+  engine.ingestTranscript({ sid, aid: null, atMs: 10, kind: 'input' });
+  // A Read lasting 5 ms, on the main thread and in the subagent.
+  engine.ingest(event('FILE_READ', 1_000, { sid, tool: 'read' }));
+  engine.ingest(event('FILE_READ', 1_000, { sid, aid: 'agentone0000', tool: 'read' }));
+  engine.ingestTranscript({ sid, aid: null, atMs: 1_000, kind: 'tool_use' });
+  engine.ingestTranscript({ sid, aid: null, atMs: 1_005, kind: 'input' });
+  engine.ingestTranscript({ sid, aid: 'agentone0000', atMs: 1_005, kind: 'input' });
+  const at = (t: number) => {
+    const s = engine.snapshot(t).sessions[0]!;
+    return [s.state, s.agents[0]!.state];
+  };
+  assert.deepEqual(at(1_100), ['READING', 'READING']);
+  assert.deepEqual(at(1_000 + hold + 100), ['THINKING', 'THINKING']);
+});
+
+test('transcript: token history stays bounded even with no snapshot taken', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  for (let t = 0; t < 10 * 60_000; t += 1_000) {
+    engine.ingestTranscript({ sid: 'aaaaaaaa', aid: null, atMs: t, kind: 'text', outTokens: 10 });
+  }
+  // Only the last rateWindowMs counts: 60 lines of 10 tokens.
+  assert.equal(engine.snapshot(10 * 60_000).tokens_per_minute, 600);
 });

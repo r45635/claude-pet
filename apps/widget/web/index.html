@@ -271,6 +271,7 @@
                    font-weight: 600; }
   .setting output { font-variant-numeric: tabular-nums; color: var(--skin-base); }
   .setting input[type=range] { width: 100%; accent-color: var(--skin-base); margin: 2px 0; }
+  .setting input[type=checkbox] { accent-color: var(--skin-base); margin: 0; width: 16px; height: 16px; }
   .setting p { margin: 0; font-size: 12px; line-height: 1.4; color: #9aa3b5; }
   .setting .reset { align-self: flex-start; border: 0; background: none; padding: 0;
                     color: #9aa3b5; font: inherit; font-size: 12px; text-decoration: underline;
@@ -434,6 +435,10 @@
         <input id="hold" type="range" min="0" max="10" step="0.5" />
         <p>Each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once.</p>
         <button class="reset" type="button" data-key="minStateSeconds">Back to default</button>
+      </div>
+      <div class="setting">
+        <label for="transcripts">Read conversation files <input id="transcripts" type="checkbox" /></label>
+        <p>More accurate: each subagent shows its own model working or its tool running, and real token counts. Only the kind of each line and token counts are kept; the text is never stored. Off by default.</p>
       </div>
       <div id="settings-status" role="status"></div>
     </div>
@@ -1089,7 +1094,13 @@
   // them while it is in the user's hand (WebKit does not focus a range on click, so focus
   // is no guide), nor while a new value is on its way: frames built before the daemon
   // applied it still carry the old one. `pending` holds until a frame agrees, or 3 s.
+  const transcriptsBox = document.getElementById('transcripts');
+  let transcriptsPending;
   function renderSettings(p) {
+    if (typeof p.readTranscripts === 'boolean') {
+      if (transcriptsPending === p.readTranscripts) transcriptsPending = undefined;
+      if (transcriptsPending === undefined) transcriptsBox.checked = p.readTranscripts;
+    }
     for (const s of Object.values(SETTINGS)) {
       const value = p[s.key];
       if (typeof value !== 'number') continue;
@@ -1122,6 +1133,17 @@
       s.input.blur();
     });
   }
+  transcriptsBox.addEventListener('change', async () => {
+    transcriptsPending = transcriptsBox.checked;
+    settingsStatus.textContent = 'Saving…';
+    try {
+      applyPrefs(await invoke('update_prefs', { patch: { readTranscripts: transcriptsBox.checked } }));
+      settingsStatus.textContent = 'Saved';
+    } catch (err) {
+      transcriptsPending = undefined;
+      settingsStatus.textContent = `Not saved: ${err}`;
+    }
+  });
   for (const button of settingsEl.querySelectorAll('.reset')) {
     const s = Object.values(SETTINGS).find((x) => x.key === button.dataset.key);
     button.addEventListener('click', () => savePref(s, null));
