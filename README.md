@@ -158,7 +158,7 @@ Measured on an Apple Silicon Mac mini (2026-10-05), CPU as a share of one core:
 
 | | widget | daemon |
 |---|---|---|
-| at rest (animations stopped) | ~0.5 % (~0.2 % when nothing at all happens) | < 1 % |
+| at rest (animations stopped) | ~0.5 % (~0.2 % with nothing happening at all, per `docs/RISKS.md` §6) | < 1 % |
 | while Claude works (60 s simulated `moderate` session) | **~3.5 %** (up to ~4.5 % with several subagents walking around) | < 1 % |
 | memory | ~85 MB | ~90-100 MB |
 
