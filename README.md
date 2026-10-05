@@ -152,6 +152,25 @@ the menu keeps it closed until the next login). Logs are in `~/.claude-pet/logs/
 `git pull`, rebuild the widget if `apps/widget` changed (`cd apps/widget && cargo tauri
 build --no-bundle`), then `restart`.
 
+## What it costs
+
+Measured on an Apple Silicon Mac mini (2026-10-05), CPU as a share of one core:
+
+| | widget | daemon |
+|---|---|---|
+| at rest (animations stopped) | ~0.5 % (~0.2 % with nothing happening at all, per `docs/RISKS.md` §6) | < 1 % |
+| while Claude works (60 s simulated `moderate` session) | **~3.5 %** (up to ~4.5 % with several subagents walking around) | < 1 % |
+| memory | ~85 MB | ~90-100 MB |
+
+The widget's cost while active is the animation itself: macOS recomposites the
+transparent window on every frame. It has been there from the first version (4.2 % on the
+same benchmark before the per-agent creatures; 3.4 % now). The daemon spawns `nettop`
+every ~5 s during a turn (~1 % CPU) unless *Read conversation files* is on, which brings
+it to ~0.6 %.
+
+Lowering the active cost would mean lighter animations (fewer creatures moving at once,
+fewer steps, fewer full-window effects); not done yet.
+
 ## License
 
 MIT
