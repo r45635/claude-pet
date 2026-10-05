@@ -195,7 +195,8 @@ test('statusline: prints a line AND emits a meter sample, leaking nothing', () =
     context_window: { total_input_tokens: 15500, total_output_tokens: 1200,
                       context_window_size: 200000, used_percentage: 8 },
     effort: { level: 'high' },
-    rate_limits: { five_hour: { used_percentage: 23.5 } },
+    rate_limits: { five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
+                   seven_day: { used_percentage: 47, resets_at: 1738900000 } },
   });
 
   assert.ok(stdout.length > 0, 'printing nothing would blank the user status bar');
@@ -208,6 +209,10 @@ test('statusline: prints a line AND emits a meter sample, leaking nothing', () =
   assert.equal(meter.context_used_pct, 8);
   assert.equal(meter.cost_usd, 1.2345);
   assert.equal(meter.model, 'claude-opus-5');
+  assert.equal(meter.rate_5h_pct, 23.5);
+  assert.equal(meter.rate_5h_resets, 1738425600);
+  assert.equal(meter.rate_7d_pct, 47);
+  assert.equal(meter.rate_7d_resets, 1738900000);
 });
 
 test('statusline: a null context reports null, never 0%', () => {

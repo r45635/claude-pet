@@ -65,6 +65,11 @@ export type MeterSample = {
   lines_added: number | null;
   lines_removed: number | null;
   rate_5h_pct: number | null;
+  /** When the 5-hour window resets, unix seconds. */
+  rate_5h_resets: number | null;
+  rate_7d_pct: number | null;
+  /** When the 7-day window resets, unix seconds. */
+  rate_7d_resets: number | null;
   effort: string | null;
   model: string | null;
 };
@@ -108,6 +113,9 @@ const METER_KEYS: (keyof MeterSample)[] = [
   'lines_added',
   'lines_removed',
   'rate_5h_pct',
+  'rate_5h_resets',
+  'rate_7d_pct',
+  'rate_7d_resets',
   'effort',
   'model',
 ];
