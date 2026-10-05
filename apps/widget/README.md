@@ -27,7 +27,8 @@ cd apps/widget && cargo tauri build --no-bundle  # once
 
 Daemon and widget share a persistent token (`~/.claude-pet/token`), so either can restart
 without the other: the widget reconnects on its own. To start both at login:
-`npm run autostart -- install`.
+`npm run autostart -- install`. After a pull or a rebuild, `npm run autostart -- restart`
+has launchd restart both on the new code (`status` and `uninstall` also exist).
 
 ## Right-click menu
 
