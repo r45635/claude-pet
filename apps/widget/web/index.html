@@ -128,8 +128,9 @@
   #pet:not([data-why]) #why, #pet[data-why=""] #why { display: none !important; }
   /* A subagent's creature: drawn smaller; its type is in a tooltip. */
   .critter.mini .cheek { display: none; }
-  /* Several creatures: the session tray belongs to the single one. */
-  #pet[data-multi="true"] #sessions { display: none; }
+  /* Several creatures: the pastilles belong to the single one; the tray stays for the
+     usage gauge, in a strip the families leave free (see renderCritters). */
+  #pet[data-multi="true"] #dots { display: none; }
 
   /* A family: the parent in the middle, its subagents wandering around it at random
      (JS picks where; the slot's CSS transition walks them there). Walking = quick little
@@ -173,7 +174,7 @@
   html.widget body { gap: 0; }
 
   /* Menu preferences. Paused = asleep on purpose: everything still, no pastilles. */
-  [data-show-sessions="false"] #sessions,
+  [data-show-sessions="false"] #dots,
   [data-paused="true"] #sessions, [data-paused="true"] .thought { display: none; }
   [data-paused="true"] * { animation-play-state: paused !important; }
 
@@ -192,6 +193,14 @@
   #dots .done    { fill: var(--c-done); }
   #dots .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* The session's usage limit, in the same tray: a small bar (how much of the 5-hour
+     window is used) and the time left before it resets. */
+  #gauge .track { fill: var(--c-sleep); }
+  #gauge .fill { fill: var(--c-done); transition: width .6s ease, fill .6s ease; }
+  #gauge.warn .fill { fill: var(--c-wait); }
+  #gauge.full .fill { fill: var(--skin-bad); }
+  #gauge text { fill: #c9cfdb; font: 700 8px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  #pet:not([data-gauge]) #gauge { display: none; }
   /* With several sessions, a ring marks the one the creature is showing. */
   #dots .focus { stroke: #eceff4; stroke-width: 1.5; }
 
@@ -393,7 +402,9 @@
     <text x="80" y="2" text-anchor="middle" lengthAdjust="spacingAndGlyphs"></text>
   </g>
 
-  <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
+  <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g>
+    <g id="gauge"><title></title><rect class="track" y="152" width="22" height="4" rx="2" />
+      <rect class="fill" y="152" height="4" rx="2" /><text y="157"></text></g></g>
 </svg>
 
 <div id="hud" hidden></div>
@@ -453,15 +464,67 @@
       dot.setAttribute('cy', '154');
       dotsLayer.appendChild(dot);
     }
-    shown.forEach((session, i) => {
+    traySessions = prefs.showSessions === false || pet.dataset.multi === 'true' ? [] : shown;
+    trayFocus = focus;
+    layoutTray();
+  }
+  let traySessions = [];
+  let trayFocus = null;
+
+  // Dots, then the gauge, centred together in one tray.
+  function layoutTray() {
+    const dotsW = traySessions.length * 12;
+    const gaugeW = gaugeShown ? 26 + gaugeText.getComputedTextLength() : 0;
+    const inner = dotsW + (dotsW && gaugeW ? 4 : 0) + gaugeW;
+    const w = inner ? inner + 6 : 0;
+    const left = 80 - inner / 2;
+    traySessions.forEach((session, i) => {
       const dot = dotsLayer.children[i];
-      dot.setAttribute('cx', (80 + (i - (shown.length - 1) / 2) * 12).toFixed(1));
-      const focused = shown.length > 1 && session.id === focus;
+      dot.setAttribute('cx', (left + 6 + i * 12).toFixed(1));
+      const focused = traySessions.length > 1 && session.id === trayFocus;
       dot.setAttribute('class', focused ? `${session.status} focus` : session.status);
     });
-    const w = shown.length ? shown.length * 12 + 4 : 0;
+    const gx = left + dotsW + (dotsW ? 4 : 0);
+    gauge.querySelector('.track').setAttribute('x', gx.toFixed(1));
+    gauge.querySelector('.fill').setAttribute('x', gx.toFixed(1));
+    gaugeText.setAttribute('x', (gx + 26).toFixed(1));
     tray.setAttribute('width', String(w));
     tray.setAttribute('x', String(80 - w / 2));
+  }
+
+  // ---- usage limit --------------------------------------------------------------------
+  // The current 5-hour window only: a bar for how much is used, the time left before it
+  // resets. Account-wide, so the same whichever session the creature shows; hidden when
+  // the engine reports it unknown (API key, no sample yet, or just reset).
+  const gauge = document.getElementById('gauge');
+  const gaugeText = gauge.querySelector('text');
+  let gaugeShown = false;
+  function untilReset(iso, nowMs) {
+    if (!iso) return '';
+    const min = Math.max(0, Math.round((Date.parse(iso) - nowMs) / 60_000));
+    if (min < 60) return `${min}m`;
+    return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+  }
+  let gaugeKey = '';
+  function renderGauge(win) {
+    const left = win ? untilReset(win.resets_at, Date.now()) : '';
+    const key = JSON.stringify([win?.used_pct, left]);
+    if (key === gaugeKey) return;
+    gaugeKey = key;
+    gaugeShown = Boolean(win);
+    if (gaugeShown) {
+      pet.dataset.gauge = '';
+      gauge.querySelector('.fill').setAttribute('width', (22 * win.used_pct / 100).toFixed(1));
+      gauge.classList.toggle('warn', win.used_pct >= 70 && win.used_pct < 90);
+      gauge.classList.toggle('full', win.used_pct >= 90);
+      gaugeText.textContent = left;
+      const at = win.resets_at ? new Date(win.resets_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      gauge.querySelector('title').textContent = `Session limit: ${win.used_pct}% used${at ? `, resets at ${at}` : ''}`;
+    } else {
+      delete pet.dataset.gauge;
+      gaugeText.textContent = '';
+    }
+    layoutTray();
   }
 
   // ---- creatures ---------------------------------------------------------------------
@@ -474,11 +537,12 @@
   const MAX_KIDS = 4;       // beyond, a "+n"
   // A family cell, in the units of the mock-up (a family is wider than tall): parent box
   // and where kids may put their feet. Above parentFeet a kid is behind the parent.
-  const CELL = { w: 180, h: 110, parent: { x: 55, y: 6, size: 70 }, kid: 36,
-                 area: { x0: 22, x1: 158, y0: 48, y1: 102 }, parentFeet: 72 };
+  const CELL = { w: 180, h: 96, parent: { x: 55, y: 6, size: 70 }, kid: 36,
+                 area: { x0: 22, x1: 158, y0: 50, y1: 92 }, parentFeet: 72 };
   // Neighbouring cells overlap a little (step < size): a cell's edges are mostly empty, so
-  // packing them tighter brings the sessions closer without the families touching.
-  CELL.step = { x: CELL.w * 0.8, y: CELL.h * 0.8 };
+  // packing them tighter brings the sessions closer without the families touching. Rows
+  // overlap more: a kid is drawn upward from its feet, so the next row's head fits under.
+  CELL.step = { x: CELL.w * 0.8, y: 74 };
   // With no subagent anywhere there is no walking area to keep: just the parent, close-packed.
   const COMPACT = { w: 80, h: 76, parent: { x: 5, y: 3, size: 70 }, step: { x: 66, y: 60 } };
   const span = (n, size, step) => size + step * (n - 1);
@@ -582,11 +646,11 @@
   const animating = () => animatingNow;
 
   // Try every number of columns; keep the one where families come out biggest.
-  function layoutCells(n, G) {
+  function layoutCells(n, G, H) {
     let best = { f: 0, cols: 1, rows: 1 };
     for (let cols = 1; cols <= n; cols += 1) {
       const rows = Math.ceil(n / cols);
-      const f = Math.min(160 / span(cols, G.w, G.step.x), 160 / span(rows, G.h, G.step.y));
+      const f = Math.min(160 / span(cols, G.w, G.step.x), H / span(rows, G.h, G.step.y));
       if (f > best.f) best = { f, cols, rows };
     }
     return best;
@@ -604,7 +668,7 @@
       : [{ id: '', state: singleState, load: s.load, agents: [] }];
     for (const g of groups) familyLoads.set(g.id, g.load);
 
-    const key = JSON.stringify([multi, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    const key = JSON.stringify([multi, gaugeShown, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
     if (key !== crittersKey) {
       crittersKey = key;
       crittersLayer.replaceChildren();
@@ -623,9 +687,11 @@
         familyAnchors.set('', { x: 66, y: 26 });
       } else {
         const G = groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
-        const { f, cols, rows } = layoutCells(groups.length, G);
+        // With the usage gauge on, the families keep clear of the tray's strip at the bottom.
+        const H = gaugeShown ? 146 : 160;
+        const { f, cols, rows } = layoutCells(groups.length, G, H);
         const x0 = (160 - f * span(cols, G.w, G.step.x)) / 2;
-        const y0 = (160 - f * span(rows, G.h, G.step.y)) / 2;
+        const y0 = (H - f * span(rows, G.h, G.step.y)) / 2;
         groups.forEach((g, i) => {
           const cell = { x: x0 + (i % cols) * G.step.x * f, y: y0 + Math.floor(i / cols) * G.step.y * f, f };
           cells.set(g.id, cell);
@@ -1019,29 +1085,46 @@
   }
   gear.addEventListener('click', () => showSettings(!bubbleEl.classList.contains('settings')));
   // Values come from the feed; a slider being dragged is not overwritten under the finger.
+  // Every frame (100 ms–1 s) carries the saved prefs. A slider must not be pushed back to
+  // them while it is in the user's hand (WebKit does not focus a range on click, so focus
+  // is no guide), nor while a new value is on its way: frames built before the daemon
+  // applied it still carry the old one. `pending` holds until a frame agrees, or 3 s.
   function renderSettings(p) {
     for (const s of Object.values(SETTINGS)) {
       const value = p[s.key];
       if (typeof value !== 'number') continue;
-      if (document.activeElement !== s.input) s.input.value = String(value);
+      if (s.pending !== undefined && (value === s.pending || Date.now() > s.pendingUntil)) s.pending = undefined;
+      if (!s.held && s.pending === undefined && Number(s.input.value) !== value) s.input.value = String(value);
       s.out.textContent = s.fmt(Number(s.input.value));
     }
   }
-  async function savePref(key, value) {
+  async function savePref(s, value) {
+    s.pending = value ?? undefined;
+    s.pendingUntil = Date.now() + 3000;
     settingsStatus.textContent = 'Saving…';
     try {
-      applyPrefs(await invoke('update_prefs', { patch: { [key]: value } }));
+      applyPrefs(await invoke('update_prefs', { patch: { [s.key]: value } }));
       settingsStatus.textContent = 'Saved';
     } catch (err) {
+      s.pending = undefined;
       settingsStatus.textContent = `Not saved: ${err}`;
     }
   }
   for (const s of Object.values(SETTINGS)) {
+    s.held = false;
+    s.input.addEventListener('pointerdown', () => { s.held = true; });
+    // pointerup can land outside the window; `change` always follows the end of a drag.
+    addEventListener('pointerup', () => { s.held = false; });
     s.input.addEventListener('input', () => { s.out.textContent = s.fmt(Number(s.input.value)); });
-    s.input.addEventListener('change', () => { savePref(s.key, Number(s.input.value)); s.input.blur(); });
+    s.input.addEventListener('change', () => {
+      s.held = false;
+      savePref(s, Number(s.input.value));
+      s.input.blur();
+    });
   }
   for (const button of settingsEl.querySelectorAll('.reset')) {
-    button.addEventListener('click', () => savePref(button.dataset.key, null));
+    const s = Object.values(SETTINGS).find((x) => x.key === button.dataset.key);
+    button.addEventListener('click', () => savePref(s, null));
   }
   input.addEventListener('input', () => {
     input.style.height = 'auto';
@@ -1077,6 +1160,7 @@
   function render(s) {
     lastFrame = s;
     applyPrefs(s.prefs);
+    renderGauge(s.rate_limits?.five_hour ?? null);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,

@@ -87,7 +87,8 @@ The `statusLine.command` receives a JSON object on stdin. Documented fields we u
   },
   "exceeds_200k_tokens": false,
   "effort": { "level": "high" },
-  "rate_limits": { "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 } }
+  "rate_limits": { "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+                   "seven_day": { "used_percentage": 47, "resets_at": 1738900000 } }
 }
 ```
 

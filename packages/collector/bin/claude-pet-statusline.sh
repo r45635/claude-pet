@@ -57,6 +57,9 @@ printf '%s' "$input" | jq -c '
       lines_added:      (.cost.total_lines_added // null),
       lines_removed:    (.cost.total_lines_removed // null),
       rate_5h_pct:      (.rate_limits.five_hour.used_percentage // null),
+      rate_5h_resets:   (.rate_limits.five_hour.resets_at // null),
+      rate_7d_pct:      (.rate_limits.seven_day.used_percentage // null),
+      rate_7d_resets:   (.rate_limits.seven_day.resets_at // null),
       effort:           (.effort.level // null),
       model:            (.model.id // null)
     }

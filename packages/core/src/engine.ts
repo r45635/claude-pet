@@ -34,6 +34,14 @@ export type PetReason =
   /** The load channel scoring highest right now. Derived. */
   | { kind: 'storm'; driver: ChannelName };
 
+/** One plan usage window, from the status line. */
+export type RateWindow = {
+  /** 0-100. Measured by Claude Code, not derived. */
+  used_pct: number;
+  /** ISO 8601, or null when Claude Code did not say. */
+  resets_at: string | null;
+};
+
 export type PetSnapshot = {
   state: PetState;
   visual: VisualState;
@@ -65,6 +73,12 @@ export type PetSnapshot = {
     lines_removed: number | null;
     context_window: number | null;
   };
+  /**
+   * The plan's usage limits. They belong to the account, not to a session: the latest
+   * sample from any session wins. A window is null when unknown (API key, no sample yet)
+   * or once its reset time has passed, until a fresh sample says where it restarted.
+   */
+  rate_limits: { five_hour: RateWindow | null; seven_day: RateWindow | null };
   sources: SnapshotSources;
   /** Names the fields in this payload that are derived rather than observed. */
   estimated: string[];
@@ -234,6 +248,8 @@ export class Engine {
   #lastError: PetReason | null = null;
   #lastIdleSignalMs = 0;
   #lastMeterMs = 0;
+  /** Latest known value of each usage window, with the time it was sampled. */
+  #rate: { five_hour: RateSample | null; seven_day: RateSample | null } = { five_hour: null, seven_day: null };
 
 
   #netSeen = false;
@@ -327,6 +343,11 @@ export class Engine {
     if (event.type === 'METER_SAMPLE') {
       lane.meter = event.meter ?? null;
       this.#lastMeterMs = event.tsMs;
+      const m = event.meter;
+      if (m) {
+        this.#rate.five_hour = newerRate(this.#rate.five_hour, m.rate_5h_pct, m.rate_5h_resets, event.tsMs);
+        this.#rate.seven_day = newerRate(this.#rate.seven_day, m.rate_7d_pct, m.rate_7d_resets, event.tsMs);
+      }
       return; // A gauge never contributes to load.
     }
 
@@ -738,6 +759,10 @@ export class Engine {
         lines_removed: meter?.lines_removed ?? null,
         context_window: meter?.context_window ?? null,
       },
+      rate_limits: {
+        five_hour: rateWindow(this.#rate.five_hour, nowMs),
+        seven_day: rateWindow(this.#rate.seven_day, nowMs),
+      },
       sources: {
         hooks: this.#sawHookEvent,
         net: this.#netSeen,
@@ -758,4 +783,24 @@ export class Engine {
       },
     };
   }
+}
+
+type RateSample = { pct: number; resetsMs: number | null; atMs: number };
+
+/** Keep the latest sample; a session without the field (API key) changes nothing. */
+function newerRate(prev: RateSample | null, pct: number | null, resets: number | null,
+                   atMs: number): RateSample | null {
+  if (pct === null) return prev;
+  if (prev && prev.atMs > atMs) return prev;
+  return { pct, resetsMs: resets === null ? null : resets * 1000, atMs };
+}
+
+function rateWindow(r: RateSample | null, nowMs: number): RateWindow | null {
+  if (!r) return null;
+  // Past its reset the old percentage is wrong and the new one unknown: say nothing.
+  if (r.resetsMs !== null && r.resetsMs <= nowMs) return null;
+  return {
+    used_pct: Math.round(clamp(r.pct, 0, 100)),
+    resets_at: r.resetsMs === null ? null : new Date(r.resetsMs).toISOString(),
+  };
 }
