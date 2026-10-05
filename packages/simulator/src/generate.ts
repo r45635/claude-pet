@@ -73,6 +73,9 @@ function meterAt(elapsedMs: number, toolCalls: number): MeterSample {
     lines_added: toolCalls * 7,
     lines_removed: toolCalls * 2,
     rate_5h_pct: Math.min(100, Math.round(elapsedMs / 36_000)),
+    rate_5h_resets: null,
+    rate_7d_pct: null,
+    rate_7d_resets: null,
     effort: 'high',
     model: 'claude-opus-5',
   };
