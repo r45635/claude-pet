@@ -695,3 +695,14 @@ test('transcript: a tool that quick is still seen for minStateMs before THINKING
   assert.deepEqual(at(1_100), ['READING', 'READING']);
   assert.deepEqual(at(1_000 + hold + 100), ['THINKING', 'THINKING']);
 });
+
+test('transcript: token history stays bounded even with no snapshot taken', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  for (let t = 0; t < 10 * 60_000; t += 1_000) {
+    engine.ingestTranscript({ sid: 'aaaaaaaa', aid: null, atMs: t, kind: 'text', outTokens: 10 });
+  }
+  // Only the last rateWindowMs counts: 60 lines of 10 tokens.
+  assert.equal(engine.snapshot(10 * 60_000).tokens_per_minute, 600);
+});
