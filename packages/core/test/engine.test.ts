@@ -409,3 +409,188 @@ test('one session ending does not put a working one to sleep', () => {
   assert.notEqual(snapshot.state, 'IDLE');
   assert.equal(snapshot.active_subagents, 1, "another session's subagents survive");
 });
+
+// Several Claude Code windows share one spool. The creature follows the busiest
+// session; nothing one session does may leak into how another one looks.
+
+test('sessions: two windows doing different things do not flicker the creature', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  // Reading in one, coding in the other, at the same calm pace: the creature must stick
+  // with one of them, not alternate READING / CODING with every event.
+  const shown: string[] = [];
+  for (let t = 1_000; t <= 40_000; t += 100) {
+    if (t % 4_000 === 0) engine.ingest(event('FILE_READ', t, { sid: 'aaaaaaaa', tool: 'read' }));
+    if (t % 4_000 === 2_000) engine.ingest(event('FILE_WRITE', t, { sid: 'bbbbbbbb', tool: 'edit' }));
+    const s = engine.snapshot(t);
+    if (s.state === 'READING' || s.state === 'CODING') shown.push(s.state);
+  }
+  const switches = shown.filter((s, i) => i > 0 && s !== shown[i - 1]).length;
+  assert.ok(switches <= 1, `the creature switched ${switches} times between the two windows`);
+});
+
+test('sessions: one window finishing does not change what another is shown doing', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 1_000, { sid: 'bbbbbbbb', tool: 'read' }));
+  assert.equal(engine.snapshot(1_500).state, 'READING');
+  engine.ingest(event('TURN_COMPLETED', 2_000, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(2_100).state, 'READING');
+});
+
+test("sessions: the context gauge is the shown session's, not the last status line's", () => {
+  const engine = new Engine(0);
+  for (let t = 0; t < 6_000; t += 1_000) {
+    const [sid, pct] = t % 2_000 ? ['bbbbbbbb', 12] : ['aaaaaaaa', 88];
+    engine.ingest(event('METER_SAMPLE', t, { sid, meter: { context_used_pct: pct } }));
+  }
+  engine.ingest(event('PROMPT_SUBMITTED', 6_000, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 6_100, { sid: 'bbbbbbbb', tool: 'read' }));
+  const snapshot = engine.snapshot(7_000);
+  assert.equal(snapshot.focus, 'bbbbbbbb');
+  assert.equal(snapshot.context_load, 12);
+});
+
+test('sessions: several calm windows do not add up to a storm', () => {
+  const peak = (sids: string[]) => {
+    const engine = new Engine(0);
+    for (const sid of sids) engine.ingest(event('PROMPT_SUBMITTED', 0, { sid }));
+    let max = 0;
+    for (let t = 0; t <= 30_000; t += 100) {
+      if (t % 8_000 === 0) for (const sid of sids) engine.ingest(event('FILE_READ', t, { sid, tool: 'read' }));
+      max = Math.max(max, engine.snapshot(t).load);
+    }
+    return max;
+  };
+  const one = peak(['aaaaaaaa']);
+  assert.ok(one < DEFAULT_CONFIG.highLoadThreshold, 'the pace must be calm for one session');
+  assert.equal(peak(['aaaaaaaa', 'bbbbbbbb', 'cccccccc']), one);
+});
+
+test('minStateMs: a short DONE stays on screen for the minimum time', () => {
+  const config = { ...DEFAULT_CONFIG, doneStickyMs: 1_000, minStateMs: 5_000 };
+  const engine = new Engine(0, config);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('FILE_READ', 500, { sid: 'aaaaaaaa', tool: 'read' }));
+  engine.ingest(event('TURN_COMPLETED', 1_000, { sid: 'aaaaaaaa' }));
+  for (let t = 1_000; t < 6_000; t += 100) {
+    assert.equal(engine.snapshot(t).state, 'DONE', `DONE must still show at ${t} ms`);
+  }
+  assert.notEqual(engine.snapshot(6_200).state, 'DONE');
+});
+
+test('minStateMs: never delays waking up, an error, a question or a storm', () => {
+  const config = { ...DEFAULT_CONFIG, minStateMs: 30_000 };
+  const engine = new Engine(0, config);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('FILE_READ', 100, { sid: 'aaaaaaaa', tool: 'read' }));
+  assert.equal(engine.snapshot(200).state, 'READING', 'waking up is immediate');
+  engine.ingest(event('PERMISSION_WAITING', 300, { sid: 'aaaaaaaa' }));
+  assert.equal(engine.snapshot(400).state, 'WAITING');
+  engine.ingest(event('FILE_WRITE', 500, { sid: 'aaaaaaaa', tool: 'edit' }));
+  assert.equal(engine.snapshot(600).state, 'CODING', 'the human answered: leave WAITING at once');
+  engine.ingest(event('ERROR', 700, { sid: 'aaaaaaaa', scope: 'tool', tool: 'bash' }));
+  assert.equal(engine.snapshot(800).state, 'ERROR');
+});
+
+
+// One creature per subagent: each shows what ITS agent does, from the agent_id on its
+// own tool events, grouped under its session.
+
+function agentSession() {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  engine.ingest(event('TOOL_STARTED', 100, { ...A, tool: 'task' }));
+  engine.ingest(event('SUBAGENT_STARTED', 200, { ...A, aid: 'ag1', agent: 'explore' }));
+  engine.ingest(event('SUBAGENT_STARTED', 300, { ...A, aid: 'ag2', agent: 'general-purpose' }));
+  return { engine, A };
+}
+
+test("agents: each subagent shows its own activity, not the session's", () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('FILE_READ', 400, { ...A, aid: 'ag1', tool: 'read' }));
+  engine.ingest(event('FILE_WRITE', 500, { ...A, aid: 'ag2', tool: 'edit' }));
+  const session = engine.snapshot(600).sessions[0]!;
+  assert.deepEqual(session.agents, [
+    { id: 'ag1', type: 'explore', state: 'READING', reason: null },
+    { id: 'ag2', type: 'general-purpose', state: 'CODING', reason: null },
+  ]);
+  assert.equal(session.state, 'TOOL_CALL', 'the main thread is still waiting on its Agent tool');
+});
+
+test("agents: a subagent's failure is its own, not its session's", () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('ERROR', 400, { ...A, aid: 'ag1', scope: 'tool', tool: 'bash' }));
+  const session = engine.snapshot(500).sessions[0]!;
+  assert.equal(session.agents[0]!.state, 'ERROR');
+  assert.deepEqual(session.agents[0]!.reason, { kind: 'tool_failed', tool: 'bash' });
+  assert.notEqual(session.state, 'ERROR');
+  assert.equal(session.reason, null);
+});
+
+test('agents: a finished subagent shows DONE for a moment, then leaves', () => {
+  const { engine, A } = agentSession();
+  engine.ingest(event('SUBAGENT_FINISHED', 1_000, { ...A, aid: 'ag1', agent: 'explore' }));
+  const linger = Math.max(DEFAULT_CONFIG.doneStickyMs, DEFAULT_CONFIG.minStateMs);
+  assert.equal(engine.snapshot(1_100).sessions[0]!.agents[0]!.state, 'DONE');
+  assert.equal(engine.snapshot(1_100).active_subagents, 1, 'only ag2 still runs');
+  assert.deepEqual(engine.snapshot(1_000 + linger).sessions[0]!.agents.map((a) => a.id), ['ag2']);
+});
+
+test('agents: without an agent_id (older Claude Code) they are still counted and ended', () => {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  engine.ingest(event('SUBAGENT_STARTED', 100, { ...A, agent: 'explore' }));
+  engine.ingest(event('SUBAGENT_STARTED', 200, { ...A, agent: 'plan' }));
+  assert.equal(engine.snapshot(300).sessions[0]!.agents.length, 2);
+  engine.ingest(event('SUBAGENT_FINISHED', 400, { ...A, agent: 'plan' }));
+  const agents = engine.snapshot(500).sessions[0]!.agents;
+  assert.deepEqual(agents.map((a) => [a.type, a.state]), [['explore', 'THINKING'], ['plan', 'DONE']]);
+});
+
+test("agents: each session's creature resolves on its own events", () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('FILE_READ', 100, { sid: 'aaaaaaaa', tool: 'read' }));
+  engine.ingest(event('FILE_WRITE', 200, { sid: 'bbbbbbbb', tool: 'edit' }));
+  engine.ingest(event('PERMISSION_WAITING', 300, { sid: 'bbbbbbbb' }));
+  const states = Object.fromEntries(engine.snapshot(400).sessions.map((s) => [s.id, s.state]));
+  assert.deepEqual(states, { aaaaaaaa: 'READING', bbbbbbbb: 'WAITING' });
+});
+
+test("reason: each session says why it is in distress, on its own", () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaaaaaa' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbbbbbb' }));
+  engine.ingest(event('ERROR', 100, { sid: 'bbbbbbbb', scope: 'api', code: 'overloaded' }));
+  const reasons = Object.fromEntries(engine.snapshot(200).sessions.map((s) => [s.id, s.reason]));
+  assert.deepEqual(reasons, { aaaaaaaa: null, bbbbbbbb: { kind: 'api_error', code: 'overloaded' } });
+});
+
+// Background agents (seen live: 3 general-purpose agents running for 25 minutes while
+// the main thread had finished and the human kept chatting).
+test('agents: background agents survive prompts and idle_prompt, and keep the family awake', () => {
+  const engine = new Engine(0);
+  const A = { sid: 'aaaaaaaa' };
+  engine.ingest(event('PROMPT_SUBMITTED', 0, A));
+  for (const aid of ['bg1', 'bg2', 'bg3']) {
+    engine.ingest(event('SUBAGENT_STARTED', 100, { ...A, aid, agent: 'general-purpose' }));
+  }
+  engine.ingest(event('TURN_COMPLETED', 1_000, A)); // the main thread is done, they are not
+  const counts: number[] = [];
+  for (let t = 2_000; t <= 300_000; t += 1_000) {
+    if (t % 7_000 === 0) engine.ingest(event('FILE_READ', t, { ...A, aid: `bg${(t / 7_000) % 3 + 1}`, tool: 'read' }));
+    if (t === 60_000) engine.ingest(event('PROMPT_SUBMITTED', t, A));   // "tu en es où ?"
+    if (t === 62_000) engine.ingest(event('TURN_COMPLETED', t, A));
+    if (t === 130_000) engine.ingest(event('MODEL_IDLE', t, A));        // idle_prompt
+    const snap = engine.snapshot(t);
+    counts.push(snap.sessions[0]!.agents.length);
+    if (t > 10_000) assert.notEqual(snap.state, 'IDLE', `asleep at ${t} ms while 3 agents work`);
+  }
+  assert.deepEqual([...new Set(counts)], [3], 'always exactly 3 agents');
+});

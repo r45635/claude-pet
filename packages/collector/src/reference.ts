@@ -27,6 +27,8 @@ export const KEY_DOCS: Record<string, string> = {
   highLoadExitThreshold: 'Load below which the storm ends. Keep it under highLoadThreshold to avoid flicker.',
   errorStickyMs: 'How long the error look stays after an error.',
   doneStickyMs: 'How long the "done" moment lasts after a turn ends.',
+  minStateMs: 'Shortest time any state stays on screen (waking up, errors, waiting and storms show at once). Settings panel: seconds.',
+  agentStaleMs: 'A subagent silent this long is dropped (background agents otherwise stay until they finish).',
   idleAfterMs: 'Silence (no turn running) before the creature falls asleep.',
   rateWindowMs: 'Window of the events/minute figures in the debug overlay.',
   sessionTtlMs: 'A session silent this long loses its pastille.',
