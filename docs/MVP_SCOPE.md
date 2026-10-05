@@ -40,13 +40,15 @@
 
 | Deferred | Phase |
 |---|---|
-| real artwork, sprite sheets, multiple creatures | 5 |
-| click-through mode, menu-bar item, launch at login, configurable size | 5 |
+| real artwork, sprite sheets | 5 |
+| multiple creatures | 5 — ✅ done: one per subagent, grouped by session |
+| click-through mode, menu-bar item | 5 |
+| launch at login, configurable size | 5 — ✅ done: `npm run autostart`, right-click → Size |
 | context/fatigue visual behaviour (designed now, rendered later) | 5 |
 | themes | 5 |
 | transcript JSONL source → real `tokens_per_minute` | 5, opt-in |
 | OTEL receiver | 5, opt-in |
-| multi-session view (several Claude Code windows at once) | 5 — the schema carries `sid` for it, the MVP shows the most recently active session |
+| multi-session view (several Claude Code windows at once) | 5 — ✅ done: one family per session |
 | Windows / Linux, Intel Macs | not planned |
 | anything that leaves the machine | never |
 
