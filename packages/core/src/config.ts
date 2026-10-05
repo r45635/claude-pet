@@ -112,6 +112,18 @@ export type EngineConfig = {
     /** Work gauge while a measured turn is open but nothing streams (a tool runs), 0..1 of work.max. */
     quietWorkFactor: number;
   };
+  /**
+   * The conversation-file source (opt-in; read by the daemon, metadata only). Each line
+   * lands ~0.1 s after Claude Code wrote it, per session AND per subagent: a prompt or a
+   * tool result starts the model working, a tool_use hands over to the tool. When it
+   * covers a session it replaces the network sensor there.
+   */
+  transcript: {
+    /** Reservoir poured into the `generation` channel per output token. */
+    perToken: number;
+    /** "Generating" with no new line for this long says nothing any more, ms. */
+    staleMs: number;
+  };
 };
 
 export const DEFAULT_CONFIG: EngineConfig = {
@@ -153,6 +165,10 @@ export const DEFAULT_CONFIG: EngineConfig = {
   sessionTtlMs: 30 * 60_000,
   // perKb: ~1 KB/s of streaming reads as THINKING (load ~70); ~3 KB/s and up as a storm.
   net: { activeBytesPerSec: 250, freshMs: 6_500, perKb: 0.2, quietWorkFactor: 0.4 },
+  // A streamed token is ~30 bytes on the wire (SSE framing included): 0.006/token ≈ net.perKb.
+  // staleMs = work.staleAfterMs: after Esc (no Stop; Claude Code writes an "interrupted"
+  // user line) the creature gives up on "working" no later than an unmeasured turn would.
+  transcript: { perToken: 0.006, staleMs: 120_000 },
 };
 
 /** Which reservoir an event type pours into. Absent => contributes no load. */
@@ -220,6 +236,7 @@ function mergeOnto(base: EngineConfig, overrides: Record<string, unknown>): Engi
     smoothing: { ...base.smoothing, ...(overrides.smoothing as object | undefined) },
     work: { ...base.work, ...(overrides.work as object | undefined) },
     net: { ...base.net, ...(overrides.net as object | undefined) },
+    transcript: { ...base.transcript, ...(overrides.transcript as object | undefined) },
   } as EngineConfig;
 }
 

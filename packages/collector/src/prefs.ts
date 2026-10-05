@@ -27,6 +27,12 @@ export type Prefs = {
   size: Size;
   showSessions: boolean;
   paused: boolean;
+  /**
+   * Read the conversation files (~/.claude/projects) for per-thread activity and real
+   * token counts. Off by default: those files hold prompts and answers, and the pet
+   * otherwise never opens them. Only line and block types and token counts are kept.
+   */
+  readTranscripts: boolean;
   /** Load (0-100) at which the creature storms. Effective value: preset or override. */
   stormThreshold: number;
   /** Shortest time a state stays on screen, seconds. Effective value. */
@@ -45,6 +51,7 @@ export const DEFAULT_PREFS: Prefs = {
   size: 'medium',
   showSessions: true,
   paused: false,
+  readTranscripts: false,
   stormThreshold: BASE.highLoadThreshold,
   minStateSeconds: BASE.minStateMs / 1000,
 };
@@ -80,6 +87,7 @@ export function prefsOf(user: UserFile): Prefs {
     size: SIZES.includes(ui.size as Size) ? (ui.size as Size) : DEFAULT_PREFS.size,
     showSessions: typeof ui.showSessions === 'boolean' ? ui.showSessions : DEFAULT_PREFS.showSessions,
     paused: typeof ui.paused === 'boolean' ? ui.paused : DEFAULT_PREFS.paused,
+    readTranscripts: typeof ui.readTranscripts === 'boolean' ? ui.readTranscripts : DEFAULT_PREFS.readTranscripts,
   };
 }
 
@@ -93,6 +101,7 @@ export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
     else if (key === 'chatModel' && CHAT_MODELS.includes(value as ChatModel)) out.chatModel = value as ChatModel;
     else if (key === 'showSessions' && typeof value === 'boolean') out.showSessions = value;
     else if (key === 'paused' && typeof value === 'boolean') out.paused = value;
+    else if (key === 'readTranscripts' && typeof value === 'boolean') out.readTranscripts = value;
     else if (key === 'stormThreshold' && (value === null || (inRange(value, STORM_THRESHOLD) && Number.isInteger(value)))) {
       out.stormThreshold = value;
     }
@@ -112,6 +121,7 @@ export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
   if (patch.chatModel !== undefined) next.ui!.chatModel = patch.chatModel;
   if (patch.showSessions !== undefined) next.ui!.showSessions = patch.showSessions;
   if (patch.paused !== undefined) next.ui!.paused = patch.paused;
+  if (patch.readTranscripts !== undefined) next.ui!.readTranscripts = patch.readTranscripts;
   // The panel's numbers are engine overrides: like a hand edit, they win over the
   // temperament preset until reset (null), which hands the knob back to the preset.
   if (patch.stormThreshold === null) {

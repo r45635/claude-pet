@@ -158,6 +158,24 @@ Observed schema drift risk is real: this file already contains 13 distinct `type
 **Decision:** implement it as `collector.sources.transcript = false` by default. When off,
 `tokens_per_minute` is reported as `null`, **not** estimated into a fake number.
 
+**Implemented (2026-10-05), settings → *Read conversation files*.** Measured on this machine
+(Claude Code, Opus 5.5 session with Haiku subagents):
+- one line per content block (`apiBlockIndex`), written ~0.1 s after the block completes
+  (median 137 ms, max 3.5 s over 17 lines); a thinking block carries `thinkingDurationMs`;
+- each subagent has its own file, `<session>/subagents/agent-<agent_id>.jsonl`; its first
+  12 characters are the hooks' `aid`, so both sources name the same thread;
+- lines of one reply repeat the reply's cumulative `usage.output_tokens`: counted once per
+  `requestId`;
+- user lines start with `parentUuid, isSidechain, promptId, type`, so they are told apart
+  without parsing the (possibly huge) tool result.
+
+What it gives, per thread: the model working (from a prompt or tool result until the next
+`tool_use`) or a tool running — live for subagents, which the network sensor (one number
+per `claude` process, every ~5 s) cannot separate — and real output tokens. What it cannot
+give: whether the model is thinking or writing *while* it does, since a block is only
+written once complete. Where it covers a session, the daemon no longer spawns `nettop`.
+Cost, 60 s with two subagents working: daemon + nettop 810 ms CPU off, 340 ms on.
+
 ### 2.2 `MessageDisplay` rate as a generation proxy ✅ documented, ⚠️ indirect
 
 Counting `MessageDisplay` events per second gives a *shape* that tracks generation

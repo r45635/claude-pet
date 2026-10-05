@@ -21,6 +21,7 @@ test('prefs: applying a patch keeps hand-tuned overrides untouched', () => {
   assert.deepEqual(next.smoothing, { releaseMs: 12_000 });
   assert.deepEqual(prefsOf(next), {
     temperament: 'nervous', chatModel: 'default', size: 'small', showSessions: true, paused: true,
+    readTranscripts: false,
     stormThreshold: TEMPERAMENTS.nervous.highLoadThreshold, minStateSeconds: DEFAULT_CONFIG.minStateMs / 1000,
   });
 });
@@ -54,4 +55,11 @@ test('settings panel: the minimum time per state is stored in ms, shown in secon
   assert.equal(set.minStateMs, 4_500);
   assert.equal(prefsOf(set).minStateSeconds, 4.5);
   assert.equal(prefsOf(applyPatch(set, { minStateSeconds: null })).minStateSeconds, DEFAULT_CONFIG.minStateMs / 1000);
+});
+
+test('prefs: reading the conversation files is off unless turned on, and boolean only', () => {
+  assert.equal(DEFAULT_PREFS.readTranscripts, false);
+  assert.ok('error' in validatePatch({ readTranscripts: 'yes' }));
+  const next = applyPatch({}, { readTranscripts: true });
+  assert.equal(prefsOf(next).readTranscripts, true);
 });
