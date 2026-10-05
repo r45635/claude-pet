@@ -24,7 +24,7 @@ Fully local. No cloud, no telemetry, no outbound network call anywhere in the co
 | 2 | state engine + tests | ✅ |
 | 3 | Tauri widget | ✅ transparent window, ~0.2% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
-| 5 | refinement | ⬜ |
+| 5 | refinement | 🟡 launch at login, sizes, one creature per session and subagent, settings, usage-limit gauge |
 
 ## Try it without Claude Code
 
@@ -101,6 +101,19 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - `jq` (ships with macOS 26 at `/usr/bin/jq`)
 - Rust — **only** for Phase 3; see `apps/widget/README.md`
 
+## What you see
+
+- **One creature per Claude Code session**, each with its subagents wandering around it
+  (up to 4 shown; one in trouble or waiting on you is never the hidden one).
+- **A tray under the feet**: one pastille per session, and the plan's usage gauge — how
+  much of the current 5-hour window is used (green, amber from 70 %, red from 90 %) and
+  the time left before it resets. It comes from the status line, so it only shows on a
+  Claude.ai plan, not with an API key.
+- **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
+  `Bash failed`, `Rate limited`).
+- **Settings** (gear icon in the chat bubble): storm threshold and minimum time per state,
+  applied live. Size, temperament and the rest are in the right-click menu.
+
 ## Talk to it
 
 Click the creature: a bubble opens; type (or use macOS dictation) and press Enter. The widget
@@ -121,6 +134,20 @@ The installer **merges**: existing hooks are left untouched, a foreign `statusLi
 overwritten (the meter then stays offline and says so), and a re-run is a no-op. Every write
 is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
 without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
+
+## Start at login
+
+```bash
+npm run autostart -- install     # daemon + widget as per-user LaunchAgents
+npm run autostart -- restart     # after a pull or a rebuild: run the new code
+npm run autostart -- status
+npm run autostart -- uninstall
+```
+
+launchd restarts the daemon whenever it stops, and the widget only after a crash (Quit in
+the menu keeps it closed until the next login). Logs are in `~/.claude-pet/logs/`. After
+`git pull`, rebuild the widget if `apps/widget` changed (`cd apps/widget && cargo tauri
+build --no-bundle`), then `restart`.
 
 ## License
 

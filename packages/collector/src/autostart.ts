@@ -3,7 +3,10 @@
  * Starts the pet at login: two per-user LaunchAgents, one for the daemon, one for the
  * widget. No sudo, nothing outside ~/Library/LaunchAgents and ~/.claude-pet.
  *
- *   node packages/collector/src/autostart.ts [install|uninstall|status] [--dry-run]
+ *   node packages/collector/src/autostart.ts [install|uninstall|status|restart] [--dry-run]
+ *
+ * `restart` (after a pull or a rebuild) has launchd stop and start both, so the new code
+ * runs without a second, hand-launched copy fighting the managed one.
  *
  * Start order does not matter: daemon and widget share a persistent token (token.ts), and
  * the widget's EventSource retries until the daemon answers.
@@ -101,7 +104,7 @@ function launchctl(...args: string[]): boolean {
 }
 
 function main(argv: string[]): number {
-  const mode = argv.find((a) => ['install', 'uninstall', 'status'].includes(a)) ?? 'status';
+  const mode = argv.find((a) => ['install', 'uninstall', 'status', 'restart'].includes(a)) ?? 'status';
   const dryRun = argv.includes('--dry-run');
 
   if (mode === 'status') {
@@ -109,6 +112,23 @@ function main(argv: string[]): number {
       const loaded = launchctl('print', `${domain()}/${a.label}`);
       const installed = existsSync(plistPath(a.label));
       process.stdout.write(`${a.label}: ${installed ? 'installed' : 'not installed'}, ${loaded ? 'loaded' : 'not loaded'}\n`);
+    }
+    return 0;
+  }
+
+  if (mode === 'restart') {
+    for (const a of agents()) {
+      if (!existsSync(plistPath(a.label))) {
+        process.stderr.write(`${a.label} is not installed: npm run autostart -- install\n`);
+        return 1;
+      }
+      if (dryRun) { process.stdout.write(`restart ${a.label}\n`); continue; }
+      // -k: kill the running instance first, so a new binary or new code is picked up.
+      if (!launchctl('kickstart', '-k', `${domain()}/${a.label}`)) {
+        process.stderr.write(`launchctl kickstart failed for ${a.label} — see ${a.log}\n`);
+        return 1;
+      }
+      process.stdout.write(`restarted ${a.label}\n`);
     }
     return 0;
   }
