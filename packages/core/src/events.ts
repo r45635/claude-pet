@@ -83,6 +83,8 @@ export type PetEvent = {
   ppid?: number;
   tool?: ToolClass;
   agent?: string;
+  /** Subagent id (opaque, ≤ 12 safe chars). Absent on the main thread. */
+  aid?: string;
   /** Multiplicity, default 1. */
   n: number;
   /** Duration of a finished tool call, ms. */
@@ -173,6 +175,9 @@ export function parsePetEvent(raw: unknown): PetEvent | null {
   const agent = str(r.agent, 48);
   if (agent) event.agent = agent.toLowerCase();
 
+  const aid = str(r.aid, 12);
+  if (aid && /^[A-Za-z0-9_-]+$/.test(aid)) event.aid = aid;
+
   const ms = num(r.ms);
   if (ms !== null && ms >= 0) event.ms = ms;
 
@@ -214,6 +219,7 @@ export function serializePetEvent(event: PetEvent): string {
   if (event.sid) out.sid = event.sid;
   if (event.tool) out.tool = event.tool;
   if (event.agent) out.agent = event.agent;
+  if (event.aid) out.aid = event.aid;
   if (event.n !== 1) out.n = event.n;
   if (event.ms !== undefined) out.ms = event.ms;
   if (event.scope) out.scope = event.scope;

@@ -55,6 +55,9 @@ jq -c --arg ppid "${PPID:-}" '
   | ($h.hook_event_name // "") as $e
   | ($h.tool_name | toolclass) as $t
   | ($h.agent_type // "" | ascii_downcase) as $a
+  # Which subagent did this (absent on the main thread): an opaque id, cut to 12 safe
+  # characters. It only lets the pet draw one creature per agent.
+  | ($h.agent_id // "" | tostring | gsub("[^A-Za-z0-9_-]"; "") | .[0:12]) as $aid
   | (
       if $e == "PreToolUse" then
         { type: (if   $t == "bash"                        then "BASH_STARTED"
@@ -90,6 +93,7 @@ jq -c --arg ppid "${PPID:-}" '
   | if $out == null then empty
     else { v: 1, ts: iso, sid: sid }
          + ({ ppid: ($ppid | tonumber? // null) } | with_entries(select(.value != null)))
+         + ({ aid: $aid } | with_entries(select(.value != "")))
          + ($out | with_entries(select(.value != "" and .value != null)))
     end
 ' >> "$SPOOL" 2>/dev/null

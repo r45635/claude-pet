@@ -31,10 +31,11 @@
                font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   body { display: grid; place-items: center; gap: 14px; grid-auto-flow: row; }
   /* Transparent background in the real widget; the dev page paints one so it is visible. */
-  #pet { width: 160px; height: 160px; overflow: visible; --skin: var(--skin-base); --bulb: var(--c-sleep); }
+  #pet { width: 160px; height: 160px; overflow: visible; }
+  .critter { --skin: var(--skin-base); --bulb: var(--c-sleep); }
   .skin { fill: var(--skin); transition: fill .8s ease; }
   .skin-line { stroke: var(--skin); transition: stroke .8s ease; }
-  #bulb { fill: var(--bulb); transition: fill .4s ease; }
+  .bulb { fill: var(--bulb); transition: fill .4s ease; }
   .ink { fill: var(--ink); }
   .ink-line { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
   .glint { fill: #fff; }
@@ -42,7 +43,9 @@
 
   /* Animation intensity is interpolated from load, never switched in steps:
      --dur and --amp are written by JS from the snapshot. */
-  #body {
+  .shaker, .body, .eyes, .arm-wait { transform-box: fill-box; }
+  .shaker { transform-origin: 50% 100%; }
+  .body {
     transform-origin: 50% 70%;
     animation: breathe var(--dur, 3.2s) ease-in-out infinite;
   }
@@ -70,36 +73,36 @@
   [data-state="WAITING"] .on-WAITING, [data-state="DONE"] .on-DONE,
   [data-state="ERROR"] .on-ERROR { display: inline; }
 
-  #pet[data-state="THINKING"]  { --bulb: var(--c-think); }
-  #pet[data-state="READING"]   { --bulb: var(--c-read); }
-  #pet[data-state="CODING"]    { --bulb: var(--c-act); }
-  #pet[data-state="TOOL_CALL"] { --bulb: var(--c-act); }
-  #pet[data-state="HIGH_LOAD"] { --bulb: var(--c-wait); --skin: var(--skin-hot); }
-  #pet[data-state="WAITING"]   { --bulb: var(--c-wait); }
-  #pet[data-state="DONE"]      { --bulb: var(--c-done); }
-  #pet[data-state="ERROR"]     { --bulb: #ffb3bf; --skin: var(--skin-bad); }
+  .critter[data-state="THINKING"]  { --bulb: var(--c-think); }
+  .critter[data-state="READING"]   { --bulb: var(--c-read); }
+  .critter[data-state="CODING"]    { --bulb: var(--c-act); }
+  .critter[data-state="TOOL_CALL"] { --bulb: var(--c-act); }
+  .critter[data-state="HIGH_LOAD"] { --bulb: var(--c-wait); --skin: var(--skin-hot); }
+  .critter[data-state="WAITING"]   { --bulb: var(--c-wait); }
+  .critter[data-state="DONE"]      { --bulb: var(--c-done); }
+  .critter[data-state="ERROR"]     { --bulb: #ffb3bf; --skin: var(--skin-bad); }
 
   /* Eyes look where the work is: up and aside while thinking, down at the page while
      reading. A tool running keeps them forward. */
-  #eyes { transition: transform .5s ease; }
-  [data-state="THINKING"] #eyes { transform: translate(3px, -4px); }
-  [data-state="READING"] #eyes  { transform: translate(0, 3px); }
-  [data-state="CODING"] #eyes   { transform: translate(0, 2px) scale(1, .75); transform-origin: 80px 88px; }
+  .eyes { transition: transform .5s ease; }
+  [data-state="THINKING"] .eyes { transform: translate(3px, -4px); }
+  [data-state="READING"] .eyes  { transform: translate(0, 3px); }
+  [data-state="CODING"] .eyes   { transform: translate(0, 2px) scale(1, .75); transform-origin: 50% 50%; }
 
-  #thought circle:nth-child(2) { opacity: .75; }
-  #thought circle:nth-child(3) { opacity: .5; }
-  [data-state="THINKING"] #thought circle { animation: think 1.2s ease-in-out infinite; }
-  [data-state="THINKING"] #thought circle:nth-child(2) { animation-delay: .2s; }
-  [data-state="THINKING"] #thought circle:nth-child(3) { animation-delay: .4s; }
+  .thought circle:nth-child(2) { opacity: .75; }
+  .thought circle:nth-child(3) { opacity: .5; }
+  [data-state="THINKING"] .thought circle { animation: think 1.2s ease-in-out infinite; }
+  [data-state="THINKING"] .thought circle:nth-child(2) { animation-delay: .2s; }
+  [data-state="THINKING"] .thought circle:nth-child(3) { animation-delay: .4s; }
   @keyframes think { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
 
-  #arm-wait { transform-origin: 40px 94px; animation: wave 1.6s ease-in-out infinite; }
-  #bulb-ring { animation: ring 1.4s ease-in-out infinite; }
+  .arm-wait { transform-origin: 100% 100%; animation: wave 1.6s ease-in-out infinite; }
+  .bulb-ring { animation: ring 1.4s ease-in-out infinite; }
 
   /* The visual tier (storm, distress) drives the shaking. */
   /* Only the creature shakes: the "why" bubble and the pastilles must stay readable. */
-  #pet[data-visual="HIGH_LOAD"] #shaker { animation: shake .12s linear infinite; }
-  #pet[data-visual="ERROR"] #shaker     { animation: shake .4s linear infinite; }
+  .critter[data-state="HIGH_LOAD"] .shaker { animation: shake .12s linear infinite; }
+  .critter[data-state="ERROR"] .shaker     { animation: shake .4s linear infinite; }
 
   /* Asleep or disconnected = fully still. An always-visible window that animates while
      nothing happens costs ~8% CPU (measured): macOS recomposites the whole transparent
@@ -107,15 +110,15 @@
   [data-visual="IDLE"] *, [data-signal="none"] * { animation-play-state: paused !important; }
 
   /* A disconnected creature must not look like a sleeping one: grey, dashed, unplugged. */
-  #pet[data-signal="none"] { --skin: #3a4050; --bulb: transparent; }
-  #pet[data-signal="none"] #shaker { animation: none; }
+  [data-signal="none"] .critter { --skin: #3a4050; --bulb: transparent; }
+  [data-signal="none"] .shaker { animation: none; }
   [data-signal="none"] .opt { display: none !important; }
   [data-signal="none"] .on-NOSIGNAL { display: inline !important; }
   [data-signal="none"] .live-only { display: none; }
-  [data-signal="none"] #shell { fill: #262a35; stroke: var(--c-off); stroke-width: 2; stroke-dasharray: 6 5; }
-  [data-signal="none"] #antenna { stroke: #4a5163; }
-  [data-signal="none"] #bulb { stroke: var(--c-off); stroke-width: 2; }
-  [data-signal="none"] #eyes { transform: none; }
+  [data-signal="none"] .shell { fill: #262a35; stroke: var(--c-off); stroke-width: 2; stroke-dasharray: 6 5; }
+  [data-signal="none"] .antenna { stroke: #4a5163; }
+  [data-signal="none"] .bulb { stroke: var(--c-off); stroke-width: 2; }
+  [data-signal="none"] .eyes { transform: none; }
 
   /* The "why" bubble: in a storm or in distress, one short line saying what caused it,
      built from closed values only (snapshot.reason). It sits above the head, in the
@@ -123,6 +126,46 @@
   #why rect, #why circle { fill: #f4f1ea; }
   #why text { fill: var(--ink); font: 700 11px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   #pet:not([data-why]) #why, #pet[data-why=""] #why { display: none !important; }
+  /* A subagent's creature: drawn smaller; its type is in a tooltip. */
+  .critter.mini .cheek { display: none; }
+  /* Several creatures: the session tray belongs to the single one. */
+  #pet[data-multi="true"] #sessions { display: none; }
+
+  /* A family: the parent in the middle, its subagents wandering around it at random
+     (JS picks where; the slot's CSS transition walks them there). Walking = quick little
+     steps leaning the way they go; stopped = the gesture of what they do. --k is the
+     family's tempo (from its session's load). A family where everyone sleeps is fully
+     still: no timer, no animation (the idle CPU budget, docs/RISKS.md #6). */
+  .kid-slot { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
+  .critter.mini { transform-box: fill-box; transform-origin: 50% 100%; }
+  /* Same colour as the parent: a dark rim keeps a kid readable when it walks past it. */
+  .critter.mini .shell { stroke: rgba(20, 22, 28, .6); stroke-width: 7; paint-order: stroke; }
+  .critter.mini.walking.lean-l { animation: step-l calc(.3s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini.walking.lean-r { animation: step-r calc(.3s * var(--k, 1)) ease-in-out infinite; }
+  @keyframes step-l { 0%, 100% { transform: rotate(-9deg) translateY(0) scale(1.06, .94); }
+                      50% { transform: rotate(-9deg) translateY(-22px) scale(.96, 1.05); } }
+  @keyframes step-r { 0%, 100% { transform: rotate(9deg) translateY(0) scale(1.06, .94); }
+                      50% { transform: rotate(9deg) translateY(-22px) scale(.96, 1.05); } }
+  .critter.mini:not(.walking)[data-state="READING"] { animation: nod calc(2.4s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini:not(.walking)[data-state="CODING"] { animation: tap calc(.36s * var(--k, 1)) cubic-bezier(.3, 0, .3, 1) infinite; }
+  .critter.mini:not(.walking)[data-state="TOOL_CALL"] { animation: hammer calc(.8s * var(--k, 1)) cubic-bezier(.6, 0, .2, 1) infinite; }
+  .critter.mini:not(.walking)[data-state="THINKING"] { animation: float calc(2.6s * var(--k, 1)) ease-in-out infinite; }
+  .critter.mini:not(.walking)[data-state="DONE"] { animation: cheer calc(1.6s * var(--k, 1)) cubic-bezier(.3, 0, .25, 1) infinite; }
+  @keyframes nod { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(6deg) translateY(4px); }
+                   50% { transform: rotate(-3deg); } 80% { transform: rotate(5deg); } }
+  @keyframes tap { 0%, 100% { transform: translateY(0) scale(1.07, .93); } 45% { transform: translateY(-24px) scale(.96, 1.05); } }
+  @keyframes hammer { 0%, 100% { transform: rotate(0); } 40% { transform: rotate(-16deg); }
+                      55% { transform: rotate(9deg) scale(1.06, .94); } 70% { transform: rotate(0); } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-30px); } }
+  @keyframes cheer { 0%, 100% { transform: translateY(0) scale(1, 1); } 14% { transform: scale(1.18, .82); }
+                     40% { transform: translateY(-90px) scale(.9, 1.12); } 58% { transform: translateY(-90px) rotate(360deg); }
+                     74% { transform: translateY(0) scale(1.14, .86) rotate(360deg); } 86% { transform: rotate(360deg); } }
+  .family[data-still="true"] * { animation-play-state: paused !important; }
+  @media (prefers-reduced-motion: reduce) {
+    .critter.mini { animation: none !important; }
+    .kid-slot { transition-duration: 0s !important; }
+  }
+  #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
   html.widget, html.widget body { background: transparent; overflow: hidden; }
@@ -131,7 +174,7 @@
 
   /* Menu preferences. Paused = asleep on purpose: everything still, no pastilles. */
   [data-show-sessions="false"] #sessions,
-  [data-paused="true"] #sessions, [data-paused="true"] #thought { display: none; }
+  [data-paused="true"] #sessions, [data-paused="true"] .thought { display: none; }
   [data-paused="true"] * { animation-play-state: paused !important; }
 
   /* Covers the window so the whole creature is a drag handle (Tauri only reads the
@@ -149,6 +192,8 @@
   #dots .done    { fill: var(--c-done); }
   #dots .idle    { fill: #5a6273; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* With several sessions, a ring marks the one the creature is showing. */
+  #dots .focus { stroke: #eceff4; stroke-width: 1.5; }
 
   /* ---- chat panel ----------------------------------------------------------------
      Rust's layout_panel grows the window toward the side with room and keeps the
@@ -202,16 +247,41 @@
           cursor: pointer; }
   #send.stop { background: var(--skin-bad); font-size: 11px; }
 
+  /* ---- settings, inside the bubble (gear in its header) ------------------------------
+     Both values are engine knobs: the page sends a patch through Rust, the daemon
+     validates it, writes config.json and the new values come back on the feed. */
+  #gear { width: 32px; height: 32px; border: 0; border-radius: 10px; background: none;
+          color: #9aa3b5; cursor: pointer; display: grid; place-items: center; }
+  #gear:hover, #bubble.settings #gear { background: rgba(255, 255, 255, .08); color: #eceff4; }
+  #settings { flex: 1; padding: 6px 16px 14px; display: flex; flex-direction: column; gap: 18px;
+              overflow-y: auto; }
+  #settings[hidden], #bubble.settings #messages, #bubble.settings #status,
+  #bubble.settings #ask { display: none; }
+  .setting { display: flex; flex-direction: column; gap: 6px; }
+  .setting label { display: flex; justify-content: space-between; align-items: baseline;
+                   font-weight: 600; }
+  .setting output { font-variant-numeric: tabular-nums; color: var(--skin-base); }
+  .setting input[type=range] { width: 100%; accent-color: var(--skin-base); margin: 2px 0; }
+  .setting p { margin: 0; font-size: 12px; line-height: 1.4; color: #9aa3b5; }
+  .setting .reset { align-self: flex-start; border: 0; background: none; padding: 0;
+                    color: #9aa3b5; font: inherit; font-size: 12px; text-decoration: underline;
+                    cursor: pointer; }
+  .setting .reset:hover { color: #eceff4; }
+  #settings-status { min-height: 16px; font-size: 12px; color: #9aa3b5; }
+
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
 
-<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-state="IDLE" data-signal="none">
-  <g id="shaker">
+<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-signal="none">
+  <defs>
+    <!-- One creature. JS clones it per session and per subagent (see renderCritters). -->
+    <g id="critter-proto" class="critter" data-state="IDLE">
+  <g class="shaker">
   <ellipse cx="80" cy="144" rx="36" ry="5" fill="#000" opacity=".35" />
 
   <!-- behind the body: arms, storm sparks -->
-  <path id="arm-wait" class="opt on-WAITING skin-line" d="M40 94 Q24 80 28 62"
+  <path class="arm-wait opt on-WAITING skin-line" d="M40 94 Q24 80 28 62"
         fill="none" stroke-width="9" stroke-linecap="round" />
   <path class="opt on-TOOL_CALL skin-line" d="M120 92 Q134 82 132 64"
         fill="none" stroke-width="9" stroke-linecap="round" />
@@ -220,14 +290,14 @@
   </g>
 
   <!-- antenna: the bulb is the state's colour -->
-  <line id="antenna" class="skin-line" x1="80" y1="44" x2="80" y2="27" stroke-width="3" stroke-linecap="round" />
-  <circle id="bulb-ring" class="opt on-WAITING" cx="80" cy="22" r="11" fill="none" stroke="var(--c-wait)" stroke-width="2" />
-  <circle id="bulb" cx="80" cy="22" r="6" />
+  <line class="antenna skin-line" x1="80" y1="44" x2="80" y2="27" stroke-width="3" stroke-linecap="round" />
+  <circle class="bulb-ring opt on-WAITING" cx="80" cy="22" r="11" fill="none" stroke="var(--c-wait)" stroke-width="2" />
+  <circle class="bulb" cx="80" cy="22" r="6" />
 
-  <g id="body">
+  <g class="body">
     <ellipse class="skin" cx="62" cy="137" rx="11" ry="6" />
     <ellipse class="skin" cx="98" cy="137" rx="11" ry="6" />
-    <path id="shell" class="skin" d="M80 42 C113 42 126 68 126 96 C126 124 107 138 80 138 C53 138 34 124 34 96 C34 68 47 42 80 42 Z" />
+    <path class="shell skin" d="M80 42 C113 42 126 68 126 96 C126 124 107 138 80 138 C53 138 34 124 34 96 C34 68 47 42 80 42 Z" />
     <ellipse class="live-only" cx="80" cy="114" rx="24" ry="15" fill="#fff" opacity=".14" />
     <g class="live-only">
       <ellipse class="cheek" cx="54" cy="100" rx="6" ry="3.5" />
@@ -235,7 +305,7 @@
     </g>
 
     <!-- eyes -->
-    <g id="eyes" class="opt on-THINKING on-READING on-CODING on-TOOL_CALL on-WAITING on-ERROR">
+    <g class="eyes opt on-THINKING on-READING on-CODING on-TOOL_CALL on-WAITING on-ERROR">
       <ellipse class="ink" cx="66" cy="88" rx="5.5" ry="7" />
       <ellipse class="ink" cx="94" cy="88" rx="5.5" ry="7" />
       <circle class="glint" cx="68" cy="85" r="1.8" />
@@ -280,7 +350,7 @@
   <g class="opt on-IDLE" fill="var(--c-off)" font-family="ui-monospace, Menlo, monospace" font-weight="700">
     <text x="112" y="50" font-size="15">z</text><text x="124" y="36" font-size="11">z</text>
   </g>
-  <g id="thought" class="opt on-THINKING" fill="var(--c-think)">
+  <g class="thought opt on-THINKING" fill="var(--c-think)">
     <circle cx="116" cy="50" r="3.5" /><circle cx="128" cy="39" r="4.5" /><circle cx="142" cy="26" r="6" />
   </g>
   <text class="opt on-CODING" x="104" y="48" fill="var(--c-act)" font-family="ui-monospace, Menlo, monospace"
@@ -313,11 +383,14 @@
   </g>
 
   </g>
+    </g>
+  </defs>
+  <g id="critters"></g>
 
-  <g id="why" class="opt on-HIGH_LOAD on-ERROR">
+  <g id="why">
     <rect y="-14" height="24" rx="12" />
     <circle cx="62" cy="16" r="3.2" /><circle cx="68" cy="24" r="2" />
-    <text x="80" y="2" text-anchor="middle"></text>
+    <text x="80" y="2" text-anchor="middle" lengthAdjust="spacingAndGlyphs"></text>
   </g>
 
   <g id="sessions"><rect id="tray" y="148" height="12" rx="6" /><g id="dots"></g></g>
@@ -329,7 +402,30 @@
 
 <div id="chat" hidden>
   <div id="bubble">
-    <header><span id="who">Claude</span><button id="close" type="button" title="Close (Esc)">×</button></header>
+    <header><span id="who">Claude</span>
+      <button id="gear" type="button" title="Settings" aria-label="Settings" aria-pressed="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      </button>
+      <button id="close" type="button" title="Close (Esc)">×</button></header>
+    <div id="settings" hidden>
+      <div class="setting">
+        <label for="storm">Storm threshold <output id="storm-out" for="storm"></output></label>
+        <input id="storm" type="range" min="30" max="100" step="1" />
+        <p>Load at which the creature starts to storm. Higher = calmer. It calms down 10 points lower.</p>
+        <button class="reset" type="button" data-key="stormThreshold">Back to the temperament's value</button>
+      </div>
+      <div class="setting">
+        <label for="hold">Minimum time per state <output id="hold-out" for="hold"></output></label>
+        <input id="hold" type="range" min="0" max="10" step="0.5" />
+        <p>Each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once.</p>
+        <button class="reset" type="button" data-key="minStateSeconds">Back to default</button>
+      </div>
+      <div id="settings-status" role="status"></div>
+    </div>
     <div id="messages"></div>
     <div id="status"></div>
     <form id="ask">
@@ -348,7 +444,7 @@
 
   // Pastilles in a tray under the feet, centred, 12 px apart, in first-seen order so a
   // session keeps its place while others come and go.
-  function renderSessions(sessions) {
+  function renderSessions(sessions, focus) {
     const shown = sessions.slice(0, 7);
     while (dotsLayer.childElementCount > shown.length) dotsLayer.lastChild.remove();
     while (dotsLayer.childElementCount < shown.length) {
@@ -360,11 +456,262 @@
     shown.forEach((session, i) => {
       const dot = dotsLayer.children[i];
       dot.setAttribute('cx', (80 + (i - (shown.length - 1) / 2) * 12).toFixed(1));
-      dot.setAttribute('class', session.status);
+      const focused = shown.length > 1 && session.id === focus;
+      dot.setAttribute('class', focused ? `${session.status} focus` : session.status);
     });
     const w = shown.length ? shown.length * 12 + 4 : 0;
     tray.setAttribute('width', String(w));
     tray.setAttribute('x', String(80 - w / 2));
+  }
+
+  // ---- creatures ---------------------------------------------------------------------
+  // One creature, as long as there is one session and no subagent: exactly as before.
+  // Otherwise one family per session, each in its own square cell: the parent in the
+  // middle and its subagents wandering around it at random (see Motion — E · balade).
+  // All cells together fit the creature's usual square, never larger.
+  const crittersLayer = document.getElementById('critters');
+  const proto = document.getElementById('critter-proto');
+  const MAX_KIDS = 4;       // beyond, a "+n"
+  // A family cell, in the units of the mock-up (a family is wider than tall): parent box
+  // and where kids may put their feet. Above parentFeet a kid is behind the parent.
+  const CELL = { w: 180, h: 110, parent: { x: 55, y: 6, size: 70 }, kid: 36,
+                 area: { x0: 22, x1: 158, y0: 48, y1: 102 }, parentFeet: 72 };
+  // Neighbouring cells overlap a little (step < size): a cell's edges are mostly empty, so
+  // packing them tighter brings the sessions closer without the families touching.
+  CELL.step = { x: CELL.w * 0.8, y: CELL.h * 0.8 };
+  // With no subagent anywhere there is no walking area to keep: just the parent, close-packed.
+  const COMPACT = { w: 80, h: 76, parent: { x: 5, y: 3, size: 70 }, step: { x: 66, y: 60 } };
+  const span = (n, size, step) => size + step * (n - 1);
+  const WANDERS = new Set(['READING', 'CODING', 'TOOL_CALL', 'THINKING', 'HIGH_LOAD']);
+  let crittersKey = '';
+  const critterEls = new Map();
+  const familyEls = new Map();
+  /** Where each family's parent stands, for the why bubble's tail. */
+  let familyAnchors = new Map();
+  /** Each kid's walk, kept across re-layouts: position in cell units, timer, mode. */
+  const walkers = new Map();
+  let cells = new Map();     // family id → { x, y, f } (cell origin and scale, viewBox units)
+
+  // Only MAX_KIDS fit: an agent in trouble or waiting on you must never be the one hidden.
+  const URGENT = new Set(['ERROR', 'WAITING']);
+  const urgentFirst = (agents) => [...agents.filter((a) => URGENT.has(a.state)),
+                                   ...agents.filter((a) => !URGENT.has(a.state))];
+
+  function critter(id, mini, title) {
+    let el = critterEls.get(id);
+    if (!el) {
+      el = proto.cloneNode(true);
+      el.removeAttribute('id');
+      if (mini) {
+        el.classList.add('mini');
+        const t = document.createElementNS(SVG_NS, 'title');
+        t.textContent = title;
+        el.prepend(t);
+      }
+      critterEls.set(id, el);
+    }
+    return el;
+  }
+  function slotted(el, cls) {
+    const slot = document.createElementNS(SVG_NS, 'g');
+    if (cls) slot.setAttribute('class', cls);
+    slot.appendChild(el);
+    return slot;
+  }
+
+  // ---- the walk -------------------------------------------------------------------------
+  function kidTransform(cell, w) {
+    const t = (w.y - CELL.area.y0) / (CELL.area.y1 - CELL.area.y0);
+    const depth = 0.72 + 0.38 * t;               // smaller behind, bigger in front
+    const s = cell.f * (CELL.kid / 160) * depth;
+    // Scale around the feet: the creature's feet are at (80, 146) in its own drawing.
+    return `translate(${(cell.x + w.x * cell.f).toFixed(2)}px, ${(cell.y + w.y * cell.f).toFixed(2)}px) ` +
+           `scale(${s.toFixed(4)}) translate(-80px, -146px)`;
+  }
+  function familyPace(famId) {
+    const load = familyLoads.get(famId) ?? 0;
+    return 0.6 + load / 100;                      // 0.6 calm … 1.6 storm
+  }
+  function stopWalker(w) {
+    clearTimeout(w.timer);
+    w.timer = 0;
+  }
+  function schedule(key, ms) {
+    const w = walkers.get(key);
+    if (!w) return;
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => walk(key), ms);
+  }
+  function walk(key) {
+    const w = walkers.get(key);
+    if (!w || !w.slot || !w.el) return;
+    const cell = cells.get(w.family);
+    if (!cell || !WANDERS.has(w.el.dataset.state) || !animating()) { w.timer = 0; return; }
+    const { x0, x1, y0, y1 } = CELL.area;
+    // Somewhere around the parent, but not standing right in front of its belly.
+    let nx;
+    let ny;
+    do {
+      nx = x0 + Math.random() * (x1 - x0);
+      ny = y0 + Math.random() * (y1 - y0);
+    } while (Math.abs(nx - 90) < 34 && ny >= CELL.parentFeet && ny < CELL.parentFeet + 22);
+    const pace = familyPace(w.family);
+    const dur = Math.max(0.5, Math.hypot(nx - w.x, ny - w.y) / (40 * pace));
+    // Behind or in front of the parent is decided at the start, while standing still: a
+    // DOM move during a transition would make it jump.
+    const front = ny >= CELL.parentFeet;
+    const layer = familyEls.get(w.family)?.querySelector(front ? '.front' : '.back');
+    if (layer && w.slot.parentNode !== layer) {
+      layer.appendChild(w.slot);
+      w.slot.getBoundingClientRect(); // settle the old position before the new one
+    }
+    w.el.classList.add('walking');
+    w.el.classList.toggle('lean-l', nx < w.x);
+    w.el.classList.toggle('lean-r', nx >= w.x);
+    w.x = nx;
+    w.y = ny;
+    w.slot.style.transitionDuration = `${dur.toFixed(2)}s`;
+    w.slot.style.transform = kidTransform(cell, w);
+    w.timer = setTimeout(() => {
+      w.el.classList.remove('walking');
+      schedule(key, (900 + Math.random() * 2400) / pace);
+    }, dur * 1000);
+  }
+  const familyLoads = new Map();
+  let animatingNow = false;
+  const animating = () => animatingNow;
+
+  // Try every number of columns; keep the one where families come out biggest.
+  function layoutCells(n, G) {
+    let best = { f: 0, cols: 1, rows: 1 };
+    for (let cols = 1; cols <= n; cols += 1) {
+      const rows = Math.ceil(n / cols);
+      const f = Math.min(160 / span(cols, G.w, G.step.x), 160 / span(rows, G.h, G.step.y));
+      if (f > best.f) best = { f, cols, rows };
+    }
+    return best;
+  }
+
+  function renderCritters(s, singleState) {
+    const sessions = s.sessions ?? [];
+    const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
+    pet.dataset.multi = String(multi);
+    const asleep = prefs.paused;
+    animatingNow = !asleep && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
+    const groups = multi
+      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
+                               agents: urgentFirst(x.agents ?? []) }))
+      : [{ id: '', state: singleState, load: s.load, agents: [] }];
+    for (const g of groups) familyLoads.set(g.id, g.load);
+
+    const key = JSON.stringify([multi, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    if (key !== crittersKey) {
+      crittersKey = key;
+      crittersLayer.replaceChildren();
+      familyEls.clear();
+      familyAnchors = new Map();
+      cells = new Map();
+      const keepCritters = new Set();
+      const keepWalkers = new Set();
+      if (!multi) {
+        const family = document.createElementNS(SVG_NS, 'g');
+        family.setAttribute('class', 'family');
+        familyEls.set('', family);
+        family.appendChild(slotted(critter('s:', false)));
+        crittersLayer.appendChild(family);
+        keepCritters.add('s:');
+        familyAnchors.set('', { x: 66, y: 26 });
+      } else {
+        const G = groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
+        const { f, cols, rows } = layoutCells(groups.length, G);
+        const x0 = (160 - f * span(cols, G.w, G.step.x)) / 2;
+        const y0 = (160 - f * span(rows, G.h, G.step.y)) / 2;
+        groups.forEach((g, i) => {
+          const cell = { x: x0 + (i % cols) * G.step.x * f, y: y0 + Math.floor(i / cols) * G.step.y * f, f };
+          cells.set(g.id, cell);
+          const family = document.createElementNS(SVG_NS, 'g');
+          family.setAttribute('class', 'family');
+          const back = document.createElementNS(SVG_NS, 'g');
+          back.setAttribute('class', 'back');
+          const front = document.createElementNS(SVG_NS, 'g');
+          front.setAttribute('class', 'front');
+          const P = G.parent;
+          const parent = slotted(critter(`s:${g.id}`, false));
+          parent.setAttribute('transform', `translate(${(cell.x + P.x * f).toFixed(2)} ${(cell.y + P.y * f).toFixed(2)}) scale(${(P.size * f / 160).toFixed(4)})`);
+          family.append(back, parent, front);
+          familyEls.set(g.id, family);
+          familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * 0.45) * f, y: cell.y + (P.y + 6) * f });
+          crittersLayer.appendChild(family);
+          keepCritters.add(`s:${g.id}`);
+
+          g.agents.slice(0, MAX_KIDS).forEach((a, k) => {
+            const id = `a:${g.id}:${a.id}`;
+            keepCritters.add(id);
+            keepWalkers.add(id);
+            const el = critter(id, true, `Subagent: ${a.type ?? 'unknown type'}`);
+            let w = walkers.get(id);
+            if (!w) {
+              // A newcomer starts at a random spot around its parent.
+              const { x0: ax, x1: bx, y0: ay, y1: by } = CELL.area;
+              w = { family: g.id, x: ax + Math.random() * (bx - ax), y: ay + Math.random() * (by - ay), timer: 0 };
+              walkers.set(id, w);
+            }
+            stopWalker(w);
+            el.classList.remove('walking');
+            w.el = el;
+            w.slot = slotted(el, 'kid-slot');
+            w.slot.style.transitionDuration = '0s';
+            w.slot.style.transform = kidTransform(cell, w);
+            (w.y >= CELL.parentFeet ? front : back).appendChild(w.slot);
+            schedule(id, 300 + k * 450);
+          });
+          if (g.agents.length > MAX_KIDS) {
+            const more = document.createElementNS(SVG_NS, 'text');
+            more.setAttribute('class', 'more');
+            more.setAttribute('transform', `translate(${(cell.x + 150 * f).toFixed(1)} ${(cell.y + 30 * f).toFixed(1)}) scale(${(f * 0.8).toFixed(4)})`);
+            more.textContent = `+${g.agents.length - MAX_KIDS}`;
+            front.appendChild(more);
+          }
+        });
+      }
+      for (const id of [...critterEls.keys()]) if (!keepCritters.has(id)) critterEls.delete(id);
+      for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); }
+    }
+
+    for (const g of groups) {
+      critterEls.get(`s:${g.id}`)?.setAttribute('data-state', g.state);
+      const states = [g.state];
+      for (const a of g.agents.slice(0, MAX_KIDS)) {
+        const state = asleep ? 'IDLE' : a.state;
+        states.push(state);
+        const id = `a:${g.id}:${a.id}`;
+        critterEls.get(id)?.setAttribute('data-state', state);
+        // A kid that starts doing something again sets off on its next walk.
+        const w = walkers.get(id);
+        if (w && !w.timer && WANDERS.has(state) && animatingNow) schedule(id, 400 + Math.random() * 800);
+      }
+      const family = familyEls.get(g.id);
+      if (!family) continue;
+      family.dataset.still = String(states.every((st) => st === 'IDLE'));
+      if (multi) {
+        // Each family at its own session's pace; the single creature keeps #pet's.
+        family.style.setProperty('--amp', (0.03 + 0.17 * g.load / 100).toFixed(3));
+        family.style.setProperty('--dur', ['3.2s', '1.4s', '0.7s'][familyTier(g.id, g.load)]);
+        family.style.setProperty('--k', (1.4 - 0.8 * g.load / 100).toFixed(2)); // calm 1.4 … storm 0.6
+      }
+    }
+  }
+
+  // Speed per family, in the same three tiers as the single creature (changing --dur
+  // mid-animation makes it jump, so it only moves between tiers, with hysteresis).
+  const familyTiers = new Map();
+  function familyTier(id, load) {
+    let tier = familyTiers.get(id) ?? 0;
+    const up = [0, 35, 70];
+    while (tier < 2 && load >= up[tier + 1]) tier += 1;
+    while (tier > 0 && load < up[tier] - 8) tier -= 1;
+    familyTiers.set(id, tier);
+    return tier;
   }
 
   // What the bubble says. Only closed values reach here (a tool class, an API error enum,
@@ -374,31 +721,70 @@
                        mcp: 'An MCP tool' };
   const API_ERRORS = { rate_limit: 'Rate limited', overloaded: 'API overloaded',
                        server_error: 'API server error' };
-  function whyText(s) {
-    const r = s.reason;
+  // ctx: the counts the storm line can quote for that creature (unknown → generic words).
+  function reasonText(r, ctx) {
     if (!r) return '';
     if (r.kind === 'tool_failed') return `${TOOL_NAMES[r.tool] ?? 'A tool'} failed`;
     if (r.kind === 'api_error') return API_ERRORS[r.code] ?? 'API error';
     if (r.kind !== 'storm') return '';
     switch (r.driver) {
-      case 'tool': return s.tool_calls_per_minute > 0 ? `${s.tool_calls_per_minute} tool calls/min` : 'Lots of tool calls';
-      case 'agent': return s.active_subagents === 1 ? '1 subagent running'
-        : s.active_subagents > 1 ? `${s.active_subagents} subagents running` : 'Lots of subagents';
+      case 'tool': return ctx.toolRate > 0 ? `${ctx.toolRate} tool calls/min` : 'Lots of tool calls';
+      case 'agent': return ctx.agents === 1 ? '1 subagent running'
+        : ctx.agents > 1 ? `${ctx.agents} subagents running` : 'Lots of subagents';
       case 'file': return 'Lots of files at once';
-      case 'generation': return s.tokens_per_minute != null
-        ? `${Math.round(s.tokens_per_minute / 1000)}k tokens/min` : 'Writing a lot';
+      case 'generation': return ctx.tokens != null ? `${Math.round(ctx.tokens / 1000)}k tokens/min` : 'Writing a lot';
       default: return '';
     }
   }
+  const agentName = (type) => {
+    const t = (type ?? 'agent').replace(/[-_]+/g, ' ');
+    const short = t.length > 10 ? `${t.slice(0, 9)}…` : t;
+    return short.charAt(0).toUpperCase() + short.slice(1);
+  };
+  // One bubble, always full size: in a crowd, the most urgent message, its tail pointing
+  // at the family it is about. Errors (an agent's or a session's) before storms.
+  function whyMessage(s) {
+    const sessions = s.sessions ?? [];
+    const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
+    if (!multi) {
+      return { text: reasonText(s.reason, { toolRate: s.tool_calls_per_minute, agents: s.active_subagents,
+                                            tokens: s.tokens_per_minute }), family: '' };
+    }
+    for (const x of sessions) {
+      const a = (x.agents ?? []).find((ag) => ag.state === 'ERROR' && ag.reason);
+      if (a) return { text: `${agentName(a.type)}: ${reasonText(a.reason, {})}`, family: x.id };
+    }
+    const ctx = (x) => ({ toolRate: x.tool_calls_per_minute, tokens: null,
+                          agents: (x.agents ?? []).filter((a) => a.state !== 'DONE').length });
+    const bad = sessions.find((x) => x.state === 'ERROR' && x.reason);
+    if (bad) return { text: reasonText(bad.reason, ctx(bad)), family: bad.id };
+    const storm = sessions.find((x) => x.state === 'HIGH_LOAD' && x.reason);
+    if (storm) return { text: reasonText(storm.reason, ctx(storm)), family: storm.id };
+    return { text: '', family: '' };
+  }
   const whyBubble = document.getElementById('why');
-  function renderWhy(text) {
+  function renderWhy({ text, family }) {
     pet.dataset.why = text;
     if (!text) return;
-    whyBubble.querySelector('text').textContent = text;
-    const w = Math.min(150, Math.round(text.length * 6.6 + 22)); // display:none can't be measured
+    const label = whyBubble.querySelector('text');
+    label.textContent = text;
+    const natural = Math.round(text.length * 6.6); // display:none can't be measured
+    const w = Math.min(156, natural + 22);
+    if (natural > w - 22) label.setAttribute('textLength', String(w - 22));
+    else label.removeAttribute('textLength');
     const rect = whyBubble.querySelector('rect');
     rect.setAttribute('width', String(w));
     rect.setAttribute('x', String(80 - w / 2));
+    // The bubble floats just above the head it is about (a lower row's family gets it over
+    // the row above), its tail's two dots leading down to that head.
+    const anchor = familyAnchors.get(family) ?? { x: 66, y: 26 };
+    const dy = Math.min(Math.max(0, anchor.y - 26), 120);
+    whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
+    const [near, far] = whyBubble.querySelectorAll('circle');
+    near.setAttribute('cx', String((80 * 0.4 + anchor.x * 0.6).toFixed(1)));
+    near.setAttribute('cy', '16');
+    far.setAttribute('cx', String(anchor.x.toFixed(1)));
+    far.setAttribute('cy', '24');
   }
 
   // Debug overlay is off by default; `d` toggles it, as does #debug in the URL.
@@ -452,6 +838,7 @@
   function applyPrefs(p) {
     if (!p) return;
     prefs = p;
+    renderSettings(p);
     pet.dataset.showSessions = String(p.showSessions);
     pet.dataset.paused = String(p.paused);
     document.documentElement.style.setProperty('--pet-size', `${petPx()}px`);
@@ -511,6 +898,7 @@
 
   async function toggleChat(open = !chatOpen) {
     chatOpen = open;
+    if (!open) showSettings(false); // it opens on the conversation next time
     const sq = petPx() + 30;
     let layout = { above: true, right: true };
     if (T) {
@@ -610,6 +998,51 @@
   }
   document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); send(); });
   document.getElementById('close').addEventListener('click', () => toggleChat(false));
+
+  // ---- settings ---------------------------------------------------------------------------
+  const bubbleEl = document.getElementById('bubble');
+  const gear = document.getElementById('gear');
+  const settingsEl = document.getElementById('settings');
+  const settingsStatus = document.getElementById('settings-status');
+  const SETTINGS = {
+    storm: { key: 'stormThreshold', input: document.getElementById('storm'),
+             out: document.getElementById('storm-out'), fmt: (v) => `${v}` },
+    hold: { key: 'minStateSeconds', input: document.getElementById('hold'),
+            out: document.getElementById('hold-out'), fmt: (v) => `${v} s` },
+  };
+  function showSettings(open) {
+    bubbleEl.classList.toggle('settings', open);
+    settingsEl.hidden = !open;
+    gear.setAttribute('aria-pressed', String(open));
+    document.getElementById('who').textContent = open ? 'Settings' : 'Claude';
+    settingsStatus.textContent = '';
+  }
+  gear.addEventListener('click', () => showSettings(!bubbleEl.classList.contains('settings')));
+  // Values come from the feed; a slider being dragged is not overwritten under the finger.
+  function renderSettings(p) {
+    for (const s of Object.values(SETTINGS)) {
+      const value = p[s.key];
+      if (typeof value !== 'number') continue;
+      if (document.activeElement !== s.input) s.input.value = String(value);
+      s.out.textContent = s.fmt(Number(s.input.value));
+    }
+  }
+  async function savePref(key, value) {
+    settingsStatus.textContent = 'Saving…';
+    try {
+      applyPrefs(await invoke('update_prefs', { patch: { [key]: value } }));
+      settingsStatus.textContent = 'Saved';
+    } catch (err) {
+      settingsStatus.textContent = `Not saved: ${err}`;
+    }
+  }
+  for (const s of Object.values(SETTINGS)) {
+    s.input.addEventListener('input', () => { s.out.textContent = s.fmt(Number(s.input.value)); });
+    s.input.addEventListener('change', () => { savePref(s.key, Number(s.input.value)); s.input.blur(); });
+  }
+  for (const button of settingsEl.querySelectorAll('.reset')) {
+    button.addEventListener('click', () => savePref(button.dataset.key, null));
+  }
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 90)}px`;
@@ -645,7 +1078,8 @@
     lastFrame = s;
     applyPrefs(s.prefs);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
-                                (s.sessions ?? []).map((x) => x.id + x.status),
+                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute,
+                                                             (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
     last = key;
@@ -654,9 +1088,9 @@
     // Its own Claude answering is observable from right here (the run is ours), so it
     // shows as thinking even though that session bypasses the hooks.
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
-    pet.dataset.state = prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state;
-    renderSessions(s.sessions ?? []);
-    renderWhy(prefs.paused ? '' : whyText(s));
+    renderCritters(s, prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state);
+    renderSessions(s.sessions ?? [], s.focus);
+    renderWhy(prefs.paused ? { text: '', family: '' } : whyMessage(s));
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 

@@ -163,6 +163,9 @@ estimated_activity_rate = events in the last 60 s        // measured, real, unit
   "tokens_per_minute": null,
   "tool_calls_per_minute": 6,
   "active_subagents": 2,
+  // The session the creature shows: the busiest by load, kept until another is clearly
+  // busier. load, rates, subagents, context_load and session all describe this one.
+  "focus": "a1b2c3d4",
   "session": { "tokens": 115000, "cost_usd": 1.23, "lines_added": 156, "lines_removed": 23 },
   "sources": { "hooks": true, "statusline": true, "transcript": false, "otel": false },
   "estimated": ["load", "estimated_activity_rate"],

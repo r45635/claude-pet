@@ -40,6 +40,34 @@ without the other: the widget reconnects on its own. To start both at login:
 | Advanced settings… | opens `~/.claude-pet/config.json` (yours to edit) next to `config.reference.jsonc` (read-only: every key, its effective value, what it does) |
 | Quit claude-pet | closes the widget until the next login (or `launchctl kickstart`) |
 
+## One creature per agent
+
+With one Claude Code session and no subagent, there is one creature, as before. Otherwise
+each session gets its own creature, and each of its subagents a smaller one at its feet,
+showing what *that* agent is doing (from the `agent_id` Claude Code puts on a subagent's
+tool events). Everything is scaled to fit the creature's usual square, never larger. Up
+to 4 subagents are drawn per session, then `+n`; one in error or waiting on you is
+always among those drawn. Hover a small one for its agent type.
+
+Each session is a family: the parent in the middle, its subagents wandering around it
+at random — each walks somewhere (little steps, leaning the way it goes, behind the
+parent or in front of it), stops to do the gesture of what it is doing (reading: nods,
+coding: taps, a tool: hammers, thinking: floats, done: a jump), then sets off again.
+The busier the session, the faster they walk and the shorter they pause. A family
+where everyone sleeps is fully still, with no timer running; the macOS "reduce motion"
+setting stops the walks and gestures. Background agents
+keep their creature while you chat and after the turn that launched them: the parent
+then shows it is waiting on them instead of falling asleep. The "why" bubble stays full
+size and floats above the family it is about, an agent's error first ("Explore: Bash
+failed"), then a session's error, then a storm.
+
+## Settings (click the creature, then the gear)
+
+| Setting | Effect |
+|---|---|
+| Storm threshold (30–100) | load at which the creature storms; it calms down 10 points lower. Overrides the temperament until reset |
+| Minimum time per state (0–10 s) | each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once |
+
 Every choice is written by the daemon to `~/.claude-pet/config.json` and applied **live**,
 as are hand edits to that file. Explicit engine overrides in the file always win over the
 temperament preset.

@@ -100,6 +100,15 @@ fn chat_ask(app: AppHandle, pet: State<'_, Pet>, text: String) -> Result<(), Str
     pet.chat.ask(app, text, chat_model())
 }
 
+/// A settings-panel patch (`{"stormThreshold": 80}`, `{"minStateSeconds": null}`…).
+/// The daemon validates every key; the page never writes to it directly.
+#[tauri::command]
+fn update_prefs(pet: State<'_, Pet>, patch: Value) -> Result<Value, String> {
+    let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
+    let body = daemon.post("/config", &patch.to_string())?;
+    serde_json::from_str(&body).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn chat_cancel(pet: State<'_, Pet>) -> bool {
     pet.chat.cancel()
@@ -239,7 +248,7 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, show_menu, resize, layout_panel])
+        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }
