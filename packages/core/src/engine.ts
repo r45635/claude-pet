@@ -141,10 +141,28 @@ type Agent = {
   /** Its last event, for agentStaleMs. */
   lastMs: number;
   hold: Hold;
+  gen?: Gen;
 };
 
 /** What a creature shows and since when: `minStateMs` keeps it on screen. */
 type Hold = { shown: PetState; sinceMs: number };
+/** From the conversation files: is this thread's model working (true) or a tool (false)? */
+type Gen = { on: boolean; atMs: number };
+
+/**
+ * One line of a conversation file, reduced by the daemon to what the creature needs:
+ * whose thread (session, subagent), and what kind of line. Never any text.
+ */
+export type TranscriptSignal = {
+  sid: string;
+  /** Subagent id as the hooks give it (12 safe chars); null for the main thread. */
+  aid: string | null;
+  atMs: number;
+  /** input = a prompt or a tool result (the model starts); the rest are its blocks. */
+  kind: 'input' | 'thinking' | 'text' | 'tool_use';
+  /** Output tokens this line adds (already de-duplicated per request). */
+  outTokens?: number;
+};
 type SessionSeen = {
   firstMs: number;
   lastMs: number;
@@ -177,6 +195,7 @@ type Lane = {
   idleMs: number;
   previous: PetState;
   hold: Hold;
+  gen?: Gen;
 };
 
 /**
@@ -258,7 +277,8 @@ export class Engine {
   #sawHookEvent = false;
 
   #transcriptEnabled = false;
-  #tokensPerMinute: number | null = null;
+  /** Output tokens seen in the conversation files, for tokens_per_minute. */
+  #tokens: { tsMs: number; n: number }[] = [];
 
   constructor(nowMs: number, config: EngineConfig = DEFAULT_CONFIG) {
     this.config = config;
@@ -325,13 +345,43 @@ export class Engine {
   /** Enable the opt-in transcript source. Until then `tokens_per_minute` stays null. */
   enableTranscriptSource(enabled: boolean): void {
     this.#transcriptEnabled = enabled;
-    if (!enabled) this.#tokensPerMinute = null;
+    if (enabled) return;
+    this.#tokens = [];
+    for (const lane of this.#lanes.values()) delete lane.gen;
+    for (const agents of this.#agents.values()) for (const a of agents.values()) delete a.gen;
   }
 
-  /** Measured output-token rate from the transcript source, when it is enabled. */
-  setTokensPerMinute(value: number | null): void {
+  /**
+   * A line from a conversation file. It only updates threads the hooks already know: a
+   * late line from a finished subagent must not bring its creature back.
+   */
+  ingestTranscript(signal: TranscriptSignal): void {
     if (!this.#transcriptEnabled) return;
-    this.#tokensPerMinute = value;
+    const lane = this.#lanes.get(signal.sid);
+    if (!lane) return;
+    const thread = signal.aid === null ? lane : this.#agents.get(signal.sid)?.get(signal.aid);
+    if (!thread || ('doneMs' in thread && thread.doneMs > 0)) return;
+    // A prompt or a tool result: the model is up. A tool_use: the tool has it now.
+    // Thinking and text blocks: still the model (another block may follow).
+    thread.gen = { on: signal.kind !== 'tool_use', atMs: signal.atMs };
+    if ('doneMs' in thread) thread.lastMs = Math.max(thread.lastMs, signal.atMs);
+    const n = signal.outTokens ?? 0;
+    if (n > 0) {
+      pourLoad(lane.load, 'generation', n * this.config.transcript.perToken);
+      this.#tokens.push({ tsMs: signal.atMs, n });
+    }
+    lane.lastMs = Math.max(lane.lastMs, signal.atMs);
+    const seen = this.#sessions.get(signal.sid);
+    if (seen) seen.lastMs = Math.max(seen.lastMs, signal.atMs);
+    const turn = this.#turns.get(signal.sid);
+    if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, signal.atMs);
+  }
+
+  /** null = the conversation files say nothing (fresh) about this thread. */
+  #genOf(thread: { gen?: Gen } | undefined, nowMs: number): boolean | null {
+    const gen = thread?.gen;
+    if (!this.#transcriptEnabled || !gen || nowMs - gen.atMs > this.config.transcript.staleMs) return null;
+    return gen.on;
   }
 
   ingest(event: PetEvent): void {
@@ -420,6 +470,7 @@ export class Engine {
         this.#turns.delete(sid);
         this.#pending.delete(sid);
         lane.dominant = null;
+        if (lane.gen) lane.gen = { on: false, atMs: event.tsMs };
         break;
       case 'PERMISSION_WAITING':
         this.#pending.add(sid);
@@ -472,6 +523,8 @@ export class Engine {
   sessionsToSample(): { sid: string; ppid: number }[] {
     const out: { sid: string; ppid: number }[] = [];
     for (const sid of this.#turns.keys()) {
+      // Covered by the conversation files: no need to spawn nettop for it.
+      if (this.#genOf(this.#lanes.get(sid), this.#nowMs) !== null) continue;
       const ppid = this.#sessions.get(sid)?.ppid;
       if (ppid) out.push({ sid, ppid });
     }
@@ -499,9 +552,24 @@ export class Engine {
 
   /** null = no fresh measurement for this session; else whether its model is streaming. */
   #generating(sid: string, nowMs: number): boolean | null {
+    const fromFiles = this.#genOf(this.#lanes.get(sid), nowMs);
+    if (fromFiles !== null) return fromFiles;
     const net = this.#sessions.get(sid)?.net;
     if (!net || nowMs - net.atMs > this.config.net.freshMs) return null;
     return net.bytesPerSec >= this.config.net.activeBytesPerSec;
+  }
+
+  /**
+   * `generating` as the creature should show it. The conversation files say the model is
+   * back to work a few ms after a Read: a tool that quick must still be seen, for
+   * minStateMs, before THINKING takes over. (The network sensor, 5 s apart, never had
+   * this problem.)
+   */
+  #shownGenerating(sid: string, thread: { dominantAtMs: number }, nowMs: number): boolean | null {
+    const generating = this.#generating(sid, nowMs);
+    const fromFiles = this.#genOf(this.#lanes.get(sid), nowMs) !== null;
+    return fromFiles && generating === true && nowMs - thread.dominantAtMs < this.config.minStateMs
+      ? null : generating;
   }
 
   /** Turns that are running and trusted: not blocked on the user, not gone silent. */
@@ -573,7 +641,7 @@ export class Engine {
   #sessionState(sid: string, seen: SessionSeen, load: number, trusted: boolean, nowMs: number): PetState {
     const lane = this.#lanes.get(sid);
     if (!lane) return 'IDLE';
-    const generating = trusted ? this.#generating(sid, nowMs) : null;
+    const generating = trusted ? this.#shownGenerating(sid, lane, nowMs) : null;
     const raw = resolveState(
       {
         nowMs,
@@ -612,11 +680,15 @@ export class Engine {
       if (a.doneMs > 0) raw = 'DONE';
       else if (a.errorMs > 0 && nowMs - a.errorMs < this.config.errorStickyMs) raw = 'ERROR';
       else if (a.waiting) raw = 'WAITING';
+      // Its conversation file says its model is working: that beats the last tool event,
+      // once that tool has been on screen for minStateMs (see #shownGenerating).
+      else if (this.#genOf(a, nowMs) === true && nowMs - a.dominantAtMs >= this.config.minStateMs) raw = 'THINKING';
       else if (a.dominant && nowMs - a.dominantAtMs < this.config.idleAfterMs) {
         raw = a.dominant === 'read' ? 'READING' : a.dominant === 'write' ? 'CODING' : 'TOOL_CALL';
       }
-      // Running, no tool in flight: its model is working (the main thread's rule 8).
-      else raw = 'THINKING';
+      // Running, no tool in flight: its model is working (the main thread's rule 8);
+      // unless its file says a tool has it.
+      else raw = this.#genOf(a, nowMs) === false ? 'TOOL_CALL' : 'THINKING';
       // DONE is final: the hold must not keep a finished agent looking busy.
       const state = raw === 'DONE' ? 'DONE' : this.#hold(a.hold, raw, nowMs);
       if (state === 'DONE') a.hold = { shown: 'DONE', sinceMs: a.doneMs };
@@ -651,6 +723,15 @@ export class Engine {
       hold.sinceMs = nowMs;
     }
     return next;
+  }
+
+  /** Output tokens per minute from the conversation files; null when the source is off. */
+  #tokensPerMinuteAt(nowMs: number): number | null {
+    if (!this.#transcriptEnabled) return null;
+    const from = nowMs - this.config.rateWindowMs;
+    while (this.#tokens.length > 0 && this.#tokens[0]!.tsMs < from) this.#tokens.shift();
+    const sum = this.#tokens.reduce((acc, t) => acc + t.n, 0);
+    return Math.round(sum * (60_000 / this.config.rateWindowMs));
   }
 
   get #turnActive(): boolean {
@@ -699,7 +780,7 @@ export class Engine {
     // Streaming is read on the focused session only: another window's stream must not
     // turn this one's reading into thinking.
     const focusTrusted = focus !== null && this.#workingTurns(nowMs).some(([id]) => id === focus!.sid);
-    const measured = focusTrusted ? this.#generating(focus!.sid, nowMs) : null;
+    const measured = focusTrusted ? this.#shownGenerating(focus!.sid, focus!.lane, nowMs) : null;
     const raw = resolveState(
       {
         nowMs,
@@ -747,7 +828,7 @@ export class Engine {
       load_confidence: confidence,
       context_load: contextLoad,
       estimated_activity_rate: activityRate,
-      tokens_per_minute: this.#tokensPerMinute,
+      tokens_per_minute: this.#tokensPerMinuteAt(nowMs),
       tool_calls_per_minute: toolRate,
       active_subagents: focus ? this.#running(focus.sid) : 0,
       sessions: this.#sessionList(nowMs, ticks),

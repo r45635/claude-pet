@@ -18,6 +18,7 @@ import { ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
+import { TranscriptSource } from './transcript.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
 import { mergeConfig } from '@claude-pet/core';
@@ -39,6 +40,15 @@ const runtime = new Runtime({ spoolFile: SPOOL_FILE, warmStartMs: 2 * 60 * 60_00
 
 const clients = new Set<ServerResponse>();
 let prefs: Prefs = prefsOf(readUserFile());
+
+// Opt-in (settings panel). Off, nothing watches or opens the conversation files.
+const transcript = new TranscriptSource();
+function applyTranscriptPref(): void {
+  const on = prefs.readTranscripts && !prefs.paused && transcript.start();
+  if (!on) transcript.stop();
+  runtime.engine.enableTranscriptSource(on);
+}
+applyTranscriptPref();
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
 function view(): string {
@@ -87,6 +97,7 @@ async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<
   writeUserFile(user);
   prefs = prefsOf(user);
   runtime.engine.setConfig(mergeConfig(user)); // hot: no restart, state kept
+  applyTranscriptPref();
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify(prefs));
   broadcast();
@@ -97,7 +108,7 @@ let timer: NodeJS.Timeout | undefined;
 let lastEventAt = 0;
 
 function tick(): void {
-  const read = runtime.pump();
+  const read = runtime.pump() + transcript.drain((signal) => runtime.engine.ingestTranscript(signal));
   if (read > 0) {
     quietTicks = 0;
     lastEventAt = Date.now();
@@ -239,6 +250,7 @@ watch(ROOT_DIR, (_event, name) => {
     const user = readUserFile();
     prefs = prefsOf(user);
     runtime.engine.setConfig(mergeConfig(user));
+    applyTranscriptPref();
     broadcast();
   }, 200);
 });

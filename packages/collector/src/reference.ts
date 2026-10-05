@@ -37,6 +37,9 @@ export const KEY_DOCS: Record<string, string> = {
   'net.freshMs': 'How long one sample (taken every ~5 s) stays valid.',
   'net.perKb': 'Load poured per KB streamed. Higher = more excited by long answers.',
   'net.quietWorkFactor': 'Share of work.max while a turn is open but nothing streams (a tool runs).',
+  transcript: 'The conversation-file source (opt-in, settings panel): per session and per subagent, whether the model is working or a tool runs, and real output tokens. Replaces the network sensor where it applies.',
+  'transcript.perToken': 'Load poured per output token. Higher = more excited by long answers.',
+  'transcript.staleMs': 'A "generating" signal with no new line for this long is ignored.',
 };
 
 const HEADER = `// claude-pet — configuration reference (read-only, regenerated each time it is opened)

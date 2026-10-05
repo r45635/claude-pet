@@ -18,7 +18,7 @@ These Claude Code hook fields are available to us and are **never extracted**:
 | `message_text` | `MessageDisplay` | the model's output, streamed |
 | `expanded_prompt` | `UserPromptExpansion` | prompt content |
 | `user_response` | `ElicitationResult` | whatever was typed into a dialog |
-| `transcript_path` content | all | the entire conversation |
+| `transcript_path` content | all | the entire conversation (see the opt-in below) |
 
 ## Reduced before storage
 
@@ -40,6 +40,28 @@ These Claude Code hook fields are available to us and are **never extracted**:
    drops everything else before it reaches the engine.
 
 Defence in depth is the point: either layer alone would be enough on a good day.
+
+## The conversation files: opt-in, off by default
+
+Settings → *Read conversation files* lets the daemon follow `~/.claude/projects/**/*.jsonl`,
+where Claude Code writes each session and each subagent. It is the one place the pet opens
+a file that holds prompts and answers, so it is **off until you turn it on**, and turning
+it off stops the watcher at once.
+
+What it keeps, per line: whose thread (session id cut to 8 chars, subagent id cut to 12,
+as the hooks cut them), the line kind (`input`, `thinking`, `text`, `tool_use`) and the
+output token count. Nothing else leaves `transcript.ts`: no text, no tool name, no path,
+no cwd. Nothing from it is written to disk or logged; it goes to the engine in memory.
+
+How little is read:
+- user lines (prompts and tool results: most of the bytes) are recognised on their first
+  bytes, where Claude Code writes `"type":"user"`, and are **never parsed**;
+- assistant lines are parsed only to read their block types and usage;
+- history is never read: at start the daemon notes where each existing file ends.
+
+`packages/collector/test/transcript.test.ts` puts `CANARY_<random>` in prompts, tool
+results, thinking, text, tool inputs and `cwd`, and asserts it is in no signal that comes
+out.
 
 ## Nothing leaves the machine
 
