@@ -11,7 +11,7 @@
 ## Prebuilt
 
 Users do not build it: `npm run autostart -- install` downloads the binary GitHub Actions
-built for this version (`.github/workflows/widget.yml`). To publish a version: bump it in
+built for this version (`.github/workflows/release.yml`). To publish a version: bump it in
 `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (the workflow
 refuses a mismatch), merge, then push the tag `v<version>`. A pull request that touches
 the widget gets a build too, kept as a workflow artifact, without a release.

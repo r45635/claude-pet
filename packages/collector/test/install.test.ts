@@ -83,3 +83,18 @@ test('cli: --dry-run writes nothing; a real run backs up then writes', () => {
   execFileSync('node', [INSTALL, 'uninstall', '--settings', file], { env });
   assert.equal(readFileSync(file, 'utf8'), original, 'uninstall must restore the file byte for byte');
 });
+
+test('install: re-pointed at another copy of the scripts, rewrites our entries in place', () => {
+  const first = planInstall(HUB, '/repo/packages/collector/bin').settings;
+  const { settings, changes } = planInstall(first, '/home/.claude-pet/app/hooks');
+  assert.equal(changes.length, HOOK_EVENTS.length + 1);
+  assert.ok(changes.every((c) => c.startsWith('~ ')));
+  for (const event of HOOK_EVENTS) {
+    const ours = settings.hooks![event].flatMap((g) => g.hooks).filter((h) => h.command.includes('claude-pet-hook.sh'));
+    assert.equal(ours.length, 1, event);
+    assert.ok(ours[0].command.includes('/home/.claude-pet/app/hooks/'), event);
+  }
+  assert.ok(settings.statusLine!.command.includes('/home/.claude-pet/app/hooks/'));
+  assert.deepEqual(settings.hooks!.SessionStart[0], HUB.hooks!.SessionStart[0]);
+  assert.equal(planInstall(settings, '/home/.claude-pet/app/hooks').changes.length, 0);
+});

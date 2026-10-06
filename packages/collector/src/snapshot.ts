@@ -9,13 +9,10 @@
  */
 
 import { Runtime } from './runtime.ts';
+import { isMain } from './entry.ts';
 import { SPOOL_FILE } from './paths.ts';
 
-const watch = process.argv.includes('--watch');
-const spoolFile = process.env.CLAUDE_PET_SPOOL ?? SPOOL_FILE;
-const runtime = new Runtime({ spoolFile, fromStart: true });
-
-function line(): string {
+function line(runtime: Runtime): string {
   runtime.pump();
   const s = runtime.snapshot();
   const context = s.context_load === null ? ' ctx —' : ` ctx ${s.context_load}%`;
@@ -31,10 +28,19 @@ function line(): string {
   );
 }
 
-if (!watch) {
-  runtime.pump();
-  process.stdout.write(`${JSON.stringify(runtime.snapshot(), null, 2)}\n`);
-} else {
-  process.stderr.write(`watching ${spoolFile} — ctrl-c to stop\n`);
-  setInterval(() => process.stdout.write(`${line()}\n`), 500);
+export function main(argv: string[]): number {
+  const spoolFile = process.env.CLAUDE_PET_SPOOL ?? SPOOL_FILE;
+  const runtime = new Runtime({ spoolFile, fromStart: true });
+  if (!argv.includes('--watch')) {
+    runtime.pump();
+    process.stdout.write(`${JSON.stringify(runtime.snapshot(), null, 2)}\n`);
+  } else {
+    process.stderr.write(`watching ${spoolFile} — ctrl-c to stop\n`);
+    setInterval(() => process.stdout.write(`${line(runtime)}\n`), 500);
+  }
+  return 0;
+}
+
+if (isMain(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
 }
