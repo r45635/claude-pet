@@ -150,7 +150,8 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - **A tray under the feet**: one pastille per session, and the plan's usage gauge — how
   much of the current 5-hour window is used (green, amber from 70 %, red from 90 %) and
   the time left before it resets. It comes from the status line, so it only shows on a
-  Claude.ai plan, not with an API key.
+  claude.ai Pro or Max plan (not with an API key, Bedrock or Vertex), after the session's
+  first answer, and not in VS Code's chat panel (see below).
 - **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
   `Bash failed`, `Rate limited`).
 - **Settings** (gear icon in the chat bubble): storm threshold and minimum time per state,
@@ -179,6 +180,16 @@ The installer **merges**: existing hooks are left untouched, a foreign `statusLi
 overwritten (the meter then stays offline and says so), and a re-run is a no-op. Every write
 is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
 without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
+
+### VS Code
+
+The Claude Code extension's graphical chat panel runs the hooks but not the status line.
+The creature follows those sessions like any other; what the status line carries does not
+arrive: no usage gauge, no context fill. To get them, switch the extension to terminal
+mode: VS Code settings → Extensions → Claude Code → **Use Terminal**
+(`claudeCode.useTerminal`). The only other source of plan usage would be Anthropic's
+internal usage API, which means reading your login token from the Keychain and calling
+out to the network: the pet does neither.
 
 ## Start at login
 
