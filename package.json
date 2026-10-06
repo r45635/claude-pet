@@ -4,6 +4,7 @@
   "private": true,
   "description": "A local desktop creature that visualizes Claude Code's observable activity.",
   "license": "MIT",
+  "repository": "github:r45635/claude-pet",
   "type": "module",
   "engines": {
     "node": ">=23.6"
@@ -20,6 +21,7 @@
     "install-hooks": "node packages/collector/src/install.ts install",
     "uninstall-hooks": "node packages/collector/src/install.ts uninstall",
     "autostart": "node packages/collector/src/autostart.ts",
+    "fetch-widget": "node packages/collector/src/widget.ts fetch",
     "replay": "node packages/simulator/src/replay.ts"
   },
   "devDependencies": {
