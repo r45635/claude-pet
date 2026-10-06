@@ -43,7 +43,7 @@ has launchd restart both on the new code (`status` and `uninstall` also exist).
 | Item | Effect |
 |---|---|
 | Temperament → Zen / Normal / Nervous | presets for what excites the creature, when it storms, how fast it calms down (`TEMPERAMENTS` in `packages/core/src/config.ts`) |
-| Size → Small / Medium / Large | window and creature size |
+| Size → Small / Medium / Large | window and creature size: 110, 150, 220 px (any size from 80 to 300 px with the slider in the settings panel) |
 | Session pastilles | show/hide one dot per live Claude Code session |
 | Pause (sleep) | the creature sleeps; the network sensor stops sampling |
 | Advanced settings… | opens `~/.claude-pet/config.json` (yours to edit) next to `config.reference.jsonc` (read-only: every key, its effective value, what it does) |

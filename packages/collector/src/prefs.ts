@@ -2,7 +2,7 @@
  * The creature's preferences, as set from its right-click menu. They live in the same
  * ~/.claude-pet/config.json as the hand-tuned engine overrides — one file, one truth:
  *
- *   { "temperament": "zen", "ui": { "size": "large", "showSessions": false, "paused": false },
+ *   { "temperament": "zen", "ui": { "sizePx": 180, "showSessions": false, "paused": false },
  *     ...any engine override, which always wins over the temperament preset }
  *
  * A patch from the menu is validated key by key; anything else is refused, so the
@@ -16,6 +16,9 @@ import { CONFIG_FILE } from './paths.ts';
 
 export const SIZES = ['small', 'medium', 'large'] as const;
 export type Size = (typeof SIZES)[number];
+/** The menu's sizes are shortcuts for these; the settings slider sets any whole px in range. */
+export const SIZE_PX: Record<Size, number> = { small: 110, medium: 150, large: 220 };
+export const SIZE_RANGE = { min: 80, max: 300 } as const;
 
 export const CHAT_MODELS = ['default', 'sonnet', 'haiku'] as const;
 export type ChatModel = (typeof CHAT_MODELS)[number];
@@ -24,7 +27,10 @@ export type Prefs = {
   temperament: Temperament;
   /** Model for the creature's own Claude (run by the widget). `default` = Claude Code's pick. */
   chatModel: ChatModel;
-  size: Size;
+  /** The menu preset matching `sizePx`, or 'custom' when the slider set something else. */
+  size: Size | 'custom';
+  /** Creature size in px: the slider's value, else the preset's (`ui.size`, older files). */
+  sizePx: number;
   showSessions: boolean;
   paused: boolean;
   /**
@@ -49,6 +55,7 @@ export const DEFAULT_PREFS: Prefs = {
   temperament: 'normal',
   chatModel: 'default',
   size: 'medium',
+  sizePx: SIZE_PX.medium,
   showSessions: true,
   paused: false,
   readTranscripts: false,
@@ -56,8 +63,10 @@ export const DEFAULT_PREFS: Prefs = {
   minStateSeconds: BASE.minStateMs / 1000,
 };
 
-/** A patch: the panel's two numbers may also be null, meaning "back to the default". */
-export type PrefsPatch = Partial<Omit<Prefs, 'stormThreshold' | 'minStateSeconds'>> & {
+/** A patch: the panel's numbers may also be null, meaning "back to the default". */
+export type PrefsPatch = Partial<Omit<Prefs, 'size' | 'sizePx' | 'stormThreshold' | 'minStateSeconds'>> & {
+  size?: Size;
+  sizePx?: number | null;
   stormThreshold?: number | null;
   minStateSeconds?: number | null;
 };
@@ -76,15 +85,22 @@ export function readUserFile(file = CONFIG_FILE): UserFile {
   }
 }
 
+function sizeOf(ui: Record<string, unknown>): Pick<Prefs, 'size' | 'sizePx'> {
+  const sizePx = inRange(ui.sizePx, SIZE_RANGE) && Number.isInteger(ui.sizePx)
+    ? ui.sizePx
+    : SIZE_PX[SIZES.includes(ui.size as Size) ? (ui.size as Size) : DEFAULT_PREFS.size as Size];
+  return { sizePx, size: SIZES.find((s) => SIZE_PX[s] === sizePx) ?? 'custom' };
+}
+
 export function prefsOf(user: UserFile): Prefs {
   const ui = user.ui ?? {};
   const engine = mergeConfig(user);
   return {
+    ...sizeOf(ui),
     stormThreshold: engine.highLoadThreshold,
     minStateSeconds: engine.minStateMs / 1000,
     temperament: isTemperament(user.temperament) ? user.temperament : DEFAULT_PREFS.temperament,
     chatModel: CHAT_MODELS.includes(ui.chatModel as ChatModel) ? (ui.chatModel as ChatModel) : DEFAULT_PREFS.chatModel,
-    size: SIZES.includes(ui.size as Size) ? (ui.size as Size) : DEFAULT_PREFS.size,
     showSessions: typeof ui.showSessions === 'boolean' ? ui.showSessions : DEFAULT_PREFS.showSessions,
     paused: typeof ui.paused === 'boolean' ? ui.paused : DEFAULT_PREFS.paused,
     readTranscripts: typeof ui.readTranscripts === 'boolean' ? ui.readTranscripts : DEFAULT_PREFS.readTranscripts,
@@ -98,6 +114,9 @@ export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
   for (const [key, value] of Object.entries(raw)) {
     if (key === 'temperament' && isTemperament(value)) out.temperament = value;
     else if (key === 'size' && SIZES.includes(value as Size)) out.size = value as Size;
+    else if (key === 'sizePx' && (value === null || (inRange(value, SIZE_RANGE) && Number.isInteger(value)))) {
+      out.sizePx = value;
+    }
     else if (key === 'chatModel' && CHAT_MODELS.includes(value as ChatModel)) out.chatModel = value as ChatModel;
     else if (key === 'showSessions' && typeof value === 'boolean') out.showSessions = value;
     else if (key === 'paused' && typeof value === 'boolean') out.paused = value;
@@ -117,7 +136,18 @@ export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
 export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
   const next: UserFile = { ...user, ui: { ...(user.ui ?? {}) } };
   if (patch.temperament !== undefined) next.temperament = patch.temperament;
-  if (patch.size !== undefined) next.ui!.size = patch.size;
+  // One size at a time: a menu preset clears the slider's value and the other way round.
+  if (patch.size !== undefined) {
+    next.ui!.size = patch.size;
+    delete next.ui!.sizePx;
+  }
+  if (patch.sizePx === null) {
+    delete next.ui!.size;
+    delete next.ui!.sizePx;
+  } else if (patch.sizePx !== undefined) {
+    next.ui!.sizePx = patch.sizePx;
+    delete next.ui!.size;
+  }
   if (patch.chatModel !== undefined) next.ui!.chatModel = patch.chatModel;
   if (patch.showSessions !== undefined) next.ui!.showSessions = patch.showSessions;
   if (patch.paused !== undefined) next.ui!.paused = patch.paused;
