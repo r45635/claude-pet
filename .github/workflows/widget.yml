@@ -26,7 +26,7 @@ jobs:
     env:
       TARGET: aarch64-apple-darwin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Versions agree
         id: version
@@ -68,7 +68,7 @@ jobs:
           (cd dist && shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.asset }}.sha256")
           cat dist/*.sha256
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.version.outputs.asset }}
           path: dist/*
