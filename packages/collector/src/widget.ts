@@ -4,7 +4,7 @@
  *
  *   1. a local build (apps/widget/src-tauri/target/release) — contributors, always wins;
  *   2. otherwise the prebuilt one, downloaded once from this repo's GitHub Release for the
- *      checkout's version (.github/workflows/widget.yml publishes it) into
+ *      checkout's version (.github/workflows/release.yml publishes it) into
  *      ~/.claude-pet/bin/v<version>/.
  *
  * The download is the only outbound request in the codebase. It runs when the user asks
@@ -21,13 +21,10 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GITHUB_REPO, isMain, VERSION } from './entry.ts';
 import { ROOT_DIR } from './paths.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const PKG = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')) as { version: string; repository: string };
-export const VERSION = PKG.version;
-/** "github:owner/name" → "owner/name" */
-export const GITHUB_REPO = PKG.repository.replace(/^github:/, '');
 export const TARGET = 'aarch64-apple-darwin';
 const BIN = 'claude-pet-widget';
 
@@ -108,7 +105,7 @@ export function fetchWidget(tag = `v${VERSION}`, { force = false, root = ROOT_DI
   }
 }
 
-function main(argv: string[]): number {
+export function main(argv: string[]): number {
   const i = argv.indexOf('--tag');
   const tag = i >= 0 && argv[i + 1] ? argv[i + 1] : `v${VERSION}`;
   if (argv.includes('fetch')) {
@@ -129,6 +126,6 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }

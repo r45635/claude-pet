@@ -10,6 +10,8 @@ export const CONFIG_FILE = join(ROOT_DIR, 'config.json');
 export const REFERENCE_FILE = join(ROOT_DIR, 'config.reference.jsonc');
 export const TOKEN_FILE = join(ROOT_DIR, 'token');
 export const LOG_DIR = join(ROOT_DIR, 'logs');
+/** The standalone install: the `claude-pet` executable, the widget, the hook scripts. */
+export const APP_DIR = join(ROOT_DIR, 'app');
 
 /** Rotate at 4 MB. ~150 bytes/event, so ~28k events before a rotation. */
 export const SPOOL_MAX_BYTES = 4 * 1024 * 1024;

@@ -4,13 +4,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assetName, checksumMatches, downloadedPath, GITHUB_REPO, releaseUrl, TARGET, VERSION } from '../src/widget.ts';
+import { GITHUB_REPO, VERSION } from '../src/entry.ts';
+import { assetName, checksumMatches, downloadedPath, releaseUrl, TARGET } from '../src/widget.ts';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const WORKFLOW = readFileSync(join(REPO, '.github', 'workflows', 'widget.yml'), 'utf8');
+const WORKFLOW = readFileSync(join(REPO, '.github', 'workflows', 'release.yml'), 'utf8');
 
 test('widget: the installer asks for the asset the workflow publishes', () => {
-  // widget.yml names it claude-pet-widget-$tag-$TARGET.tar.gz with TARGET in env.
+  // release.yml names it claude-pet-widget-$tag-$TARGET.tar.gz with TARGET in env.
   assert.match(WORKFLOW, /asset=claude-pet-widget-\$tag-\$TARGET\.tar\.gz/);
   assert.match(WORKFLOW, new RegExp(`TARGET: ${TARGET}\\n`));
   assert.equal(assetName('v1.2.3'), `claude-pet-widget-v1.2.3-${TARGET}.tar.gz`);
