@@ -12,8 +12,9 @@ token storm, waiting on you, done, or in trouble.
 > plausible number.
 
 Fully local. No cloud, no telemetry, no outbound network call at runtime. The one exception
-is at install: a one-time download of the prebuilt widget from this repository's GitHub
-Releases, checked against its published SHA-256 (skipped if you build it yourself).
+is installing from a clone: a one-time download of the prebuilt widget from this
+repository's GitHub Releases, checked against its published SHA-256 (skipped if you build
+it yourself).
 
 ---
 
@@ -30,7 +31,28 @@ Releases, checked against its published SHA-256 (skipped if you build it yoursel
 
 ## Install
 
-On an Apple Silicon Mac with Node ≥ 23.6 — no Rust, no compiling:
+On an Apple Silicon Mac. Nothing to install first — no Node, no Rust, no clone:
+
+```bash
+curl -fsSLO https://github.com/r45635/claude-pet/releases/latest/download/claude-pet-aarch64-apple-darwin.tar.gz
+tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
+./claude-pet/claude-pet setup
+```
+
+`setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
+hooks into Claude Code and starts the pet at login. To update, run the same three lines
+again. `~/.claude-pet/app/claude-pet` also has `status`, `restart`, `snapshot` and
+`uninstall` (which keeps your settings and logs).
+
+The archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub Actions
+(`.github/workflows/release.yml`) for every version tag. Download it with `curl`, not a
+browser: the binaries are not notarized by Apple, and a browser download would be
+quarantined by Gatekeeper. While the repository is private, `curl` cannot see it; use
+`gh release download -R r45635/claude-pet -p claude-pet-aarch64-apple-darwin.tar.gz`.
+
+### From a clone
+
+For working on the pet. Needs Node ≥ 23.6, no Rust:
 
 ```bash
 git clone https://github.com/r45635/claude-pet && cd claude-pet
@@ -39,10 +61,10 @@ npm run install-hooks            # wire it into Claude Code
 npm run autostart -- install     # downloads the prebuilt widget, starts daemon + widget at login
 ```
 
-The widget is compiled by GitHub Actions (`.github/workflows/widget.yml`) and attached to
-the release matching `package.json`'s version; `autostart install` fetches it into
-`~/.claude-pet/bin/` (`npm run fetch-widget` does only that step). While the repository
-is private, the download needs a `gh` logged in with access to it.
+`autostart install` fetches the widget of `package.json`'s version into `~/.claude-pet/bin/`
+(`npm run fetch-widget` does only that step), unless you built it yourself.
+`npm run build-standalone` builds the release archive locally (needs the official Node
+build from nodejs.org: Homebrew's cannot make single executables).
 
 ## Try it without Claude Code
 
@@ -115,7 +137,8 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 ## Requirements
 
 - macOS, Apple Silicon
-- Node ≥ 23.6 (runs the TypeScript directly — there is no build step)
+- from a clone only: Node ≥ 23.6 (runs the TypeScript directly); the standalone release
+  embeds its own
 - `jq` (ships with macOS 26 at `/usr/bin/jq`)
 - Rust — **only** to build the widget yourself; otherwise the prebuilt one is downloaded.
   See `apps/widget/README.md`

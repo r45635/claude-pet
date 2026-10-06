@@ -16,6 +16,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './entry.ts';
 import { ROOT_DIR } from './paths.ts';
 
 const BIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin');
@@ -68,17 +69,27 @@ export function planInstall(input: Settings, binDir = BIN_DIR): Plan {
   settings.hooks ??= {};
   for (const event of HOOK_EVENTS) {
     const groups = (settings.hooks[event] ??= []);
-    const present = groups.some((g) => g.hooks?.some((h) => isOurs(h.command, HOOK_SCRIPT)));
-    if (present) continue;
-    groups.push({ hooks: [{ type: 'command', command: hookCmd, timeout: HOOK_TIMEOUT_S }] });
-    changes.push(`+ hooks.${event}`);
+    const ours = groups.flatMap((g) => g.hooks ?? []).filter((h) => isOurs(h.command, HOOK_SCRIPT));
+    if (ours.length === 0) {
+      groups.push({ hooks: [{ type: 'command', command: hookCmd, timeout: HOOK_TIMEOUT_S }] });
+      changes.push(`+ hooks.${event}`);
+    } else if (ours.some((h) => h.command !== hookCmd)) {
+      // Installed from elsewhere (a clone, then the standalone app): point at this copy.
+      for (const h of ours) h.command = hookCmd;
+      changes.push(`~ hooks.${event}`);
+    }
   }
 
   const current = settings.statusLine;
   if (current === undefined) {
     settings.statusLine = { type: 'command', command: statusCmd, padding: 0 };
     changes.push('+ statusLine');
-  } else if (!isOurs(current.command, STATUSLINE_SCRIPT)) {
+  } else if (isOurs(current.command, STATUSLINE_SCRIPT)) {
+    if (current.command !== statusCmd) {
+      current.command = statusCmd;
+      changes.push('~ statusLine');
+    }
+  } else {
     warnings.push(
       'a statusLine is already configured and was left untouched: the context/token meter ' +
         'stays offline (sources.statusline=false) until it wraps claude-pet-statusline.sh',
@@ -120,13 +131,13 @@ function settingsPath(argv: string[]): string {
   return join(dir, 'settings.json');
 }
 
-function main(argv: string[]): number {
+export function main(argv: string[], binDir = BIN_DIR): number {
   const mode = argv.includes('uninstall') ? 'uninstall' : 'install';
   const dryRun = argv.includes('--dry-run');
   const file = settingsPath(argv);
 
   const before: Settings = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
-  const plan = mode === 'install' ? planInstall(before) : planUninstall(before);
+  const plan = mode === 'install' ? planInstall(before, binDir) : planUninstall(before);
 
   for (const w of plan.warnings) process.stderr.write(`⚠️  ${w}\n`);
   if (plan.changes.length === 0) {
@@ -149,6 +160,7 @@ function main(argv: string[]): number {
     process.stdout.write(`backup: ${backup}\n`);
   }
 
+  mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.claude-pet.tmp`;
   writeFileSync(tmp, `${JSON.stringify(plan.settings, null, 2)}\n`, { mode: 0o644 });
   renameSync(tmp, file);
@@ -156,6 +168,6 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }
