@@ -153,11 +153,11 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
   Claude.ai plan, not with an API key.
 - **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
   `Bash failed`, `Rate limited`).
-- **Settings** (gear icon in the chat bubble): storm threshold and minimum time per state,
-  applied live, and *Read conversation files* (off by default): each subagent then shows
+- **Settings** (gear icon in the chat bubble): the creatures' size (80 to 300 px),
+  storm threshold and minimum time per state, applied live, and *Read conversation files* (off by default): each subagent then shows
   its own model working or its tool running, and token counts are real. Only line kinds
-  and token counts are kept, never text — see [`PRIVACY.md`](docs/PRIVACY.md). Size,
-  temperament and the rest are in the right-click menu.
+  and token counts are kept, never text — see [`PRIVACY.md`](docs/PRIVACY.md). Size
+  presets, temperament and the rest are in the right-click menu.
 
 ## Talk to it
 

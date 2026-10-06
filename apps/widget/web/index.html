@@ -257,8 +257,9 @@
   #send.stop { background: var(--skin-bad); font-size: 11px; }
 
   /* ---- settings, inside the bubble (gear in its header) ------------------------------
-     Both values are engine knobs: the page sends a patch through Rust, the daemon
-     validates it, writes config.json and the new values come back on the feed. */
+     The page sends a patch through Rust, the daemon validates it, writes config.json
+     and the new values come back on the feed. Size is a display pref; the others are
+     engine knobs. */
   #gear { width: 32px; height: 32px; border: 0; border-radius: 10px; background: none;
           color: #9aa3b5; cursor: pointer; display: grid; place-items: center; }
   #gear:hover, #bubble.settings #gear { background: rgba(255, 255, 255, .08); color: #eceff4; }
@@ -424,6 +425,12 @@
       </button>
       <button id="close" type="button" title="Close (Esc)">×</button></header>
     <div id="settings" hidden>
+      <div class="setting">
+        <label for="size">Size <output id="size-out" for="size"></output></label>
+        <input id="size" type="range" min="80" max="300" step="10" />
+        <p>How big the creatures are. Right-click → Size has Small, Medium and Large as shortcuts.</p>
+        <button class="reset" type="button" data-key="sizePx">Back to default</button>
+      </div>
       <div class="setting">
         <label for="storm">Storm threshold <output id="storm-out" for="storm"></output></label>
         <input id="storm" type="range" min="30" max="100" step="1" />
@@ -888,7 +895,7 @@
   // writes to the daemon, the chat. The page itself only *reads* the daemon's SSE feed.
   const T = window.__TAURI__;
   const invoke = (cmd, args) => (T ? T.core.invoke(cmd, args) : Promise.reject(new Error('no host')));
-  let prefs = { temperament: 'normal', chatModel: 'default', size: 'medium', showSessions: true, paused: false };
+  let prefs = { temperament: 'normal', chatModel: 'default', size: 'medium', sizePx: 150, showSessions: true, paused: false };
 
   // A release webview has no console: report to the daemon log through a GET, the
   // same kind of request as the SSE feed.
@@ -896,15 +903,29 @@
     new Image().src = `${base}/log?token=${encodeURIComponent(token)}&m=${encodeURIComponent(message)}`;
   }
 
-  const SIZES = { small: 110, medium: 150, large: 220 };
-  let appliedWindow = '';
-  function petPx() { return SIZES[prefs.size] ?? SIZES.medium; }
-  function fitWindow() {
-    if (chatOpen) return; // layout_panel owns the window while the chat is open
-    const sq = petPx() + 30;
-    if (String(sq) === appliedWindow) return;
-    appliedWindow = String(sq);
-    invoke('resize', { width: sq, height: sq }).catch((err) => diag(`resize: ${err}`));
+  let appliedSize = 0;
+  // While the size slider is in hand or its value on the way, it is the size: the live
+  // preview must not snap back to the saved one carried by every frame.
+  function petPx() {
+    const s = SETTINGS.size;
+    if (s.held || s.pending !== undefined) return Number(s.input.value);
+    return Number.isFinite(prefs.sizePx) ? prefs.sizePx : 150;
+  }
+  function applySize() {
+    const px = petPx();
+    if (px === appliedSize) return;
+    appliedSize = px;
+    document.documentElement.style.setProperty('--pet-size', `${px}px`);
+    const sq = px + 30;
+    if (!chatOpen) {
+      invoke('resize', { width: sq, height: sq }).catch((err) => diag(`resize: ${err}`));
+      return;
+    }
+    // The chat is open: lay the panel out again around the new square (layout_panel
+    // keeps the creature's corner where it is).
+    invoke('layout_panel', { open: true, pet: sq, panelW: PANEL.w, panelH: PANEL.h })
+      .then((layout) => { if (chatOpen) place(layout); })
+      .catch((err) => diag(`layout: ${err}`));
   }
   function applyPrefs(p) {
     if (!p) return;
@@ -912,8 +933,7 @@
     renderSettings(p);
     pet.dataset.showSessions = String(p.showSessions);
     pet.dataset.paused = String(p.paused);
-    document.documentElement.style.setProperty('--pet-size', `${petPx()}px`);
-    fitWindow();
+    applySize();
   }
 
   addEventListener('contextmenu', (e) => {
@@ -1076,6 +1096,8 @@
   const settingsEl = document.getElementById('settings');
   const settingsStatus = document.getElementById('settings-status');
   const SETTINGS = {
+    size: { key: 'sizePx', input: document.getElementById('size'),
+            out: document.getElementById('size-out'), fmt: (v) => `${v} px` },
     storm: { key: 'stormThreshold', input: document.getElementById('storm'),
              out: document.getElementById('storm-out'), fmt: (v) => `${v}` },
     hold: { key: 'minStateSeconds', input: document.getElementById('hold'),
@@ -1126,7 +1148,10 @@
     s.input.addEventListener('pointerdown', () => { s.held = true; });
     // pointerup can land outside the window; `change` always follows the end of a drag.
     addEventListener('pointerup', () => { s.held = false; });
-    s.input.addEventListener('input', () => { s.out.textContent = s.fmt(Number(s.input.value)); });
+    s.input.addEventListener('input', () => {
+      s.out.textContent = s.fmt(Number(s.input.value));
+      if (s === SETTINGS.size) applySize();
+    });
     s.input.addEventListener('change', () => {
       s.held = false;
       savePref(s, Number(s.input.value));
