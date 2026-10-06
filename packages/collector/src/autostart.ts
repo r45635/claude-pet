@@ -8,20 +8,24 @@
  * `restart` (after a pull or a rebuild) has launchd stop and start both, so the new code
  * runs without a second, hand-launched copy fighting the managed one.
  *
+ * The widget is the local build if there is one, otherwise the prebuilt binary for this
+ * version, which `install` and `restart` download when it is missing (widget.ts): no Rust
+ * needed to use the pet.
+ *
  * Start order does not matter: daemon and widget share a persistent token (token.ts), and
  * the widget's EventSource retries until the daemon answers.
  */
 
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOG_DIR } from './paths.ts';
+import { fetchWidget, LOCAL_BUILD, resolveWidget } from './widget.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DAEMON_TS = join(REPO, 'packages', 'collector', 'src', 'daemon.ts');
-const WIDGET_BIN = join(REPO, 'apps', 'widget', 'src-tauri', 'target', 'release', 'claude-pet-widget');
 const AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
 export type Agent = {
@@ -74,7 +78,7 @@ function nodeOnPath(): string {
   return process.execPath;
 }
 
-export function agents(): Agent[] {
+export function agents(widgetBin = resolveWidget() ?? LOCAL_BUILD): Agent[] {
   return [
     {
       label: 'dev.r45635.claude-pet.daemon',
@@ -84,7 +88,7 @@ export function agents(): Agent[] {
     },
     {
       label: 'dev.r45635.claude-pet.widget',
-      program: [WIDGET_BIN],
+      program: [widgetBin],
       keepAlive: 'crash',
       log: join(LOG_DIR, 'widget.log'),
     },
@@ -103,6 +107,33 @@ function launchctl(...args: string[]): boolean {
   }
 }
 
+/** (Re)writes and loads one agent; bootout first, so a stale definition is replaced, not stacked. */
+function load(a: Agent): boolean {
+  const file = plistPath(a.label);
+  launchctl('bootout', `${domain()}/${a.label}`);
+  mkdirSync(AGENTS_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+  writeFileSync(file, plist(a), { mode: 0o644 });
+  if (!launchctl('bootstrap', domain(), file)) {
+    process.stderr.write(`launchctl bootstrap failed for ${a.label} — see ${a.log}\n`);
+    return false;
+  }
+  return true;
+}
+
+/** The widget to run: the local build, the prebuilt one already here, or a fresh download. */
+function ensureWidget(): string | null {
+  const found = resolveWidget();
+  if (found) return found;
+  process.stdout.write('no local build of the widget: downloading the prebuilt one from GitHub\n');
+  try {
+    return fetchWidget();
+  } catch (e) {
+    process.stderr.write(`${(e as Error).message}\nor build it yourself: cd apps/widget && cargo tauri build --no-bundle\n`);
+    return null;
+  }
+}
+
 function main(argv: string[]): number {
   const mode = argv.find((a) => ['install', 'uninstall', 'status', 'restart'].includes(a)) ?? 'status';
   const dryRun = argv.includes('--dry-run');
@@ -116,48 +147,42 @@ function main(argv: string[]): number {
     return 0;
   }
 
-  if (mode === 'restart') {
+  if (mode === 'uninstall') {
     for (const a of agents()) {
-      if (!existsSync(plistPath(a.label))) {
-        process.stderr.write(`${a.label} is not installed: npm run autostart -- install\n`);
-        return 1;
-      }
-      if (dryRun) { process.stdout.write(`restart ${a.label}\n`); continue; }
-      // -k: kill the running instance first, so a new binary or new code is picked up.
-      if (!launchctl('kickstart', '-k', `${domain()}/${a.label}`)) {
-        process.stderr.write(`launchctl kickstart failed for ${a.label} — see ${a.log}\n`);
-        return 1;
-      }
-      process.stdout.write(`restarted ${a.label}\n`);
+      const file = plistPath(a.label);
+      if (dryRun) { process.stdout.write(`uninstall ${file}\n`); continue; }
+      launchctl('bootout', `${domain()}/${a.label}`);
+      rmSync(file, { force: true });
+      process.stdout.write(`removed ${a.label}\n`);
     }
     return 0;
   }
 
-  if (mode === 'install' && !existsSync(WIDGET_BIN)) {
-    process.stderr.write(`widget binary missing: ${WIDGET_BIN}\nbuild it first: cd apps/widget && cargo tauri build --no-bundle\n`);
-    return 1;
-  }
+  const widget = dryRun ? resolveWidget() ?? LOCAL_BUILD : ensureWidget();
+  if (!widget) return 1;
 
-  for (const a of agents()) {
+  for (const a of agents(widget)) {
     const file = plistPath(a.label);
-    if (dryRun) {
-      process.stdout.write(`${mode} ${file}\n${mode === 'install' ? plist(a) : ''}\n`);
+    if (mode === 'restart') {
+      if (!existsSync(file)) {
+        process.stderr.write(`${a.label} is not installed: npm run autostart -- install\n`);
+        return 1;
+      }
+      // After a pull to a new version the widget lives at a new path: rewrite the agent.
+      const stale = readFileSync(file, 'utf8') !== plist(a);
+      if (dryRun) { process.stdout.write(`${stale ? 'reload' : 'restart'} ${a.label}\n`); continue; }
+      if (stale) {
+        if (!load(a)) return 1;
+      } else if (!launchctl('kickstart', '-k', `${domain()}/${a.label}`)) {
+        // -k: kill the running instance first, so a new binary or new code is picked up.
+        process.stderr.write(`launchctl kickstart failed for ${a.label} — see ${a.log}\n`);
+        return 1;
+      }
+      process.stdout.write(`restarted ${a.label}\n`);
       continue;
     }
-    // bootout first in both modes: install must replace a stale definition, not stack on it.
-    launchctl('bootout', `${domain()}/${a.label}`);
-    if (mode === 'uninstall') {
-      rmSync(file, { force: true });
-      process.stdout.write(`removed ${a.label}\n`);
-      continue;
-    }
-    mkdirSync(AGENTS_DIR, { recursive: true });
-    mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
-    writeFileSync(file, plist(a), { mode: 0o644 });
-    if (!launchctl('bootstrap', domain(), file)) {
-      process.stderr.write(`launchctl bootstrap failed for ${a.label} — see ${a.log}\n`);
-      return 1;
-    }
+    if (dryRun) { process.stdout.write(`install ${file}\n${plist(a)}\n`); continue; }
+    if (!load(a)) return 1;
     process.stdout.write(`loaded ${a.label}  (log: ${a.log})\n`);
   }
   return 0;

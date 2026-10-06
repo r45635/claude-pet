@@ -8,9 +8,17 @@
 - `src-tauri/` — a transparent, undecorated, always-on-top 180×180 window, no Dock icon.
   Its only capability is `start-dragging`: no fs, shell or network plugin.
 
+## Prebuilt
+
+Users do not build it: `npm run autostart -- install` downloads the binary GitHub Actions
+built for this version (`.github/workflows/widget.yml`). To publish a version: bump it in
+`package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (the workflow
+refuses a mismatch), merge, then push the tag `v<version>`. A pull request that touches
+the widget gets a build too, kept as a workflow artifact, without a release.
+
 ## Build and run
 
-Needs Rust and the Tauri CLI (one-time, ~1.5 GB):
+To work on the widget. Needs Rust and the Tauri CLI (one-time, ~1.5 GB):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal

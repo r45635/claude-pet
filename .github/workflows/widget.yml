@@ -1,0 +1,85 @@
+# Builds the widget on a GitHub-hosted Apple Silicon Mac, so users need neither Rust nor
+# the Tauri CLI: `npm run autostart -- install` downloads what this publishes.
+#
+#   pull request touching the widget → build only, binary kept as a workflow artifact
+#   tag v<version>                   → build, then attach it to the GitHub Release
+#
+# The tag must match package.json, tauri.conf.json and Cargo.toml, because the installer
+# looks for the release named after package.json's version: the binary embeds web/, and
+# must speak the same protocol as the daemon of the same checkout.
+name: widget
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'apps/widget/**'
+      - '.github/workflows/widget.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15 # arm64
+    env:
+      TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Versions agree
+        id: version
+        run: |
+          pkg=$(jq -r .version package.json)
+          conf=$(jq -r .version apps/widget/src-tauri/tauri.conf.json)
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' apps/widget/src-tauri/Cargo.toml | head -1)
+          [ "$pkg" = "$conf" ] && [ "$pkg" = "$cargo" ] \
+            || { echo "::error::package.json $pkg, tauri.conf.json $conf, Cargo.toml $cargo"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+            # v0.2.0, or v0.2.0-rc.1 for a prerelease of the same version
+            case "$tag" in "v$pkg"|"v$pkg"-*) ;; *) echo "::error::tag $tag does not match version $pkg"; exit 1 ;; esac
+          else
+            tag="v$pkg"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "asset=claude-pet-widget-$tag-$TARGET.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/widget/src-tauri
+
+      # The npm build of the Tauri CLI is prebuilt: seconds, against minutes for cargo install.
+      - name: Build
+        working-directory: apps/widget
+        run: npx --yes @tauri-apps/cli@2.12.1 build --no-bundle
+
+      - name: Package
+        id: package
+        run: |
+          bin=apps/widget/src-tauri/target/release/claude-pet-widget
+          file "$bin" | grep -q arm64 || { echo "::error::not an arm64 binary"; exit 1; }
+          codesign -v "$bin" # the linker's ad-hoc signature, which Apple Silicon requires
+          mkdir dist
+          tar -czf "dist/${{ steps.version.outputs.asset }}" -C "$(dirname "$bin")" claude-pet-widget
+          (cd dist && shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.asset }}.sha256")
+          cat dist/*.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.version.outputs.asset }}
+          path: dist/*
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          prerelease=; case "$TAG" in *-*) prerelease=--prerelease ;; esac
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag $prerelease
+          gh release upload "$TAG" dist/* --clobber
