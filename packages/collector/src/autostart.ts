@@ -114,10 +114,20 @@ function launchctl(...args: string[]): boolean {
   }
 }
 
+/**
+ * bootout returns before launchd has finished tearing the service down, and a bootstrap
+ * in that window fails ("Input/output error"): wait, up to 5 s, until it is really gone.
+ */
+function bootout(label: string): void {
+  if (!launchctl('bootout', `${domain()}/${label}`)) return; // was not loaded
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let i = 0; i < 50 && launchctl('print', `${domain()}/${label}`); i++) Atomics.wait(pause, 0, 0, 100);
+}
+
 /** (Re)writes and loads one agent; bootout first, so a stale definition is replaced, not stacked. */
 function load(a: Agent): boolean {
   const file = plistPath(a.label);
-  launchctl('bootout', `${domain()}/${a.label}`);
+  bootout(a.label);
   mkdirSync(AGENTS_DIR, { recursive: true });
   mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
   writeFileSync(file, plist(a), { mode: 0o644 });
@@ -158,7 +168,7 @@ export function manage(mode: Mode, launch: Launch, dryRun = false): number {
     const file = plistPath(a.label);
     if (mode === 'uninstall') {
       if (dryRun) { process.stdout.write(`uninstall ${file}\n`); continue; }
-      launchctl('bootout', `${domain()}/${a.label}`);
+      bootout(a.label);
       rmSync(file, { force: true });
       process.stdout.write(`removed ${a.label}\n`);
       continue;
