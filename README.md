@@ -11,7 +11,9 @@ token storm, waiting on you, done, or in trouble.
 > was measured or derived, and anything unknown is reported as `null` — never as a
 > plausible number.
 
-Fully local. No cloud, no telemetry, no outbound network call anywhere in the codebase.
+Fully local. No cloud, no telemetry, no outbound network call at runtime. The one exception
+is at install: a one-time download of the prebuilt widget from this repository's GitHub
+Releases, checked against its published SHA-256 (skipped if you build it yourself).
 
 ---
 
@@ -25,6 +27,22 @@ Fully local. No cloud, no telemetry, no outbound network call anywhere in the co
 | 3 | Tauri widget | ✅ transparent window, ~0.2% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
 | 5 | refinement | 🟡 launch at login, sizes, one creature per session and subagent, settings, usage-limit gauge |
+
+## Install
+
+On an Apple Silicon Mac with Node ≥ 23.6 — no Rust, no compiling:
+
+```bash
+git clone https://github.com/r45635/claude-pet && cd claude-pet
+npm install
+npm run install-hooks            # wire it into Claude Code
+npm run autostart -- install     # downloads the prebuilt widget, starts daemon + widget at login
+```
+
+The widget is compiled by GitHub Actions (`.github/workflows/widget.yml`) and attached to
+the release matching `package.json`'s version; `autostart install` fetches it into
+`~/.claude-pet/bin/` (`npm run fetch-widget` does only that step). While the repository
+is private, the download needs a `gh` logged in with access to it.
 
 ## Try it without Claude Code
 
@@ -99,7 +117,8 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 - macOS, Apple Silicon
 - Node ≥ 23.6 (runs the TypeScript directly — there is no build step)
 - `jq` (ships with macOS 26 at `/usr/bin/jq`)
-- Rust — **only** for Phase 3; see `apps/widget/README.md`
+- Rust — **only** to build the widget yourself; otherwise the prebuilt one is downloaded.
+  See `apps/widget/README.md`
 
 ## What you see
 
@@ -149,8 +168,9 @@ npm run autostart -- uninstall
 
 launchd restarts the daemon whenever it stops, and the widget only after a crash (Quit in
 the menu keeps it closed until the next login). Logs are in `~/.claude-pet/logs/`. After
-`git pull`, rebuild the widget if `apps/widget` changed (`cd apps/widget && cargo tauri
-build --no-bundle`), then `restart`.
+`git pull`, `restart`: it downloads the widget of the new version if needed. A local build
+(`apps/widget/src-tauri/target/release`) always wins over the download, so if you build it
+yourself, rebuild after a pull that changed `apps/widget`.
 
 ## What it costs
 
