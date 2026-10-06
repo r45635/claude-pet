@@ -21,6 +21,7 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, rmSync, wri
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './entry.ts';
 import { LOG_DIR } from './paths.ts';
 import { fetchWidget, LOCAL_BUILD, resolveWidget } from './widget.ts';
 
@@ -78,17 +79,23 @@ function nodeOnPath(): string {
   return process.execPath;
 }
 
-export function agents(widgetBin = resolveWidget() ?? LOCAL_BUILD): Agent[] {
+/** What launchd runs: from a clone, node + daemon.ts; standalone, `claude-pet daemon`. */
+export type Launch = { daemon: string[]; widget: string };
+
+export const cloneLaunch = (widget = resolveWidget() ?? LOCAL_BUILD): Launch =>
+  ({ daemon: [nodeOnPath(), DAEMON_TS], widget });
+
+export function agents(launch: Launch = cloneLaunch()): Agent[] {
   return [
     {
       label: 'dev.r45635.claude-pet.daemon',
-      program: [nodeOnPath(), DAEMON_TS],
+      program: launch.daemon,
       keepAlive: true,
       log: join(LOG_DIR, 'daemon.log'),
     },
     {
       label: 'dev.r45635.claude-pet.widget',
-      program: [widgetBin],
+      program: [launch.widget],
       keepAlive: 'crash',
       log: join(LOG_DIR, 'widget.log'),
     },
@@ -134,12 +141,12 @@ function ensureWidget(): string | null {
   }
 }
 
-function main(argv: string[]): number {
-  const mode = argv.find((a) => ['install', 'uninstall', 'status', 'restart'].includes(a)) ?? 'status';
-  const dryRun = argv.includes('--dry-run');
+export type Mode = 'install' | 'uninstall' | 'status' | 'restart';
 
+/** `launch` is only read by install and restart. */
+export function manage(mode: Mode, launch: Launch, dryRun = false): number {
   if (mode === 'status') {
-    for (const a of agents()) {
+    for (const a of agents(launch)) {
       const loaded = launchctl('print', `${domain()}/${a.label}`);
       const installed = existsSync(plistPath(a.label));
       process.stdout.write(`${a.label}: ${installed ? 'installed' : 'not installed'}, ${loaded ? 'loaded' : 'not loaded'}\n`);
@@ -147,25 +154,18 @@ function main(argv: string[]): number {
     return 0;
   }
 
-  if (mode === 'uninstall') {
-    for (const a of agents()) {
-      const file = plistPath(a.label);
+  for (const a of agents(launch)) {
+    const file = plistPath(a.label);
+    if (mode === 'uninstall') {
       if (dryRun) { process.stdout.write(`uninstall ${file}\n`); continue; }
       launchctl('bootout', `${domain()}/${a.label}`);
       rmSync(file, { force: true });
       process.stdout.write(`removed ${a.label}\n`);
+      continue;
     }
-    return 0;
-  }
-
-  const widget = dryRun ? resolveWidget() ?? LOCAL_BUILD : ensureWidget();
-  if (!widget) return 1;
-
-  for (const a of agents(widget)) {
-    const file = plistPath(a.label);
     if (mode === 'restart') {
       if (!existsSync(file)) {
-        process.stderr.write(`${a.label} is not installed: npm run autostart -- install\n`);
+        process.stderr.write(`${a.label} is not installed: install it first\n`);
         return 1;
       }
       // After a pull to a new version the widget lives at a new path: rewrite the agent.
@@ -188,6 +188,14 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function main(argv: string[]): number {
+  const mode = (argv.find((a) => ['install', 'uninstall', 'status', 'restart'].includes(a)) ?? 'status') as Mode;
+  const dryRun = argv.includes('--dry-run');
+  if (mode === 'status' || mode === 'uninstall' || dryRun) return manage(mode, cloneLaunch(), dryRun);
+  const widget = ensureWidget();
+  return widget ? manage(mode, cloneLaunch(widget)) : 1;
+}
+
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }

@@ -1,13 +1,18 @@
-# Builds the widget on a GitHub-hosted Apple Silicon Mac, so users need neither Rust nor
-# the Tauri CLI: `npm run autostart -- install` downloads what this publishes.
+# Builds the release on a GitHub-hosted Apple Silicon Mac, so users need neither Rust nor
+# Node: two archives per version.
 #
-#   pull request touching the widget → build only, binary kept as a workflow artifact
-#   tag v<version>                   → build, then attach it to the GitHub Release
+#   claude-pet-aarch64-apple-darwin.tar.gz   standalone: `claude-pet` (a Node single
+#                                            executable) + the widget + the hook scripts
+#   claude-pet-widget-<tag>-…tar.gz          the widget alone, which `npm run autostart --
+#                                            install` downloads for a clone
+#
+#   pull request touching the code → tests + build only, kept as workflow artifacts
+#   tag v<version>                 → the same, then attached to the GitHub Release
 #
 # The tag must match package.json, tauri.conf.json and Cargo.toml, because the installer
 # looks for the release named after package.json's version: the binary embeds web/, and
 # must speak the same protocol as the daemon of the same checkout.
-name: widget
+name: release
 
 on:
   push:
@@ -15,7 +20,10 @@ on:
   pull_request:
     paths:
       - 'apps/widget/**'
-      - '.github/workflows/widget.yml'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
@@ -46,6 +54,14 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "asset=claude-pet-widget-$tag-$TARGET.tar.gz" >> "$GITHUB_OUTPUT"
 
+      # The official build: Homebrew's Node cannot make single executable applications.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+
+      - name: Tests
+        run: npm ci && npm test
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -63,15 +79,21 @@ jobs:
           bin=apps/widget/src-tauri/target/release/claude-pet-widget
           file "$bin" | grep -q arm64 || { echo "::error::not an arm64 binary"; exit 1; }
           codesign -v "$bin" # the linker's ad-hoc signature, which Apple Silicon requires
-          mkdir dist
-          tar -czf "dist/${{ steps.version.outputs.asset }}" -C "$(dirname "$bin")" claude-pet-widget
-          (cd dist && shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.asset }}.sha256")
-          cat dist/*.sha256
+          mkdir -p release
+          tar -czf "release/${{ steps.version.outputs.asset }}" -C "$(dirname "$bin")" claude-pet-widget
+          (cd release && shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.asset }}.sha256")
+          cat release/*.sha256
+
+      - name: Standalone
+        run: |
+          node scripts/build-standalone.ts --widget apps/widget/src-tauri/target/release/claude-pet-widget
+          ./dist/claude-pet/claude-pet version
+          mkdir -p release && mv dist/*.tar.gz dist/*.sha256 release/
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.version.outputs.asset }}
-          path: dist/*
+          name: claude-pet-${{ steps.version.outputs.tag }}
+          path: release/*
 
       - name: Release
         if: github.ref_type == 'tag'
@@ -82,4 +104,4 @@ jobs:
           prerelease=; case "$TAG" in *-*) prerelease=--prerelease ;; esac
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag $prerelease
-          gh release upload "$TAG" dist/* --clobber
+          gh release upload "$TAG" release/* --clobber
