@@ -66,7 +66,10 @@ out.
 ## Nothing leaves the machine
 
 - the collector binds `127.0.0.1` only, with a per-run token in the SSE URL;
-- there is no outbound HTTP anywhere in the codebase, and no analytics dependency;
+- there is no outbound HTTP at runtime, and no analytics dependency. The only request in
+  the codebase is `packages/collector/src/widget.ts`: at install, when asked, it downloads
+  the prebuilt widget from this repository's GitHub Releases and checks its SHA-256. It
+  sends nothing but the request for that file;
 - `~/.claude-pet/` is `0700`; the spool is `0600`.
 
 ## Talking to the creature
