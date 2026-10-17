@@ -6,6 +6,7 @@
 
 mod chat;
 mod daemon;
+mod avatars;
 mod hit;
 mod menu;
 
@@ -117,8 +118,36 @@ fn chat_cancel(pet: State<'_, Pet>) -> bool {
 
 #[tauri::command]
 fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value) -> Result<(), String> {
-    let menu = menu::build(&app, &prefs, pet.chat.busy()).map_err(|e| e.to_string())?;
+    let mut avatars = vec![("classic".to_owned(), "Classic".to_owned())];
+    for a in avatars::list(&root()) {
+        if let (Some(id), Some(name)) = (a["id"].as_str(), a["name"].as_str()) {
+            avatars.push((id.to_owned(), name.to_owned()));
+        }
+    }
+    let menu = menu::build(&app, &prefs, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
+/// An installed avatar, ready for the page (data: URLs and text, all checked).
+#[tauri::command]
+fn get_avatar(id: String) -> Result<Value, String> {
+    avatars::load(&root(), &id)
+}
+
+/// A `.claudepet` dropped on the creature: install it, switch to it, tell the page.
+fn install_dropped(app: &AppHandle, path: &Path) {
+    match avatars::import(&root(), path) {
+        Ok((id, name)) => {
+            if let Some(d) = &app.state::<Pet>().daemon {
+                let _ = d.post("/config", &serde_json::json!({ "avatar": id }).to_string());
+            }
+            let _ = app.emit("avatar", serde_json::json!({ "ok": true, "id": id, "name": name }));
+        }
+        Err(error) => {
+            eprintln!("avatar import {}: {error}", path.display());
+            let _ = app.emit("avatar", serde_json::json!({ "ok": false, "error": error }));
+        }
+    }
 }
 
 /// Resize from the page (size preference), keeping the window's top-left corner.
@@ -214,6 +243,11 @@ fn on_menu(app: &AppHandle, id: &str) {
             let _ = std::process::Command::new("open").arg(pet.chat.dir()).status();
         }
         "advanced" => post("/open-config", ""),
+        "avatars:folder" => {
+            let dir = avatars::dir(&root());
+            let _ = fs::create_dir_all(&dir);
+            let _ = std::process::Command::new("open").arg(dir).status();
+        }
         "quit" => app.exit(0),
         _ => {}
     }
@@ -261,11 +295,20 @@ fn main() {
                 .initialization_script(&script)
                 .build()?;
             if let Some(window) = app.get_webview_window("pet") {
-                hit::spawn_tracker(app.handle().clone(), window);
+                hit::spawn_tracker(app.handle().clone(), window.clone());
+                // Drop a .claudepet on the creature to install it (no plugin: a window event).
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                        for path in paths.iter().filter(|p| p.extension().is_some_and(|e| e == "claudepet")) {
+                            install_dropped(&handle, path);
+                        }
+                    }
+                });
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel, set_hit_regions])
+        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel, set_hit_regions, get_avatar])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }

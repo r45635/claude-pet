@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isTemperament, mergeConfig, type Temperament } from '@claude-pet/core';
 import { CONFIG_FILE } from './paths.ts';
+import AVATAR_FORMAT from './avatar-format.json' with { type: 'json' };
 
 export const SIZES = ['small', 'medium', 'large'] as const;
 export type Size = (typeof SIZES)[number];
@@ -43,6 +44,8 @@ export type Prefs = {
   stormThreshold: number;
   /** Shortest time a state stays on screen, seconds. Effective value. */
   minStateSeconds: number;
+  /** The avatar's id (docs/AVATARS.md): `classic` or one installed in ~/.claude-pet/avatars. */
+  avatar: string;
 };
 
 /** The settings panel's ranges. The storm ends 10 points below where it starts. */
@@ -61,7 +64,10 @@ export const DEFAULT_PREFS: Prefs = {
   readTranscripts: false,
   stormThreshold: BASE.highLoadThreshold,
   minStateSeconds: BASE.minStateMs / 1000,
+  avatar: 'classic',
 };
+const AVATAR_ID = new RegExp(AVATAR_FORMAT.idPattern);
+const isAvatarId = (v: unknown): v is string => typeof v === 'string' && AVATAR_ID.test(v);
 
 /** A patch: the panel's numbers may also be null, meaning "back to the default". */
 export type PrefsPatch = Partial<Omit<Prefs, 'size' | 'sizePx' | 'stormThreshold' | 'minStateSeconds'>> & {
@@ -104,6 +110,7 @@ export function prefsOf(user: UserFile): Prefs {
     showSessions: typeof ui.showSessions === 'boolean' ? ui.showSessions : DEFAULT_PREFS.showSessions,
     paused: typeof ui.paused === 'boolean' ? ui.paused : DEFAULT_PREFS.paused,
     readTranscripts: typeof ui.readTranscripts === 'boolean' ? ui.readTranscripts : DEFAULT_PREFS.readTranscripts,
+    avatar: isAvatarId(ui.avatar) ? ui.avatar : DEFAULT_PREFS.avatar,
   };
 }
 
@@ -121,6 +128,7 @@ export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
     else if (key === 'showSessions' && typeof value === 'boolean') out.showSessions = value;
     else if (key === 'paused' && typeof value === 'boolean') out.paused = value;
     else if (key === 'readTranscripts' && typeof value === 'boolean') out.readTranscripts = value;
+    else if (key === 'avatar' && isAvatarId(value)) out.avatar = value;
     else if (key === 'stormThreshold' && (value === null || (inRange(value, STORM_THRESHOLD) && Number.isInteger(value)))) {
       out.stormThreshold = value;
     }
@@ -152,6 +160,7 @@ export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
   if (patch.showSessions !== undefined) next.ui!.showSessions = patch.showSessions;
   if (patch.paused !== undefined) next.ui!.paused = patch.paused;
   if (patch.readTranscripts !== undefined) next.ui!.readTranscripts = patch.readTranscripts;
+  if (patch.avatar !== undefined) next.ui!.avatar = patch.avatar;
   // The panel's numbers are engine overrides: like a hand edit, they win over the
   // temperament preset until reset (null), which hands the knob back to the preset.
   if (patch.stormThreshold === null) {
