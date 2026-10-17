@@ -1,0 +1,23 @@
+/* halloween — pumpkin skin, witch's hat, a bat. Scoped to this avatar by the widget. */
+
+.critter {
+  --skin-base: #ff9b42;   /* calm: pumpkin */
+  --skin-hot: #ffcf5a;    /* storm */
+  --skin-bad: #ff6b8a;    /* error */
+}
+.antenna, .bulb, .bulb-ring { display: none; }
+
+.ribs { fill: none; stroke: #c9651a; stroke-width: 2.5; stroke-linecap: round; opacity: .55; }
+.witch-brim, .witch-crown { fill: #3b2a5a; stroke: #24183a; stroke-width: 1.5; }
+.witch-band { fill: var(--bulb); }
+.bat { fill: #24183a; }
+
+.witch { transform-box: fill-box; transform-origin: 50% 100%; }
+/* Asleep: pulled down. Done: tipped. Storm: it jumps. */
+.critter[data-state="IDLE"] .witch { transform: translateY(6px); }
+.critter[data-state="DONE"] .witch { animation: tip 1s ease-in-out 2; }
+.critter[data-state="HIGH_LOAD"] .witch { animation: jump .5s ease-in-out infinite; }
+.bat { transform-box: fill-box; transform-origin: 50% 50%; animation: flap .35s ease-in-out infinite; }
+@keyframes tip { 0%, 100% { transform: rotate(0); } 50% { transform: translate(5px, -7px) rotate(12deg); } }
+@keyframes jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px) rotate(-4deg); } }
+@keyframes flap { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.55) translateY(-2px); } }

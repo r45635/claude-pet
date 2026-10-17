@@ -1,0 +1,22 @@
+/* nouvel-an — lavender skin, gold party hat, streamers. Scoped to this avatar by the widget. */
+
+.critter {
+  --skin-base: #b9a6ff;   /* calm: lavender */
+  --skin-hot: #ffb36b;    /* storm */
+  --skin-bad: #ff7a90;    /* error */
+}
+.antenna, .bulb, .bulb-ring { display: none; }
+
+.party-cone { fill: #ffcf4a; stroke: #c99a1a; stroke-width: 1.5; stroke-linejoin: round; }
+.party-stripe { fill: none; stroke: #e0457b; stroke-width: 3; stroke-linecap: round; }
+.party-pompom { fill: var(--bulb); stroke: #ffffff; stroke-width: 1.5; }
+.streamer { fill: none; stroke-width: 3; stroke-linecap: round; }
+.streamer-a { stroke: #5fd4c4; }
+.streamer-b { stroke: #ff8fb1; }
+
+.party { transform-box: fill-box; transform-origin: 30% 100%; }
+/* Asleep: the hat slides sideways. Done: it hops. Storm: it jumps. */
+.critter[data-state="IDLE"] .party { transform: rotate(-16deg) translate(-4px, 4px); }
+.critter[data-state="DONE"] .party { animation: hop .45s ease-in-out 3; }
+.critter[data-state="HIGH_LOAD"] .party { animation: hop .4s ease-in-out infinite; }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px) rotate(6deg); } }
