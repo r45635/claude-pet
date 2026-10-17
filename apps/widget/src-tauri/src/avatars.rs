@@ -1,0 +1,390 @@
+//! Avatars on disk: `~/.claude-pet/avatars/<id>/`, installed from a dropped `.claudepet`.
+//!
+//! An avatar is untrusted content. The rules (ids, states, fallbacks, file types, limits)
+//! come from the same JSON as the creator tooling (packages/collector/src/avatar-format.json)
+//! and are enforced here at import AND at load: file names are checked by structure, file
+//! types by their bytes, sizes before they are read. The page then gets data: URLs and
+//! text only — it never touches the disk — and sanitizes SVG/CSS itself (web/avatar.js).
+
+use base64::Engine;
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+const FORMAT_JSON: &str = include_str!("../../../../packages/collector/src/avatar-format.json");
+
+fn format() -> &'static Value {
+    static FORMAT: OnceLock<Value> = OnceLock::new();
+    FORMAT.get_or_init(|| serde_json::from_str(FORMAT_JSON).expect("avatar-format.json is valid JSON"))
+}
+fn limit(key: &str) -> u64 {
+    format()["limits"][key].as_u64().unwrap_or(0)
+}
+
+/// `^[a-z0-9][a-z0-9-]{0,39}$`, the format's idPattern, without a regex crate.
+pub fn valid_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    !b.is_empty()
+        && b.len() <= 40
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+fn extension(name: &str) -> String {
+    name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+}
+
+/// A flat file name: no directory, no dot-file, a known extension.
+fn valid_file(name: &str, exts: &[&str]) -> bool {
+    let b = name.as_bytes();
+    !b.is_empty()
+        && b.len() <= 64
+        && b[0].is_ascii_alphanumeric()
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(c))
+        && !name.contains("..")
+        && exts.contains(&extension(name).as_str())
+}
+
+/// The real type of a file, from its first bytes.
+pub fn sniff(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG") {
+        return Some("png");
+    }
+    if bytes.starts_with(b"GIF8") {
+        return Some("gif");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("jpg");
+    }
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]);
+    let head = head.trim_start();
+    if head.starts_with("<svg") || (head.starts_with("<?xml") && head.contains("<svg")) {
+        return Some("svg");
+    }
+    None
+}
+
+fn image_exts() -> Vec<&'static str> {
+    vec!["png", "gif", "webp", "jpg", "jpeg", "svg"]
+}
+
+/// A css file may not reach outside the avatar (the page re-checks when it scopes it).
+fn css_ok(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    !(t.contains("@import") || t.contains("@font-face") || t.contains("javascript:") || t.contains('\\'))
+        && t.match_indices("url(").all(|(i, _)| t[i + 4..].trim_start().trim_start_matches(['\'', '"']).starts_with('#'))
+}
+
+/// Check a manifest; returns the files it references.
+pub fn check_manifest(m: &Value) -> Result<Vec<String>, String> {
+    let fmt = format();
+    if m.get("format") != Some(&fmt["format"]) {
+        return Err(format!("\"format\" must be {}", fmt["format"]));
+    }
+    let id = m["id"].as_str().unwrap_or("");
+    if !valid_id(id) {
+        return Err("\"id\" must be lowercase letters, digits and dashes (1-40)".into());
+    }
+    if fmt["builtin"].as_array().is_some_and(|b| b.iter().any(|x| x == id)) {
+        return Err(format!("\"id\" \"{id}\" is reserved for a built-in avatar"));
+    }
+    match m["name"].as_str() {
+        Some(n) if !n.is_empty() && n.chars().count() <= 60 => {}
+        _ => return Err("\"name\" is required (1-60 characters)".into()),
+    }
+    let mut files: Vec<String> = vec![];
+    let mut add = |field: &str, name: &Value, exts: &[&str]| -> Result<(), String> {
+        let n = name.as_str().filter(|n| valid_file(n, exts)).ok_or(format!("{field}: not a plain file name with an allowed extension"))?;
+        if !files.iter().any(|f| f == n) {
+            files.push(n.to_owned());
+        }
+        Ok(())
+    };
+    match m["kind"].as_str() {
+        Some("images") => {
+            let states = m["states"].as_object().ok_or("\"states\" is required for kind \"images\"")?;
+            if !states.contains_key("IDLE") {
+                return Err("\"states.IDLE\" is required".into());
+            }
+            let known: Vec<&str> = fmt["states"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+            for (state, file) in states {
+                if state != "ACTIVE" && !known.contains(&state.as_str()) {
+                    return Err(format!("\"states.{state}\": unknown state"));
+                }
+                add(&format!("states.{state}"), file, &image_exts())?;
+            }
+        }
+        Some("svg") => {
+            add("svg", &m["svg"], &["svg"])?;
+            if !m["css"].is_null() {
+                add("css", &m["css"], &["css"])?;
+            }
+        }
+        _ => return Err("\"kind\" must be \"images\" or \"svg\"".into()),
+    }
+    Ok(files)
+}
+
+/// Bytes of a referenced file, checked: size, and real type matching the extension.
+fn checked(name: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() as u64 > limit("fileBytes") {
+        return Err(format!("{name}: too large"));
+    }
+    let ext = extension(name);
+    if ext == "css" {
+        let text = std::str::from_utf8(bytes).map_err(|_| format!("{name}: not UTF-8"))?;
+        return if css_ok(text) { Ok(()) } else { Err(format!("{name}: @import, @font-face, escapes and url() to anything but #id are not allowed")) };
+    }
+    let expected = if ext == "jpeg" { "jpg" } else { ext.as_str() };
+    match sniff(bytes) {
+        Some(real) if real == expected => Ok(()),
+        real => Err(format!("{name}: content is {}, not .{ext}", real.unwrap_or("unknown"))),
+    }
+}
+
+pub fn dir(root: &Path) -> PathBuf {
+    root.join("avatars")
+}
+
+fn read_manifest(path: &Path) -> Result<Value, String> {
+    let meta = fs::metadata(path).map_err(|_| "no manifest.json".to_string())?;
+    if meta.len() > limit("manifestBytes") {
+        return Err("manifest.json is too large".into());
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|e| format!("manifest.json: {e}"))
+}
+
+/// Installed avatars, valid ones only: `[{id, name, author, kind}]`, sorted by name.
+pub fn list(root: &Path) -> Vec<Value> {
+    let mut out: Vec<Value> = fs::read_dir(dir(root))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if !valid_id(&name) {
+                return None; // skips <id>.bak and temporary import folders
+            }
+            let m = read_manifest(&entry.path().join("manifest.json")).ok()?;
+            check_manifest(&m).ok()?;
+            (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "author": m["author"], "kind": m["kind"] }))
+        })
+        .collect();
+    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    out
+}
+
+/// What the page needs to draw an avatar: for kind images, every state resolved through
+/// the fallbacks to a data: URL; for kind svg, the SVG and CSS text.
+pub fn load(root: &Path, id: &str) -> Result<Value, String> {
+    if !valid_id(id) {
+        return Err("bad avatar id".into());
+    }
+    let base = dir(root).join(id);
+    let m = read_manifest(&base.join("manifest.json"))?;
+    let files = check_manifest(&m)?;
+    if m["id"] != id {
+        return Err("manifest id does not match its folder".into());
+    }
+    let mut total = 0u64;
+    let mut contents: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for name in &files {
+        let path = base.join(name);
+        let size = fs::metadata(&path).map_err(|_| format!("{name}: missing"))?.len();
+        total += size;
+        if size > limit("fileBytes") || total > limit("totalBytes") {
+            return Err(format!("{name}: too large"));
+        }
+        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        checked(name, &bytes)?;
+        contents.insert(name.clone(), bytes);
+    }
+
+    let mut out = Map::new();
+    for key in ["id", "name", "kind", "anchors", "hitbox"] {
+        if !m[key].is_null() {
+            out.insert(key.into(), m[key].clone());
+        }
+    }
+    if m["kind"] == "images" {
+        let fmt = format();
+        let states = m["states"].as_object().unwrap();
+        let mut images = Map::new();
+        for state in fmt["states"].as_array().unwrap().iter().filter_map(Value::as_str) {
+            // Follow the fallbacks (THINKING → ACTIVE → IDLE …) to a declared picture.
+            let mut key = state.to_owned();
+            let mut hops = 0;
+            while !states.contains_key(&key) && hops < 8 {
+                match fmt["fallback"][&key].as_str() {
+                    Some(next) => key = next.to_owned(),
+                    None => break,
+                }
+                hops += 1;
+            }
+            let file = states.get(&key).or(states.get("IDLE")).and_then(Value::as_str).unwrap_or("");
+            let mime = fmt["imageTypes"][extension(file)].as_str().unwrap_or("application/octet-stream");
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&contents[file]);
+            images.insert(state.into(), Value::String(format!("data:{mime};base64,{b64}")));
+        }
+        out.insert("images".into(), Value::Object(images));
+    } else {
+        let text = |f: &Value| -> Result<String, String> {
+            let n = f.as_str().unwrap_or("");
+            String::from_utf8(contents[n].clone()).map_err(|_| format!("{n}: not UTF-8"))
+        };
+        out.insert("svg".into(), Value::String(text(&m["svg"])?));
+        if !m["css"].is_null() {
+            out.insert("css".into(), Value::String(text(&m["css"])?));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+/// Install a `.claudepet`: every entry flat, bounded and checked before anything is
+/// written; then an atomic swap, keeping the previous version as `<id>.bak`.
+pub fn import(root: &Path, archive: &Path) -> Result<(String, String), String> {
+    let file = fs::File::open(archive).map_err(|e| format!("cannot open: {e}"))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|_| "not a .claudepet (zip) file".to_string())?;
+    if zip.len() as u64 > limit("files") + 1 + 8 {
+        return Err("too many files".into());
+    }
+    let mut entries: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut total = 0u64;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let raw = entry.name().to_owned();
+        if entry.is_dir() || raw.starts_with("__MACOSX/") {
+            continue; // folders and Finder's metadata are ignored, never extracted
+        }
+        // enclosed_name() refuses absolute paths and `..` (zip-slip); flat files only.
+        let name = entry.enclosed_name().and_then(|p| p.to_str().map(str::to_owned)).ok_or(format!("{raw}: unsafe path"))?;
+        if name.contains('/') || name.starts_with('.') {
+            return Err(format!("{raw}: files must be at the top level"));
+        }
+        if entry.size() > limit("fileBytes") {
+            return Err(format!("{name}: too large"));
+        }
+        let mut bytes = Vec::new();
+        // Never trust the declared size: read at most the limit + 1.
+        entry.by_ref().take(limit("fileBytes") + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > limit("fileBytes") {
+            return Err(format!("{name}: too large"));
+        }
+        total += bytes.len() as u64;
+        if total > limit("totalBytes") {
+            return Err("the avatar is too large".into());
+        }
+        entries.insert(name, bytes);
+    }
+    let manifest_bytes = entries.get("manifest.json").ok_or("no manifest.json")?;
+    if manifest_bytes.len() as u64 > limit("manifestBytes") {
+        return Err("manifest.json is too large".into());
+    }
+    let m: Value = serde_json::from_slice(manifest_bytes).map_err(|e| format!("manifest.json: {e}"))?;
+    let files = check_manifest(&m)?;
+    for name in &files {
+        checked(name, entries.get(name).ok_or(format!("{name}: referenced but missing"))?)?;
+    }
+    let id = m["id"].as_str().unwrap().to_owned();
+    let name = m["name"].as_str().unwrap().to_owned();
+
+    // Write only what the manifest references, into a temporary folder, then swap.
+    let avatars = dir(root);
+    fs::create_dir_all(&avatars).map_err(|e| e.to_string())?;
+    let tmp = avatars.join(format!(".import-{id}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir(&tmp).map_err(|e| e.to_string())?;
+    for f in files.iter().chain(std::iter::once(&"manifest.json".to_string())) {
+        fs::write(tmp.join(f), &entries[f]).map_err(|e| e.to_string())?;
+    }
+    let target = avatars.join(&id);
+    let backup = avatars.join(format!("{id}.bak"));
+    if target.exists() {
+        let _ = fs::remove_dir_all(&backup);
+        fs::rename(&target, &backup).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+    Ok((id, name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\x0d";
+
+    fn tmp_root(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("claude-pet-avatars-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn zip_of(path: &Path, files: &[(&str, &[u8])]) {
+        let mut w = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        for (name, bytes) in files {
+            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(bytes).unwrap();
+        }
+        w.finish().unwrap();
+    }
+    const MANIFEST: &[u8] = br#"{"format":1,"id":"demo","name":"Demo","kind":"images","states":{"IDLE":"idle.png"}}"#;
+
+    #[test]
+    fn ids_are_checked_by_structure() {
+        assert!(valid_id("ghost") && valid_id("a-1"));
+        for bad in ["", "Ghost", "../x", "-a", "a/b", &"x".repeat(41)] {
+            assert!(!valid_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn import_then_load_resolves_every_state() {
+        let root = tmp_root("ok");
+        let pkg = root.join("demo.claudepet");
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", PNG), ("README.txt", b"ignored")]);
+        assert_eq!(import(&root, &pkg).unwrap(), ("demo".into(), "Demo".into()));
+        assert!(!dir(&root).join("demo/README.txt").exists(), "only referenced files are installed");
+        let a = load(&root, "demo").unwrap();
+        assert!(a["images"]["THINKING"].as_str().unwrap().starts_with("data:image/png;base64,"));
+        assert_eq!(list(&root).len(), 1);
+        // Re-importing keeps the previous version aside.
+        import(&root, &pkg).unwrap();
+        assert!(dir(&root).join("demo.bak").exists());
+        assert_eq!(list(&root).len(), 1, "the .bak is not listed");
+    }
+
+    #[test]
+    fn zip_slip_and_nested_paths_are_refused() {
+        let root = tmp_root("slip");
+        let pkg = root.join("evil.claudepet");
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("../../evil.png", PNG)]);
+        assert!(import(&root, &pkg).unwrap_err().contains("unsafe path"));
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("sub/idle.png", PNG)]);
+        assert!(import(&root, &pkg).unwrap_err().contains("top level"));
+        assert!(!root.join("evil.png").exists() && !dir(&root).join("demo").exists());
+    }
+
+    #[test]
+    fn content_must_match_its_extension() {
+        let root = tmp_root("sniff");
+        let pkg = root.join("x.claudepet");
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", b"<html><script>alert(1)</script>")]);
+        assert!(import(&root, &pkg).unwrap_err().contains("not .png"));
+    }
+
+    #[test]
+    fn stylesheets_cannot_reach_outside() {
+        assert!(css_ok(".a { fill: url(#g) }"));
+        assert!(!css_ok(".a { background: url(https://x/y) }"));
+        assert!(!css_ok("@import 'x.css';"));
+        assert!(!css_ok(".a { color: \\72 ed }"));
+    }
+}

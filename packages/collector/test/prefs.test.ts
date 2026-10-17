@@ -21,9 +21,17 @@ test('prefs: applying a patch keeps hand-tuned overrides untouched', () => {
   assert.deepEqual(next.smoothing, { releaseMs: 12_000 });
   assert.deepEqual(prefsOf(next), {
     temperament: 'nervous', chatModel: 'default', size: 'small', sizePx: 110, showSessions: true, paused: true,
-    readTranscripts: false,
+    readTranscripts: false, avatar: 'classic',
     stormThreshold: TEMPERAMENTS.nervous.highLoadThreshold, minStateSeconds: DEFAULT_CONFIG.minStateMs / 1000,
   });
+});
+
+test('prefs: the avatar is an id, never a path', () => {
+  assert.deepEqual(validatePatch({ avatar: 'ghost' }), { avatar: 'ghost' });
+  for (const bad of ['../x', 'Ghost', '', 'a/b', 'x'.repeat(41)]) {
+    assert.ok('error' in validatePatch({ avatar: bad }), bad);
+  }
+  assert.equal(prefsOf({ ui: { avatar: '../../etc' } }).avatar, 'classic');
 });
 
 test('temperament: preset applies, and an explicit override still wins over it', () => {

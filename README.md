@@ -133,6 +133,7 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 | [`RISKS.md`](docs/RISKS.md) | nine risks, each with a mitigation and a guard |
 | [`ROADMAP.md`](docs/ROADMAP.md) | the phase order and why it survives this machine |
 | [`PRIVACY.md`](docs/PRIVACY.md) | what is never read, what is reduced, how it is enforced |
+| [`AVATARS.md`](docs/AVATARS.md) | make your own creature: the `.claudepet` format, states, the SVG contract, safety |
 
 ## Requirements
 
@@ -159,6 +160,13 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
   its own model working or its tool running, and token counts are real. Only line kinds
   and token counts are kept, never text — see [`PRIVACY.md`](docs/PRIVACY.md). Size
   presets, temperament and the rest are in the right-click menu.
+
+## Make it your own
+
+Right-click → **Avatar** switches the creature's look; drag a `.claudepet` file onto it to
+install a new one. An avatar is one picture per state (any drawing tool or image AI) or an SVG
+following the creature's template — validated, sandboxed, and it never changes what the pet
+does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avatars/`](avatars).
 
 ## Talk to it
 
