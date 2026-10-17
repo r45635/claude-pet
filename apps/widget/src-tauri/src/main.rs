@@ -6,6 +6,7 @@
 
 mod chat;
 mod daemon;
+mod hit;
 mod menu;
 
 use std::fs;
@@ -218,6 +219,18 @@ fn on_menu(app: &AppHandle, id: &str) {
     }
 }
 
+/// The page's latest drawn shapes; the tracker in hit.rs lets clicks through elsewhere.
+#[tauri::command]
+fn set_hit_regions(hit: State<'_, hit::HitRegions>, shapes: Vec<hit::Shape>) {
+    if let Ok(mut current) = hit.0.lock() {
+        // One log line when the count changes: enough to see the page is reporting.
+        if current.as_ref().map(Vec::len) != Some(shapes.len()) {
+            eprintln!("hit regions: {} shape(s)", shapes.len());
+        }
+        *current = Some(shapes);
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -232,6 +245,7 @@ fn main() {
                 daemon: token.map(|t| daemon::Daemon::new(&url, t)),
             });
             app.manage(PanelState(std::sync::Mutex::new(None)));
+            app.manage(hit::HitRegions::default());
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))
@@ -246,9 +260,12 @@ fn main() {
                 .visible_on_all_workspaces(true)
                 .initialization_script(&script)
                 .build()?;
+            if let Some(window) = app.get_webview_window("pet") {
+                hit::spawn_tracker(app.handle().clone(), window);
+            }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel])
+        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel, set_hit_regions])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }

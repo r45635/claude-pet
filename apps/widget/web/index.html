@@ -1252,5 +1252,53 @@
     // EventSource reconnects on its own; this only surfaces the gap to the viewer.
     es.onerror = () => { pet.dataset.signal = 'none'; };
   }
+  // ---- click-through outside the creature -------------------------------------------------
+  // The window is a transparent square; macOS would give it every click inside it, empty
+  // corners included. So the page tells the host what is actually drawn — each creature's
+  // body as an ellipse, the why bubble, the tray, the open chat panel — and the host
+  // (hit.rs) lets clicks fall through everywhere else. Sent only when something moved.
+  const HIT_PAD = 6;
+  let lastHits = '';
+  function visibleRect(el) {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return r.width >= 1 && r.height >= 1 ? r : null; // display:none anywhere above => 0×0
+  }
+  function hitShapes() {
+    const shapes = [];
+    for (const shell of crittersLayer.querySelectorAll('.shell')) {
+      const r = visibleRect(shell);
+      if (r) shapes.push({ kind: 'ellipse', cx: r.x + r.width / 2, cy: r.y + r.height / 2,
+                           rx: r.width / 2 + HIT_PAD, ry: r.height / 2 + HIT_PAD });
+    }
+    const boxes = [document.getElementById('why'), document.getElementById('tray')];
+    if (chatOpen) boxes.push(document.getElementById('bubble'));
+    if (!hud.hidden) boxes.push(hud);
+    for (const el of boxes) {
+      const r = visibleRect(el);
+      if (r) shapes.push({ kind: 'rect', x: r.x - HIT_PAD, y: r.y - HIT_PAD,
+                           w: r.width + 2 * HIT_PAD, h: r.height + 2 * HIT_PAD });
+    }
+    return shapes.map((sh) => Object.fromEntries(
+      Object.entries(sh).map(([k, v]) => [k, typeof v === 'number' ? Math.round(v) : v])));
+  }
+  function reportHits() {
+    const shapes = hitShapes();
+    // Nothing drawn yet (before the first frame): keep the host's default, a fully
+    // clickable window, rather than a window that takes no click at all.
+    if (shapes.length === 0) return;
+    const key = JSON.stringify(shapes);
+    if (key === lastHits) return;
+    lastHits = key;
+    invoke('set_hit_regions', { shapes }).catch((err) => diag(`hit regions: ${err}`));
+  }
+  // 4 Hz while something can move (a creature animating, the chat open), every 2 s at
+  // rest: measuring a still page four times a second cost ~0.4 % CPU for nothing.
+  function hitLoop() {
+    reportHits();
+    setTimeout(hitLoop, animatingNow || chatOpen ? 250 : 2_000);
+  }
+  if (T) hitLoop();
+
   connect();
 </script>
