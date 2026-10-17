@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FORMAT, checkManifest, isAnimated, sniff, validateDir } from '../src/avatar-format.ts';
@@ -24,8 +24,9 @@ test('format: a minimal image avatar (IDLE only) is valid', () => {
 });
 
 test('format: the shipped examples are valid', () => {
-  for (const id of ['ghost', 'mint']) {
-    const r = validateDir(join(import.meta.dirname, '..', '..', '..', 'avatars', id));
+  const root = join(import.meta.dirname, '..', '..', '..', 'avatars');
+  for (const id of readdirSync(root)) {
+    const r = validateDir(join(root, id));
     assert.deepEqual(r.errors, [], id);
   }
 });
