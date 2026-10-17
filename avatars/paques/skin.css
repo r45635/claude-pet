@@ -1,0 +1,24 @@
+/* paques — a cream bunny with a bow tie and an egg. Scoped to this avatar by the widget. */
+
+.critter {
+  --skin-base: #f1ebe2;   /* calm: cream */
+  --skin-hot: #ffc78a;    /* storm */
+  --skin-bad: #ff8a9c;    /* error */
+}
+.antenna, .bulb, .bulb-ring { display: none; }
+
+.ear-in { fill: #ffb3c7; }
+.bow { fill: var(--bulb); }
+.egg-shell { fill: #9fd8ff; }
+.egg-zigzag { fill: none; stroke: #ffd166; stroke-width: 2.5; stroke-linejoin: round; }
+.egg-band { stroke: #ff8fb1; stroke-width: 2.5; }
+
+.ear { transform-box: fill-box; transform-origin: 50% 100%; transition: transform .4s ease; }
+/* Asleep: ears flop to the left (clear of the zz). Waiting on you: one ear twitches. Done: the egg hops. */
+.critter[data-state="IDLE"] .ear-left { transform: rotate(-28deg); }
+.critter[data-state="IDLE"] .ear-right { transform: rotate(-22deg); }
+.critter[data-state="WAITING"] .ear-right { animation: twitch .6s ease-in-out infinite; }
+.critter[data-state="DONE"] .egg { animation: hop .5s ease-in-out 3; }
+.egg { transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes twitch { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(10deg); } }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
