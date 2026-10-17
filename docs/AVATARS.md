@@ -5,8 +5,8 @@ pictures, or one SVG — packed into a `.claudepet` file. **Drag the file onto t
 install it; **right-click → Avatar** to switch. Everything else keeps working whatever it looks
 like: the states, breathing, storms, subagents walking around, the chat, clicks.
 
-Two examples ship in [`avatars/`](../avatars): `ghost` (pictures) and `mint` (SVG, a commented
-template).
+Examples ship in [`avatars/`](../avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
+commented template) and `cowboy` (SVG, with a hat that moves with the mood).
 
 ## Two ways to make one
 
