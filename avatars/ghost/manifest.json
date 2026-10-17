@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "ghost",
+  "name": "Ghost",
+  "author": "claude-pet",
+  "version": "1.0.0",
+  "kind": "images",
+  "states": {
+    "IDLE": "idle.svg",
+    "ACTIVE": "active.svg",
+    "THINKING": "thinking.svg",
+    "ERROR": "error.svg"
+  },
+  "hitbox": { "cx": 80, "cy": 86, "rx": 46, "ry": 58 }
+}

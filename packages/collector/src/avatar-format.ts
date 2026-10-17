@@ -1,0 +1,170 @@
+/**
+ * The .claudepet avatar format, for the creator tooling (`npm run avatar -- validate|pack`).
+ * The rules themselves live in avatar-format.json, shared with the widget's importer
+ * (apps/widget/src-tauri/src/avatars.rs), so the two can never disagree.
+ *
+ * An avatar is untrusted content: everything here is checked by structure (ids, file
+ * names, sizes, magic bytes), never trusted by name. See docs/AVATARS.md.
+ */
+
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import FORMAT from './avatar-format.json' with { type: 'json' };
+
+export { FORMAT };
+export type Kind = 'images' | 'svg';
+export type Manifest = {
+  format: 1;
+  id: string;
+  name: string;
+  author?: string;
+  version?: string;
+  kind: Kind;
+  states?: Record<string, string>;
+  svg?: string;
+  css?: string;
+  anchors?: { feet?: [number, number]; why?: [number, number] };
+  hitbox?: { cx: number; cy: number; rx: number; ry: number };
+};
+export type Report = { manifest: Manifest | null; files: string[]; errors: string[]; warnings: string[] };
+
+const ID = new RegExp(FORMAT.idPattern);
+const STATE_KEYS = new Set([...FORMAT.states, 'ACTIVE']);
+/** Flat file names only: no directory, no dot-file, a known extension. */
+const FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
+const num = (v: unknown, lo = -40, hi = 200): v is number => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+const pair = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && num(v[0]) && num(v[1]);
+
+/** Check a parsed manifest; returns the referenced files. */
+export function checkManifest(raw: unknown, errors: string[]): { manifest: Manifest | null; files: string[] } {
+  const m = raw as Record<string, unknown>;
+  if (!m || typeof m !== 'object' || Array.isArray(m)) {
+    errors.push('manifest.json must be a JSON object');
+    return { manifest: null, files: [] };
+  }
+  if (m.format !== FORMAT.format) errors.push(`"format" must be ${FORMAT.format}`);
+  if (typeof m.id !== 'string' || !ID.test(m.id)) errors.push(`"id" must match ${FORMAT.idPattern}`);
+  else if (FORMAT.builtin.includes(m.id)) errors.push(`"id" "${m.id}" is reserved for a built-in avatar`);
+  if (!str(m.name, 60)) errors.push('"name" is required (1-60 characters)');
+  if (m.author !== undefined && !str(m.author, 60)) errors.push('"author" must be 1-60 characters');
+  if (m.version !== undefined && !str(m.version, 20)) errors.push('"version" must be 1-20 characters');
+
+  const files: string[] = [];
+  const fileRef = (field: string, name: unknown, exts: string[]) => {
+    if (typeof name !== 'string' || !FILE.test(name) || name.includes('..')) {
+      errors.push(`${field}: "${String(name)}" is not a plain file name`);
+      return;
+    }
+    if (!exts.includes(extname(name).slice(1).toLowerCase())) {
+      errors.push(`${field}: "${name}" must be one of .${exts.join(', .')}`);
+      return;
+    }
+    if (!files.includes(name)) files.push(name);
+  };
+
+  if (m.kind === 'images') {
+    const states = m.states as Record<string, unknown> | undefined;
+    if (!states || typeof states !== 'object' || Array.isArray(states)) {
+      errors.push('"states" is required for kind "images"');
+    } else {
+      if (!('IDLE' in states)) errors.push('"states.IDLE" is required: every state falls back to it');
+      for (const [state, file] of Object.entries(states)) {
+        if (!STATE_KEYS.has(state)) errors.push(`"states.${state}": unknown state (${[...STATE_KEYS].join(', ')})`);
+        else fileRef(`states.${state}`, file, Object.keys(FORMAT.imageTypes));
+      }
+    }
+  } else if (m.kind === 'svg') {
+    fileRef('svg', m.svg, ['svg']);
+    if (m.css !== undefined) fileRef('css', m.css, ['css']);
+  } else {
+    errors.push('"kind" must be "images" or "svg"');
+  }
+
+  const anchors = m.anchors as Record<string, unknown> | undefined;
+  if (anchors !== undefined) {
+    if (!anchors || typeof anchors !== 'object') errors.push('"anchors" must be an object');
+    else {
+      if (anchors.feet !== undefined && !pair(anchors.feet)) errors.push('"anchors.feet" must be [x, y] in the 160×160 box');
+      if (anchors.why !== undefined && !pair(anchors.why)) errors.push('"anchors.why" must be [x, y] in the 160×160 box');
+    }
+  }
+  const h = m.hitbox as Record<string, unknown> | undefined;
+  if (h !== undefined && !(h && num(h.cx) && num(h.cy) && num(h.rx, 1, 120) && num(h.ry, 1, 120))) {
+    errors.push('"hitbox" must be {cx, cy, rx, ry} in the 160×160 box');
+  }
+  return { manifest: errors.length ? null : (m as Manifest), files };
+}
+
+/** The real type of a file from its first bytes, never from its name. */
+export function sniff(bytes: Uint8Array): string | null {
+  const b = (i: number) => bytes[i];
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (b(0) === 0x89 && ascii(1, 4) === 'PNG') return 'png';
+  if (ascii(0, 4) === 'GIF8') return 'gif';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp';
+  if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return 'jpg';
+  const head = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
+  if (head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'))) return 'svg';
+  return null;
+}
+
+/** An animated image keeps the CPU busy even while the creature sleeps. */
+export function isAnimated(type: string, bytes: Uint8Array): boolean {
+  const text = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (type === 'png') return text(0, Math.min(bytes.length, 4096)).includes('acTL');
+  if (type === 'webp') return text(0, Math.min(bytes.length, 64)).includes('ANIM');
+  if (type === 'gif') {
+    // More than one image descriptor (0x2C) after a graphic control extension = frames.
+    let frames = 0;
+    for (let i = 13; i < bytes.length - 1 && frames < 2; i += 1) {
+      if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9) frames += 1;
+    }
+    return frames > 1;
+  }
+  return false;
+}
+
+/** Validate an avatar folder (the unpacked form a creator works in). */
+export function validateDir(dir: string): Report {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  let raw: unknown;
+  try {
+    const path = join(dir, 'manifest.json');
+    if (statSync(path).size > FORMAT.limits.manifestBytes) throw new Error('manifest.json is too large');
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (err) {
+    return { manifest: null, files: [], errors: [`manifest.json: ${(err as Error).message}`], warnings };
+  }
+  const { manifest, files } = checkManifest(raw, errors);
+  if (!manifest) return { manifest, files, errors, warnings };
+
+  const present = new Set(readdirSync(dir));
+  if (files.length + 1 > FORMAT.limits.files) errors.push(`more than ${FORMAT.limits.files} files`);
+  let total = 0;
+  for (const name of files) {
+    if (!present.has(name)) {
+      errors.push(`${name}: referenced but missing`);
+      continue;
+    }
+    const bytes = new Uint8Array(readFileSync(join(dir, name)));
+    total += bytes.length;
+    if (bytes.length > FORMAT.limits.fileBytes) errors.push(`${name}: larger than ${FORMAT.limits.fileBytes} bytes`);
+    const ext = extname(name).slice(1).toLowerCase();
+    const real = sniff(bytes);
+    const expected = ext === 'jpeg' ? 'jpg' : ext;
+    if (ext === 'css') {
+      if (/@import|@font-face|url\(\s*['"]?(?!#)/i.test(new TextDecoder().decode(bytes))) {
+        errors.push(`${name}: @import, @font-face and url() to anything but #id are not allowed`);
+      }
+    } else if (real !== expected) {
+      errors.push(`${name}: content is ${real ?? 'unknown'}, not .${ext}`);
+    } else if (manifest.kind === 'images' && manifest.states?.IDLE === name && isAnimated(real, bytes)) {
+      warnings.push(`${name}: the IDLE image is animated — it keeps the CPU busy while the creature sleeps`);
+    }
+  }
+  if (total > FORMAT.limits.totalBytes) errors.push(`files total more than ${FORMAT.limits.totalBytes} bytes`);
+  return { manifest, files, errors, warnings };
+}

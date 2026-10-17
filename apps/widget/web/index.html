@@ -120,6 +120,12 @@
   [data-signal="none"] .bulb { stroke: var(--c-off); stroke-width: 2; }
   [data-signal="none"] .eyes { transform: none; }
 
+  /* Image avatars: the .shell is an invisible hit ellipse, and an unplugged creature is its
+     IDLE picture, greyed. */
+  .critter[data-kind="images"] ellipse.shell,
+  [data-signal="none"] .critter[data-kind="images"] ellipse.shell { fill: transparent; stroke: none; }
+  [data-signal="none"] .critter[data-kind="images"] image { filter: grayscale(1); opacity: .55; }
+
   /* The "why" bubble: in a storm or in distress, one short line saying what caused it,
      built from closed values only (snapshot.reason). It sits above the head, in the
      window's margin. */
@@ -459,6 +465,7 @@
 </div>
 
 <script type="module">
+  import { buildImageProto, buildSvgProto, scopeCss, resolveStates, DEFAULT_GEO } from './avatar.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -545,7 +552,12 @@
   // middle and its subagents wandering around it at random (see Motion — E · balade).
   // All cells together fit the creature's usual square, never larger.
   const crittersLayer = document.getElementById('critters');
-  const proto = document.getElementById('critter-proto');
+  // The avatar (docs/AVATARS.md): `classic` is the creature drawn in <defs>; another one
+  // swaps in its own prototype and geometry (where its feet are, where the why bubble
+  // points). Everything else — states, breathing, walking, clicks — works unchanged.
+  const classicProto = document.getElementById('critter-proto');
+  let proto = classicProto;
+  let geo = DEFAULT_GEO;
   const MAX_KIDS = 4;       // beyond, a "+n"
   // A family cell, in the units of the mock-up (a family is wider than tall): parent box
   // and where kids may put their feet. Above parentFeet a kid is behind the parent.
@@ -600,9 +612,10 @@
     const t = (w.y - CELL.area.y0) / (CELL.area.y1 - CELL.area.y0);
     const depth = 0.72 + 0.38 * t;               // smaller behind, bigger in front
     const s = cell.f * (CELL.kid / 160) * depth;
-    // Scale around the feet: the creature's feet are at (80, 146) in its own drawing.
+    // Scale around the feet, where the avatar puts them in its own drawing (80, 146 by default).
+    const [fx, fy] = geo.feet;
     return `translate(${(cell.x + w.x * cell.f).toFixed(2)}px, ${(cell.y + w.y * cell.f).toFixed(2)}px) ` +
-           `scale(${s.toFixed(4)}) translate(-80px, -146px)`;
+           `scale(${s.toFixed(4)}) translate(${-fx}px, ${-fy}px)`;
   }
   function familyPace(famId) {
     const load = familyLoads.get(famId) ?? 0;
@@ -696,7 +709,7 @@
         family.appendChild(slotted(critter('s:', false)));
         crittersLayer.appendChild(family);
         keepCritters.add('s:');
-        familyAnchors.set('', { x: 66, y: 26 });
+        familyAnchors.set('', { x: geo.why[0], y: geo.why[1] });
       } else {
         const G = groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
         // With the usage gauge on, the families keep clear of the tray's strip at the bottom.
@@ -718,7 +731,10 @@
           parent.setAttribute('transform', `translate(${(cell.x + P.x * f).toFixed(2)} ${(cell.y + P.y * f).toFixed(2)}) scale(${(P.size * f / 160).toFixed(4)})`);
           family.append(back, parent, front);
           familyEls.set(g.id, family);
-          familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * 0.45) * f, y: cell.y + (P.y + 6) * f });
+          // Above the parent's head: the avatar's why anchor, in the parent's scaled box
+          // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
+          familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * (geo.why[0] + 6) / 160) * f,
+                                    y: cell.y + (P.y + 6 + (geo.why[1] - 26) * P.size / 160) * f });
           crittersLayer.appendChild(family);
           keepCritters.add(`s:${g.id}`);
 
@@ -855,7 +871,7 @@
     rect.setAttribute('x', String(80 - w / 2));
     // The bubble floats just above the head it is about (a lower row's family gets it over
     // the row above), its tail's two dots leading down to that head.
-    const anchor = familyAnchors.get(family) ?? { x: 66, y: 26 };
+    const anchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
     const dy = Math.min(Math.max(0, anchor.y - 26), 120);
     whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
     const [near, far] = whyBubble.querySelectorAll('circle');
@@ -927,9 +943,74 @@
       .then((layout) => { if (chatOpen) place(layout); })
       .catch((err) => diag(`layout: ${err}`));
   }
+  // ---- avatar -----------------------------------------------------------------------------
+  const avatarStyle = document.createElement('style');
+  avatarStyle.id = 'avatar-css';
+  document.head.appendChild(avatarStyle);
+  let avatarId = 'classic';
+  let avatarLoading = '';
+
+  /** Swap the creature's prototype; the next render rebuilds every creature from it. */
+  function setAvatar(id, protoEl, avatarGeo, css) {
+    avatarId = id;
+    proto = protoEl;
+    geo = avatarGeo;
+    avatarStyle.textContent = css;
+    crittersKey = '';
+    critterEls.clear();
+    last = '';
+    if (lastFrame) render(lastFrame);
+  }
+
+  /** Build an avatar from what the host (or the harness) delivers; classic on any failure. */
+  function applyAvatar(avatar) {
+    try {
+      const protoEl = avatar.kind === 'svg' ? buildSvgProto(document, avatar) : buildImageProto(document, avatar);
+      const css = avatar.kind === 'svg' && avatar.css ? scopeCss(avatar.css, avatar.id) : '';
+      setAvatar(avatar.id, protoEl, { ...DEFAULT_GEO, ...(avatar.anchors ?? {}) }, css);
+    } catch (err) {
+      diag(`avatar ${avatar.id}: ${err.message}`);
+      setAvatar('classic', classicProto, DEFAULT_GEO, '');
+    }
+  }
+
+  function loadAvatar(id) {
+    if (!id || id === avatarId || id === avatarLoading) return;
+    if (id === 'classic') { setAvatar('classic', classicProto, DEFAULT_GEO, ''); return; }
+    if (!T) return;
+    avatarLoading = id;
+    invoke('get_avatar', { id })
+      .then((avatar) => applyAvatar(avatar))
+      .catch((err) => {
+        diag(`avatar ${id}: ${err}`);
+        setAvatar('classic', classicProto, DEFAULT_GEO, '');
+      })
+      .finally(() => { avatarLoading = ''; });
+  }
+
+  // A .claudepet dropped on the creature (installed by the host): say so in the why bubble
+  // for a few seconds, and reload even when it replaced the avatar already on screen.
+  let flashTimer = 0;
+  function flash(text) {
+    clearTimeout(flashTimer);
+    renderWhy({ text, family: '' });
+    flashTimer = setTimeout(() => { last = ''; if (lastFrame) render(lastFrame); }, 4_000);
+  }
+  T?.event.listen('avatar', ({ payload }) => {
+    if (payload.ok) {
+      avatarId = '';
+      loadAvatar(payload.id);
+      flash(`Avatar: ${String(payload.name).slice(0, 24)}`);
+    } else {
+      flash('Avatar refused (see the log)');
+      diag(`avatar import: ${payload.error}`);
+    }
+  });
+
   function applyPrefs(p) {
     if (!p) return;
     prefs = p;
+    loadAvatar(p.avatar ?? 'classic');
     renderSettings(p);
     pet.dataset.showSessions = String(p.showSessions);
     pet.dataset.paused = String(p.paused);
@@ -1184,6 +1265,51 @@
 
   // Browser-harness demo, to review the design without a Tauri host:
   //   index.html#demo=chat&layout=above-right  (or below-left, …)
+  // Browser-harness demo of an avatar (run Chrome with --allow-file-access-from-files):
+  //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none]
+  // It reads the avatar folder like the widget's importer would, minus the validation.
+  if (params.get('demo') === 'avatar') {
+    (async () => {
+      await null; // let the rest of the module initialise first (render's state is below)
+      const id = params.get('avatar') ?? 'classic';
+      const state = params.get('state') ?? 'IDLE';
+      const kids = Number(params.get('kids') ?? 0);
+      document.documentElement.classList.add('widget');
+      document.body.style.background = '#3b4252';
+      if (id !== 'classic') {
+        const root = new URL(`../../../avatars/${id}/`, location.href);
+        const format = await (await fetch(new URL('../../../packages/collector/src/avatar-format.json', location.href))).json();
+        const manifest = await (await fetch(new URL('manifest.json', root))).json();
+        const text = async (f) => (await fetch(new URL(f, root))).text();
+        const dataUrl = async (f) => {
+          const blob = await (await fetch(new URL(f, root))).blob();
+          const type = format.imageTypes[f.split('.').pop().toLowerCase()];
+          return new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result.replace(/^data:[^;]*/, `data:${type}`)); fr.readAsDataURL(blob); });
+        };
+        const avatar = { id, kind: manifest.kind, anchors: manifest.anchors, hitbox: manifest.hitbox };
+        if (manifest.kind === 'svg') {
+          avatar.svg = await text(manifest.svg);
+          if (manifest.css) avatar.css = await text(manifest.css);
+        } else {
+          const files = resolveStates(manifest.states, format.fallback, format.states);
+          avatar.images = {};
+          for (const [st, f] of Object.entries(files)) avatar.images[st] = await dataUrl(f);
+        }
+        applyAvatar(avatar);
+      }
+      const agents = Array.from({ length: kids }, (_, i) => ({ id: `k${i}`, type: 'explore', state }));
+      render({
+        state, visual: state === 'IDLE' ? 'IDLE' : state === 'HIGH_LOAD' || state === 'ERROR' ? state : 'ACTIVE',
+        load: state === 'HIGH_LOAD' ? 90 : state === 'IDLE' ? 0 : 50, reason: null,
+        sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
+        sessions: kids ? [{ id: 'demo', status: 'working', state, load: 50, agents }] : [],
+        prefs: { ...prefs, avatar: id }, estimated_activity_rate: 0, load_confidence: 1, context_load: null,
+        active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
+      });
+      document.title = `ready ${id} ${state}`;
+    })().catch((err) => { document.title = `failed ${err.message}`; });
+  }
+
   if (params.get('demo') === 'chat') {
     const [v, h] = (params.get('layout') ?? 'above-right').split('-');
     chatOpen = true;
@@ -1300,5 +1426,6 @@
   }
   if (T) hitLoop();
 
-  connect();
+  // A harness demo draws a frame of its own: no live feed to overwrite it.
+  if (!params.get('demo')) connect();
 </script>
