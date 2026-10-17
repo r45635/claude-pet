@@ -23,7 +23,9 @@
     "autostart": "node packages/collector/src/autostart.ts",
     "fetch-widget": "node packages/collector/src/widget.ts fetch",
     "build-standalone": "node scripts/build-standalone.ts",
-    "replay": "node packages/simulator/src/replay.ts"
+    "replay": "node packages/simulator/src/replay.ts",
+    "avatar": "node scripts/avatar.ts",
+    "test:avatar-sanitizer": "node scripts/avatar-sanitize-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

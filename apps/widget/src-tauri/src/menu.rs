@@ -27,7 +27,20 @@ fn toggle<R: Runtime>(app: &AppHandle<R>, prefs: &Value, key: &str, text: &str) 
     CheckMenuItemBuilder::with_id(format!("pref:{key}:{}", !on), text).checked(on).build(app)
 }
 
-pub fn build<R: Runtime>(app: &AppHandle<R>, prefs: &Value, busy: bool) -> tauri::Result<Menu<R>> {
+/// Avatar ▸ Classic and every installed one (`avatars`: id, name), plus the folder.
+fn avatar_menu<R: Runtime>(app: &AppHandle<R>, prefs: &Value, avatars: &[(String, String)]) -> tauri::Result<tauri::menu::Submenu<R>> {
+    let current = prefs["avatar"].as_str().unwrap_or("classic");
+    let mut sub = SubmenuBuilder::new(app, "Avatar");
+    for (id, name) in avatars {
+        let item = CheckMenuItemBuilder::with_id(format!("pref:avatar:{id}"), name).checked(current == id).build(app)?;
+        sub = sub.item(&item);
+    }
+    sub.separator()
+        .item(&MenuItemBuilder::with_id("avatars:folder", "Open avatars folder").build(app)?)
+        .build()
+}
+
+pub fn build<R: Runtime>(app: &AppHandle<R>, prefs: &Value, busy: bool, avatars: &[(String, String)]) -> tauri::Result<Menu<R>> {
     let stop = MenuItemBuilder::with_id("chat:stop", "Stop answering").enabled(busy).build(app)?;
     MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id("chat:open", "Talk…").build(app)?)
@@ -37,6 +50,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, prefs: &Value, busy: bool) -> tauri
             &[("default", "Default"), ("sonnet", "Sonnet"), ("haiku", "Haiku")])?)
         .item(&MenuItemBuilder::with_id("chat:folder", "Open chat folder").build(app)?)
         .separator()
+        .item(&avatar_menu(app, prefs, avatars)?)
         .item(&radio(app, prefs, "temperament", "Temperament",
             &[("zen", "Zen"), ("normal", "Normal"), ("nervous", "Nervous")])?)
         .item(&radio(app, prefs, "size", "Size",
@@ -73,5 +87,6 @@ mod tests {
         assert_eq!(pref_patch("pref:size:small").unwrap(), r#"{"size":"small"}"#);
         assert_eq!(pref_patch("pref:paused:true").unwrap(), r#"{"paused":true}"#);
         assert_eq!(pref_patch("quit"), None);
+        assert_eq!(pref_patch("pref:avatar:ghost").unwrap(), r#"{"avatar":"ghost"}"#);
     }
 }

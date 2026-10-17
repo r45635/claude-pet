@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>avatar sanitizer test</title>
+<!--
+  Poisoned SVG avatars through web/avatar.js, in a real browser (DOMParser). Run with
+  `npm run test:avatar-sanitizer` (headless Chrome); the verdict is the page title:
+  "PASS <n>" or "FAIL <what leaked>".
+-->
+<body>
+<pre id="out"></pre>
+<script type="module">
+  import { buildSvgProto, sanitizeSvg } from './avatar.js';
+
+  const wrap = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 160 160">
+    <g class="critter"><g class="shaker"><g class="body"><path class="shell" d="M0 0h10v10z"/>${inner}</g></g></g></svg>`;
+  // Each payload, and a marker that must not survive anywhere in the result.
+  const POISON = [
+    ['<script>window.pwned=1<\/script>', 'pwned'],  // <\/ : not to close this page's own <script>
+    ['<circle r="5" onload="window.pwned=1" onclick="x()"/>', 'onload'],
+    ['<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">EVIL</div></foreignObject>', 'EVIL'],
+    ['<a href="javascript:alert(1)"><circle r="3"/></a>', 'javascript'],
+    ['<use href="https://evil.example/x.svg#a"/>', 'evil.example'],
+    ['<use xlink:href="https://evil.example/x.svg#a"/>', 'evil.example'],
+    ['<image href="https://evil.example/track.png"/>', 'evil.example'],
+    ['<circle r="4" fill="url(https://evil.example/p)"/>', 'evil.example'],
+    ['<circle r="4" style="fill:url(https://evil.example/p)"/>', 'evil.example'],
+    ['<style>@import url(https://evil.example/c.css);</style>', 'evil.example'],
+    ['<animate attributeName="href" to="javascript:alert(1)"/>', 'javascript'],
+    ['<set attributeName="onload" to="alert(1)"/>', 'alert'],
+    ['<iframe src="https://evil.example"/>', 'evil.example'],
+    ['<circle r="4" data-x="1" FILL="red" ONLOAD="x()"/>', 'ONLOAD'],
+  ];
+  const KEEP = '<circle class="eye opt on-THINKING" cx="5" cy="5" r="2" fill="url(#g)"/><use href="#g"/>';
+
+  const failures = [];
+  for (const [payload, marker] of POISON) {
+    try {
+      const el = buildSvgProto(document, { id: 'test', svg: wrap(payload + KEEP) });
+      const html = el.outerHTML;
+      if (html.includes(marker)) failures.push(`${marker} survived: ${payload}`);
+      if (!el.querySelector('.on-THINKING') || !html.includes('url(#g)') || !el.querySelector('use[href="#g"]')) {
+        failures.push(`legit content removed with: ${payload}`);
+      }
+    } catch (err) {
+      failures.push(`threw on ${payload}: ${err.message}`);
+    }
+  }
+  // The contract is enforced: no critter, or two shells, is refused.
+  for (const bad of ['<svg xmlns="http://www.w3.org/2000/svg"><g/></svg>',
+                     wrap('<path class="shell" d="M0 0"/>'), 'not svg at all']) {
+    try { buildSvgProto(document, { id: 'test', svg: bad }); failures.push(`accepted: ${bad.slice(0, 40)}`); } catch { /* expected */ }
+  }
+  // Nothing executed while sanitizing.
+  if (window.pwned) failures.push('a payload ran');
+
+  document.getElementById('out').textContent = failures.join('\n') || 'all clean';
+  document.title = failures.length ? `FAIL ${failures[0]}` : `PASS ${POISON.length}`;
+</script>
+</body>
