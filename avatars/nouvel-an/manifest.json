@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "nouvel-an",
+  "name": "Nouvel An",
+  "author": "claude-pet",
+  "version": "1.0.0",
+  "kind": "svg",
+  "svg": "creature.svg",
+  "css": "skin.css"
+}

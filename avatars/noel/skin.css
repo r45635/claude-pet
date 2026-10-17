@@ -1,0 +1,21 @@
+/* noel — snow-white skin, Santa hat, striped scarf. Scoped to this avatar by the widget. */
+
+.critter {
+  --skin-base: #e6eef8;   /* calm: snow */
+  --skin-hot: #ffb36b;    /* storm */
+  --skin-bad: #ff7a90;    /* error */
+}
+.antenna, .bulb, .bulb-ring { display: none; }
+
+.santa-cap { fill: #d63a3a; stroke: #9e2424; stroke-width: 1.5; }
+.santa-trim, .santa-pompom { fill: #ffffff; stroke: #d9dee7; stroke-width: 1; }
+.scarf-band, .scarf-tail { fill: #2f8f5b; }
+.scarf-stripe { fill: none; stroke: var(--bulb); stroke-width: 4; stroke-linecap: round; }
+
+.santa { transform-box: fill-box; transform-origin: 50% 100%; }
+/* Asleep: pulled down. Done: the hat wiggles. Storm: it jumps. */
+.critter[data-state="IDLE"] .santa { transform: translateY(6px); }
+.critter[data-state="DONE"] .santa { animation: wiggle 0.9s ease-in-out 2; }
+.critter[data-state="HIGH_LOAD"] .santa { animation: jump .5s ease-in-out infinite; }
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-9deg); } 70% { transform: rotate(7deg); } }
+@keyframes jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px) rotate(-4deg); } }
