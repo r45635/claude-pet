@@ -108,6 +108,11 @@ commands, with nobody there to answer a permission prompt.
 - **Mitigation:** the widget spawns `claude` itself, behind Tauri IPC that only its own
   webview can call. No port exposes the agent. The token is no longer logged (and was
   rotated after the change).
+- **Off by default (v0.3.0), gated natively:** `chat_ask` (Rust) reads `ui.chat.enabled` from
+  `config.json` at every question and refuses unless it is `true`. The page can turn it off
+  but never on (`update_prefs` refuses `chatEnabled: true`), so a compromised page or avatar
+  cannot re-enable it; turning it on is the native menu's "Enable chat…", after a native
+  confirmation that says what it means.
 - **Guards:** `auto` mode (Claude Code's classifier) rather than `bypassPermissions`; one run
   at a time; a stop button; a dedicated working folder `~/.claude-pet/chat` — which Bash
   can still leave, so it is a default, not a sandbox.

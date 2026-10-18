@@ -47,8 +47,10 @@ has launchd restart both on the new code (`status` and `uninstall` also exist).
 
 | Item | Effect |
 |---|---|
+| Enable chat… / Disable chat | the chat is off by default; turning it on asks a native confirmation (see `docs/RISKS.md` §10) |
+| Settings… | the settings panel: every setting, in your language ([`docs/CONFIG.md`](../../docs/CONFIG.md)) |
 | Temperament → Zen / Normal / Nervous | presets for what excites the creature, when it storms, how fast it calms down (`TEMPERAMENTS` in `packages/core/src/config.ts`) |
-| Size → Small / Medium / Large | window and creature size: 110, 150, 220 px (any size from 80 to 300 px with the slider in the settings panel) |
+| Size → Small / Medium / Large, Zoom in / out / Actual size | nominal size 110 / 150 / 220 px; zoom ±0.1 (⌘+ / ⌘− / ⌘0 on the creature); shown size kept within min/max |
 | Session pastilles | show/hide one dot per live Claude Code session |
 | Pause (sleep) | the creature sleeps; the network sensor stops sampling |
 | Avatar → Classic / installed ones | the creature's look; drop a `.claudepet` on it to install one ([`docs/AVATARS.md`](../../docs/AVATARS.md)) |
