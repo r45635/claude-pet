@@ -3,6 +3,7 @@ name = "claude-pet-widget"
 version = "0.2.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/r45635/claude-pet"
 publish = false
 
 [build-dependencies]

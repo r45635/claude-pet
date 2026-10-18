@@ -31,7 +31,7 @@ import { applyPatch, ConfigFileError, nativeOnlyKey, prefsOf, readUserFile, sani
 import { setLaunchAtLogin } from './login.ts';
 import { STANDALONE, VERSION } from './entry.ts';
 import { LOCAL_BUILD } from './widget.ts';
-import { checkForUpdate, freshUpdateState } from './update.ts';
+import { checkForUpdate, freshUpdateState, installStandalone, restartDetached } from './update.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -85,12 +85,63 @@ applyTranscriptPref();
 
 // Release updates: checked daily (update.ts), surfaced in every frame and in /health.
 let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
+let autoTried: string | null = null; // one automatic attempt per detected version, no retry loop
 async function updateCheckLoop(): Promise<void> {
   if (!prefs.updatesCheck) return;
   const before = JSON.stringify(update);
   update = await checkForUpdate(update);
   if (update.error) process.stderr.write(`${update.error}\n`);
   if (JSON.stringify(update) !== before) broadcast();
+  // Automatic install: standalone only, and only a signed release (allowUnsigned stays false).
+  if (prefs.updatesAuto && update.available && update.layout === 'standalone' && update.latest && autoTried !== update.latest) {
+    autoTried = update.latest;
+    await runInstall(update.latest, false);
+  }
+}
+
+/** The one install path, automatic or from the menu. Failure is reported, never silent. */
+async function runInstall(tag: string, allowUnsigned: boolean): Promise<void> {
+  update = { ...update, installing: true, error: null, unsigned: false };
+  broadcast();
+  const result = await installStandalone(tag, { allowUnsigned });
+  if (!result.ok) {
+    // An unsigned release is not an error to hide: the menu offers a warned, manual install.
+    update = { ...update, installing: false, error: result.error, unsigned: result.unsigned === true };
+    process.stderr.write(`update: ${result.error}\n`);
+    broadcast();
+    return;
+  }
+  process.stderr.write(`update: ${tag} installed, restarting (previous version kept as app.old)\n`);
+  update = { ...update, installing: false, available: false };
+  broadcast();
+  restartDetached();
+}
+
+/**
+ * POST /update — install the detected release (standalone only). Body {} or
+ * {"allowUnsigned":true}, the latter sent only after the native "unsigned" warning dialog.
+ * Native-only, the whole route: only the menu's confirmation dialogs call it (isNative).
+ */
+async function postUpdate(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const refuse = (status: number, error: string) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error, update }));
+  };
+  if (!isNative(req)) return refuse(403, 'native_only');
+  const body = await readBody(req);
+  let allowUnsigned = false;
+  try {
+    allowUnsigned = JSON.parse(body || '{}').allowUnsigned === true;
+  } catch {
+    /* an empty or broken body is a plain install request */
+  }
+  if (update.layout !== 'standalone') return refuse(400, 'clone');
+  if (update.installing) return refuse(409, 'installing');
+  if (!update.available || !update.latest) return refuse(409, 'no_update');
+  // Accepted now, reported over SSE: a download outlasts the menu's 5 s localhost call.
+  res.writeHead(202, { 'content-type': 'application/json' });
+  res.end('{"ok":true}');
+  void runInstall(update.latest, allowUnsigned);
 }
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
@@ -277,6 +328,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname === '/config') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(prefs));
+    return;
+  }
+
+  if (url.pathname === '/update' && req.method === 'POST') {
+    void postUpdate(req, res);
     return;
   }
 

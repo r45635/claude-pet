@@ -40,9 +40,18 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 ```
 
 `setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
-hooks into Claude Code and starts the pet at login. To update, run the same three lines
-again. `~/.claude-pet/app/claude-pet` also has `status`, `restart`, `snapshot` and
-`uninstall` (which keeps your settings and logs).
+hooks into Claude Code and starts the pet at login. `~/.claude-pet/app/claude-pet` also has
+`status`, `restart`, `snapshot` and `uninstall` (which keeps your settings and logs).
+
+**Updates install themselves.** Once a day the daemon asks GitHub which release is the
+latest (a request carrying nothing but the URL — [PRIVACY](docs/PRIVACY.md)). When a newer
+one is out, it downloads it, checks its SHA-256 **and its release signature**, swaps it in
+and restarts the creature; right-click → *Install vX…* does the same on demand. Only signed
+releases install on their own; an unsigned one is offered behind a warning. The previous
+version stays in `~/.claude-pet/app.old` — to go back:
+`mv ~/.claude-pet/app ~/.claude-pet/app.bad && mv ~/.claude-pet/app.old ~/.claude-pet/app && ~/.claude-pet/app/claude-pet restart`.
+Both behaviours are settings (*Check for updates*, *Install updates automatically*). Running
+the three lines above again still works as a manual update.
 
 The archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub Actions
 (`.github/workflows/release.yml`) for every version tag. Download it with `curl`, not a

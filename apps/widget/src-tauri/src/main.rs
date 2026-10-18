@@ -123,10 +123,14 @@ fn chat_cancel(pet: State<'_, Pet>) -> bool {
 }
 
 #[tauri::command]
-fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, locale: Option<String>) -> Result<(), String> {
+fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, locale: Option<String>, update: Option<Value>) -> Result<(), String> {
     let locale = locale.unwrap_or_else(|| "en".into());
     if let Ok(mut l) = app.state::<MenuLocale>().0.lock() {
         *l = locale.clone(); // for the native dialogs the menu opens
+    }
+    let update = update.unwrap_or(Value::Null);
+    if let Ok(mut u) = app.state::<MenuUpdate>().0.lock() {
+        *u = update.clone(); // the dialogs word themselves from it; the daemon decides
     }
     let mut avatars = vec![("classic".to_owned(), "Classic".to_owned())];
     for a in avatars::list(&root()) {
@@ -137,12 +141,14 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
         }
     }
     let chat_on = settings::chat_enabled(&settings::user_config(&root()));
-    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
+    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
 /// The language the menu was last opened in, for the native dialogs it opens.
 struct MenuLocale(std::sync::Mutex<String>);
+/// The daemon's update state as the menu last showed it.
+struct MenuUpdate(std::sync::Mutex<Value>);
 
 /// The settings' description, for the page to build its panel from.
 #[tauri::command]
@@ -193,6 +199,59 @@ fn confirm_enable_chat(app: &AppHandle) {
                 if let Err(e) = d.post("/config", r#"{"chatEnabled":true}"#) {
                     eprintln!("enable chat: {e}");
                 }
+            }
+        });
+}
+
+/// "Install vX…": confirm, then ask the daemon, which downloads, verifies and restarts
+/// both processes. An unsigned release gets its own, warning-worded confirmation.
+fn confirm_update(app: &AppHandle, unsigned: bool) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let update = app.state::<MenuUpdate>().0.lock().map(|u| u.clone()).unwrap_or(Value::Null);
+    let Some(tag) = update["latest"].as_str().filter(|t| menu::valid_tag(t)).map(str::to_owned) else { return };
+    let w = menu::Words::new(&locale);
+    let key = if unsigned { "dialog.updateUnsigned" } else { "dialog.update" };
+    let handle = app.clone();
+    app.dialog()
+        .message(w.get(&format!("{key}.body")).replace("{v}", &tag))
+        .title(w.get(&format!("{key}.title")).replace("{v}", &tag))
+        .kind(if unsigned { MessageDialogKind::Warning } else { MessageDialogKind::Info })
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get(&format!("{key}.ok")), w.get("dialog.cancel")))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            if let Some(d) = &handle.state::<Pet>().daemon {
+                let body = serde_json::json!({ "allowUnsigned": unsigned }).to_string();
+                if let Err(e) = d.post("/update", &body) {
+                    eprintln!("update: {e}");
+                }
+            }
+        });
+}
+
+/// A clone is never updated behind its owner's back: say how, and offer the release page.
+fn explain_update(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let update = app.state::<MenuUpdate>().0.lock().map(|u| u.clone()).unwrap_or(Value::Null);
+    let Some(tag) = update["latest"].as_str().filter(|t| menu::valid_tag(t)).map(str::to_owned) else { return };
+    let w = menu::Words::new(&locale);
+    let mut body = w.get("dialog.updateClone.body").replace("{v}", &tag);
+    if update["pinnedLocalBuild"] == true {
+        body.push_str("\n\n");
+        body.push_str(&w.get("dialog.updateClone.pinned"));
+    }
+    let url = format!("{}/releases/tag/{tag}", env!("CARGO_PKG_REPOSITORY"));
+    app.dialog()
+        .message(body)
+        .title(w.get("dialog.updateClone.title").replace("{v}", &tag))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get("dialog.updateClone.open"), w.get("dialog.close")))
+        .show(move |open| {
+            if open {
+                let _ = std::process::Command::new("open").arg(&url).status();
             }
         });
 }
@@ -298,6 +357,9 @@ fn on_menu(app: &AppHandle, id: &str) {
     }
     match id {
         "chat:enable" => confirm_enable_chat(app),
+        "update:install" => confirm_update(app, false),
+        "update:install-unsigned" => confirm_update(app, true),
+        "update:how" => explain_update(app),
         "chat:disable" => {
             pet.chat.cancel();
             post("/config", r#"{"chatEnabled":false}"#);
@@ -412,6 +474,7 @@ fn main() {
             app.manage(PanelState(std::sync::Mutex::new(None)));
             app.manage(hit::HitRegions::default());
             app.manage(MenuLocale(std::sync::Mutex::new("en".into())));
+            app.manage(MenuUpdate(std::sync::Mutex::new(Value::Null)));
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))

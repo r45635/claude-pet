@@ -1147,7 +1147,7 @@
 
   addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    invoke('show_menu', { prefs, locale: currentLocale() }).catch((err) => diag(`menu: ${err}`));
+    invoke('show_menu', { prefs, locale: currentLocale(), update: lastFrame?.update ?? null }).catch((err) => diag(`menu: ${err}`));
   });
 
   // ---- click to talk, drag to move ---------------------------------------------------------
@@ -1562,8 +1562,32 @@
   // Frames arrive every 100 ms–1 s; touching the DOM only on change keeps an idle page idle.
   let last = '';
   let lastFrame = null;
+
+  // Updates (docs/RISKS.md #12): the daemon detects and installs; the page only says so,
+  // once per event — a new version seen, an install that failed, a restart onto a new one.
+  let updateSeen = '';
+  let wasInstalling = false;
+  let versionChecked = false;
+  const VERSION_KEY = 'claude-pet.version';
+  function noticeUpdate(s) {
+    const u = s.update;
+    if (u?.available && u.latest && u.latest !== updateSeen && !u.installing) {
+      updateSeen = u.latest;
+      flash(t('update.available', { v: u.latest }));
+    }
+    if (wasInstalling && u && !u.installing && u.error) flash(t('update.failed'));
+    wasInstalling = !!u?.installing;
+    if (s.version && !versionChecked) {
+      versionChecked = true; // once per page load: a restart onto a new version is a new page
+      let before = null;
+      try { before = localStorage.getItem(VERSION_KEY); localStorage.setItem(VERSION_KEY, s.version); } catch { /* storage off */ }
+      if (before && before !== s.version) flash(t('update.done', { v: `v${s.version}` }));
+    }
+  }
+
   function render(s) {
     lastFrame = s;
+    noticeUpdate(s);
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,

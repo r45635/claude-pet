@@ -153,5 +153,18 @@ from the same release page proves integrity in transit, nothing more.
   repository's CI holding the secret (or from the key's owner). It does **not** protect
   against a compromised GitHub account, a compromised Actions runner, or a malicious commit
   that CI faithfully builds and signs; and the binaries remain un-notarized.
+- **The updater** (`packages/collector/src/update.ts`): automatic install happens only on
+  the standalone layout, only for a release whose signature verifies; the archive is fully
+  verified and unpacked before `~/.claude-pet/app` is touched, the previous version is kept
+  as `app.old`, and a failure is reported (`/health`, the creature's bubble), never silent.
+  A clone is never modified: the creature only tells its owner how to pull. An unsigned
+  release needs a human's confirmation in a native dialog. `POST /update` is native-only
+  as a whole (the `X-Claude-Pet-Native` header, §10): the page can neither trigger an install
+  nor consent to an unsigned one.
+- **The settings are page-writable on purpose:** the worst a compromised page could do is
+  turn automatic install on — of a release signed by the pinned key from the pinned
+  repository. It cannot point the updater anywhere else.
 - **Guard:** tag builds fail if the secret is absent; tests pin the signing step, the
-  pubkey/pem identity, and the verify/refuse behavior.
+  pubkey/pem identity, the verify/refuse behavior, and the installer's refusals (tampered
+  checksum, bad or foreign signature, incomplete archive, unsigned without consent) — in
+  each case the installed version is left untouched.
