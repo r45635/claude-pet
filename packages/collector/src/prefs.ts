@@ -1,178 +1,170 @@
 /**
- * The creature's preferences, as set from its right-click menu. They live in the same
- * ~/.claude-pet/config.json as the hand-tuned engine overrides — one file, one truth:
+ * The creature's preferences and the config file they live in, ~/.claude-pet/config.json:
  *
- *   { "temperament": "zen", "ui": { "sizePx": 180, "showSessions": false, "paused": false },
- *     ...any engine override, which always wins over the temperament preset }
+ *   { "temperament": "zen",
+ *     "ui": { "locale": "fr", "size": { "nominalPx": 150, "zoom": 1.2 }, "chat": { "enabled": false }, … },
+ *     …any engine override (packages/core/src/config.ts), which always wins over the preset }
  *
- * A patch from the menu is validated key by key; anything else is refused, so the
- * HTTP route cannot be used to write arbitrary content into the file.
+ * Every setting is described once, in settings-schema.json — path, type, range, default,
+ * who may write it — and everything here is driven by that description. A patch from the
+ * menu or the panel is validated key by key; anything else is refused, so the HTTP route
+ * cannot write arbitrary content into the file. Hand-written engine overrides go through
+ * `sanitizeEngine`: wrong type or out of range is ignored and reported, never used.
+ * An unreadable file is never overwritten (ConfigFileError): your hand edits are kept.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isTemperament, mergeConfig, type Temperament } from '@claude-pet/core';
+import { DEFAULT_CONFIG, mergeConfig, type Temperament } from '@claude-pet/core';
 import { CONFIG_FILE } from './paths.ts';
 import AVATAR_FORMAT from './avatar-format.json' with { type: 'json' };
+import SCHEMA from './settings-schema.json' with { type: 'json' };
 
+export { SCHEMA };
+
+export type Spec = {
+  key: string;
+  path: string;
+  type: 'enum' | 'bool' | 'int' | 'number' | 'id' | 'point';
+  values?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+  scale?: number;
+  default: unknown;
+  section: string | null;
+  nativeOnly?: boolean;
+  nativeOnlyTrue?: boolean;
+  doc: string;
+};
+export const SPECS = SCHEMA.prefs as Spec[];
+const SPEC = new Map(SPECS.map((s) => [s.key, s]));
+
+// ---- size: nominal × zoom, kept between min and max ----------------------------------------
 export const SIZES = ['small', 'medium', 'large'] as const;
 export type Size = (typeof SIZES)[number];
-/** The menu's sizes are shortcuts for these; the settings slider sets any whole px in range. */
+/** The menu's sizes are shortcuts for these nominal sizes. */
 export const SIZE_PX: Record<Size, number> = { small: 110, medium: 150, large: 220 };
-export const SIZE_RANGE = { min: 80, max: 300 } as const;
 
-export const CHAT_MODELS = ['default', 'sonnet', 'haiku'] as const;
-export type ChatModel = (typeof CHAT_MODELS)[number];
+/** The size actually shown: nominal × zoom, clamped to [min, max] (in either order). */
+export function shownPx(nominalPx: number, zoom: number, minPx: number, maxPx: number): number {
+  const lo = Math.min(minPx, maxPx);
+  const hi = Math.max(minPx, maxPx);
+  return Math.round(Math.min(hi, Math.max(lo, nominalPx * zoom)));
+}
 
+// ---- the prefs object ----------------------------------------------------------------------
 export type Prefs = {
-  temperament: Temperament;
-  /** Model for the creature's own Claude (run by the widget). `default` = Claude Code's pick. */
-  chatModel: ChatModel;
-  /** The menu preset matching `sizePx`, or 'custom' when the slider set something else. */
-  size: Size | 'custom';
-  /** Creature size in px: the slider's value, else the preset's (`ui.size`, older files). */
-  sizePx: number;
-  showSessions: boolean;
-  paused: boolean;
-  /**
-   * Read the conversation files (~/.claude/projects) for per-thread activity and real
-   * token counts. Off by default: those files hold prompts and answers, and the pet
-   * otherwise never opens them. Only line and block types and token counts are kept.
-   */
-  readTranscripts: boolean;
-  /** Load (0-100) at which the creature storms. Effective value: preset or override. */
-  stormThreshold: number;
-  /** Shortest time a state stays on screen, seconds. Effective value. */
-  minStateSeconds: number;
-  /** The avatar's id (docs/AVATARS.md): `classic` or one installed in ~/.claude-pet/avatars. */
+  locale: 'auto' | 'en' | 'fr';
+  theme: 'system' | 'light' | 'dark';
+  reduceMotion: 'system' | 'on' | 'off';
+  launchAtLogin: boolean;
   avatar: string;
+  nominalPx: number;
+  minPx: number;
+  maxPx: number;
+  zoom: number;
+  opacity: number;
+  alwaysOnTop: boolean;
+  showSessions: boolean;
+  temperament: Temperament;
+  /** Effective value: the override if any, else the temperament's. */
+  stormThreshold: number;
+  /** Effective value, seconds. */
+  minStateSeconds: number;
+  paused: boolean;
+  netSensor: boolean;
+  readTranscripts: boolean;
+  chatEnabled: boolean;
+  chatModel: 'default' | 'sonnet' | 'haiku';
+  position: { x: number; y: number } | null;
+  /** Derived, for the widget: the size shown (nominal × zoom, clamped) … */
+  sizePx: number;
+  /** … and the menu preset matching the nominal size, or 'custom'. */
+  size: Size | 'custom';
 };
 
-/** The settings panel's ranges. The storm ends 10 points below where it starts. */
-export const STORM_THRESHOLD = { min: 30, max: 100 } as const;
-export const MIN_STATE_SECONDS = { min: 0, max: 30 } as const;
-const STORM_EXIT_GAP = 10;
+/** A patch: any setting by key (null = back to its default), plus the menu's `size` preset. */
+export type PrefsPatch = Partial<Record<string, unknown>>;
 
-const BASE = mergeConfig({});
-export const DEFAULT_PREFS: Prefs = {
-  temperament: 'normal',
-  chatModel: 'default',
-  size: 'medium',
-  sizePx: SIZE_PX.medium,
-  showSessions: true,
-  paused: false,
-  readTranscripts: false,
-  stormThreshold: BASE.highLoadThreshold,
-  minStateSeconds: BASE.minStateMs / 1000,
-  avatar: 'classic',
-};
-const AVATAR_ID = new RegExp(AVATAR_FORMAT.idPattern);
-const isAvatarId = (v: unknown): v is string => typeof v === 'string' && AVATAR_ID.test(v);
-
-/** A patch: the panel's numbers may also be null, meaning "back to the default". */
-export type PrefsPatch = Partial<Omit<Prefs, 'size' | 'sizePx' | 'stormThreshold' | 'minStateSeconds'>> & {
-  size?: Size;
-  sizePx?: number | null;
-  stormThreshold?: number | null;
-  minStateSeconds?: number | null;
-};
-
-const inRange = (v: unknown, r: { min: number; max: number }): v is number =>
-  typeof v === 'number' && Number.isFinite(v) && v >= r.min && v <= r.max;
-
+export class ConfigFileError extends Error {}
 type UserFile = Record<string, unknown> & { ui?: Record<string, unknown> };
 
+// ---- paths ---------------------------------------------------------------------------------
+function getPath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), obj);
+}
+function setPath(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const keys = path.split('.');
+  let o = obj;
+  for (const k of keys.slice(0, -1)) {
+    if (!o[k] || typeof o[k] !== 'object' || Array.isArray(o[k])) o[k] = {};
+    o = o[k] as Record<string, unknown>;
+  }
+  o[keys.at(-1)!] = value;
+}
+function deletePath(obj: Record<string, unknown>, path: string): void {
+  const keys = path.split('.');
+  const parents: Record<string, unknown>[] = [obj];
+  for (const k of keys.slice(0, -1)) {
+    const next = parents.at(-1)![k];
+    if (!next || typeof next !== 'object') return;
+    parents.push(next as Record<string, unknown>);
+  }
+  delete parents.at(-1)![keys.at(-1)!];
+  // Drop the containers this emptied (ui.size → ui), never the root.
+  for (let i = parents.length - 1; i > 0; i -= 1) {
+    if (Object.keys(parents[i]).length > 0) break;
+    delete parents[i - 1][keys[i - 1]];
+  }
+}
+
+// ---- values --------------------------------------------------------------------------------
+const AVATAR_ID = new RegExp(AVATAR_FORMAT.idPattern);
+const roundTo = (v: number, step: number) => Number((Math.round(v / step) * step).toFixed(6));
+
+/** The value as stored, if it is valid for the spec (in the spec's own unit), else undefined. */
+export function coerce(spec: Spec, value: unknown): unknown {
+  switch (spec.type) {
+    case 'enum': return spec.values!.includes(value as string) ? value : undefined;
+    case 'bool': return typeof value === 'boolean' ? value : undefined;
+    case 'id': return typeof value === 'string' && AVATAR_ID.test(value) ? value : undefined;
+    case 'int':
+      return Number.isInteger(value) && (value as number) >= spec.min! && (value as number) <= spec.max! ? value : undefined;
+    case 'number': {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < spec.min! || value > spec.max!) return undefined;
+      return spec.step ? roundTo(value, spec.step) : value;
+    }
+    case 'point': {
+      const p = value as { x?: unknown; y?: unknown } | null;
+      const ok = (n: unknown) => Number.isInteger(n) && Math.abs(n as number) <= 100_000;
+      return p && typeof p === 'object' && ok(p.x) && ok(p.y) ? { x: p.x, y: p.y } : undefined;
+    }
+  }
+}
+
+const stored = (spec: Spec, user: UserFile) => {
+  const raw = getPath(user, spec.path);
+  return coerce(spec, spec.scale && typeof raw === 'number' ? raw / spec.scale : raw);
+};
+
+// ---- the file ------------------------------------------------------------------------------
+/**
+ * The user file. Missing → {}. Present but not a JSON object → ConfigFileError: the caller
+ * must keep the last good config and never write over it (that would lose hand edits).
+ */
 export function readUserFile(file = CONFIG_FILE): UserFile {
+  if (!existsSync(file)) return {};
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new ConfigFileError(`config.json is not valid JSON: ${(err as Error).message}`);
   }
-}
-
-function sizeOf(ui: Record<string, unknown>): Pick<Prefs, 'size' | 'sizePx'> {
-  const sizePx = inRange(ui.sizePx, SIZE_RANGE) && Number.isInteger(ui.sizePx)
-    ? ui.sizePx
-    : SIZE_PX[SIZES.includes(ui.size as Size) ? (ui.size as Size) : DEFAULT_PREFS.size as Size];
-  return { sizePx, size: SIZES.find((s) => SIZE_PX[s] === sizePx) ?? 'custom' };
-}
-
-export function prefsOf(user: UserFile): Prefs {
-  const ui = user.ui ?? {};
-  const engine = mergeConfig(user);
-  return {
-    ...sizeOf(ui),
-    stormThreshold: engine.highLoadThreshold,
-    minStateSeconds: engine.minStateMs / 1000,
-    temperament: isTemperament(user.temperament) ? user.temperament : DEFAULT_PREFS.temperament,
-    chatModel: CHAT_MODELS.includes(ui.chatModel as ChatModel) ? (ui.chatModel as ChatModel) : DEFAULT_PREFS.chatModel,
-    showSessions: typeof ui.showSessions === 'boolean' ? ui.showSessions : DEFAULT_PREFS.showSessions,
-    paused: typeof ui.paused === 'boolean' ? ui.paused : DEFAULT_PREFS.paused,
-    readTranscripts: typeof ui.readTranscripts === 'boolean' ? ui.readTranscripts : DEFAULT_PREFS.readTranscripts,
-    avatar: isAvatarId(ui.avatar) ? ui.avatar : DEFAULT_PREFS.avatar,
-  };
-}
-
-/** Validate a menu patch. Returns the cleaned patch, or an error naming the bad key. */
-export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'patch must be an object' };
-  const out: PrefsPatch = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (key === 'temperament' && isTemperament(value)) out.temperament = value;
-    else if (key === 'size' && SIZES.includes(value as Size)) out.size = value as Size;
-    else if (key === 'sizePx' && (value === null || (inRange(value, SIZE_RANGE) && Number.isInteger(value)))) {
-      out.sizePx = value;
-    }
-    else if (key === 'chatModel' && CHAT_MODELS.includes(value as ChatModel)) out.chatModel = value as ChatModel;
-    else if (key === 'showSessions' && typeof value === 'boolean') out.showSessions = value;
-    else if (key === 'paused' && typeof value === 'boolean') out.paused = value;
-    else if (key === 'readTranscripts' && typeof value === 'boolean') out.readTranscripts = value;
-    else if (key === 'avatar' && isAvatarId(value)) out.avatar = value;
-    else if (key === 'stormThreshold' && (value === null || (inRange(value, STORM_THRESHOLD) && Number.isInteger(value)))) {
-      out.stormThreshold = value;
-    }
-    else if (key === 'minStateSeconds' && (value === null || inRange(value, MIN_STATE_SECONDS))) {
-      out.minStateSeconds = value === null ? null : Math.round(value * 10) / 10;
-    }
-    else return { error: `invalid key or value: ${key}` };
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ConfigFileError('config.json must contain a JSON object');
   }
-  return out;
-}
-
-/** Fold a validated patch into the user file, keeping every other key untouched. */
-export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
-  const next: UserFile = { ...user, ui: { ...(user.ui ?? {}) } };
-  if (patch.temperament !== undefined) next.temperament = patch.temperament;
-  // One size at a time: a menu preset clears the slider's value and the other way round.
-  if (patch.size !== undefined) {
-    next.ui!.size = patch.size;
-    delete next.ui!.sizePx;
-  }
-  if (patch.sizePx === null) {
-    delete next.ui!.size;
-    delete next.ui!.sizePx;
-  } else if (patch.sizePx !== undefined) {
-    next.ui!.sizePx = patch.sizePx;
-    delete next.ui!.size;
-  }
-  if (patch.chatModel !== undefined) next.ui!.chatModel = patch.chatModel;
-  if (patch.showSessions !== undefined) next.ui!.showSessions = patch.showSessions;
-  if (patch.paused !== undefined) next.ui!.paused = patch.paused;
-  if (patch.readTranscripts !== undefined) next.ui!.readTranscripts = patch.readTranscripts;
-  if (patch.avatar !== undefined) next.ui!.avatar = patch.avatar;
-  // The panel's numbers are engine overrides: like a hand edit, they win over the
-  // temperament preset until reset (null), which hands the knob back to the preset.
-  if (patch.stormThreshold === null) {
-    delete next.highLoadThreshold;
-    delete next.highLoadExitThreshold;
-  } else if (patch.stormThreshold !== undefined) {
-    next.highLoadThreshold = patch.stormThreshold;
-    next.highLoadExitThreshold = Math.max(0, patch.stormThreshold - STORM_EXIT_GAP);
-  }
-  if (patch.minStateSeconds === null) delete next.minStateMs;
-  else if (patch.minStateSeconds !== undefined) next.minStateMs = Math.round(patch.minStateSeconds * 1000);
-  return next;
+  return parsed as UserFile;
 }
 
 export function writeUserFile(user: UserFile, file = CONFIG_FILE): void {
@@ -180,4 +172,117 @@ export function writeUserFile(user: UserFile, file = CONFIG_FILE): void {
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(user, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, file);
+}
+
+// ---- engine overrides: checked against the schema's ranges ---------------------------------
+const ENGINE_RANGES = Object.entries(SCHEMA.engine).filter(([k]) => !k.startsWith('_')) as [string, [number, number]][];
+const NOT_ENGINE = new Set(['ui', 'temperament', '_comment']);
+
+function rangeFor(path: string): [number, number] | undefined {
+  for (const [pattern, range] of ENGINE_RANGES) {
+    const re = new RegExp(`^${pattern.replace(/\./g, '\\.').replace(/\*/g, '[^.]+')}$`);
+    if (re.test(path)) return range;
+  }
+  return undefined;
+}
+
+/**
+ * The file with every invalid engine override removed, and why. A key the engine does not
+ * know, a value of the wrong type or out of its range is reported and left out — so a typo
+ * in a hand edit can never put the creature into a nonsensical state.
+ */
+export function sanitizeEngine(user: UserFile): { user: UserFile; warnings: string[] } {
+  const warnings: string[] = [];
+  const out: UserFile = {};
+  const walk = (value: unknown, def: unknown, path: string, into: Record<string, unknown>, key: string) => {
+    if (def !== null && typeof def === 'object') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        warnings.push(`${path}: expected an object — ignored`);
+        return;
+      }
+      const sub: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (!(k in (def as Record<string, unknown>))) warnings.push(`${path}.${k}: unknown key — ignored`);
+        else walk(v, (def as Record<string, unknown>)[k], `${path}.${k}`, sub, k);
+      }
+      if (Object.keys(sub).length) into[key] = sub;
+      return;
+    }
+    const range = rangeFor(path);
+    if (typeof value !== 'number' || !Number.isFinite(value)) warnings.push(`${path}: expected a number — ignored`);
+    else if (range && (value < range[0] || value > range[1])) warnings.push(`${path}: ${value} is outside ${range[0]}–${range[1]} — ignored`);
+    else into[key] = value;
+  };
+  for (const [key, value] of Object.entries(user)) {
+    if (NOT_ENGINE.has(key)) out[key] = value;
+    else if (!(key in DEFAULT_CONFIG)) warnings.push(`${key}: unknown key — ignored`);
+    else walk(value, (DEFAULT_CONFIG as Record<string, unknown>)[key], key, out, key);
+  }
+  return { user: out, warnings };
+}
+
+// ---- prefs from the file -------------------------------------------------------------------
+/** Older files: `ui.size: "large"` or `ui.sizePx: 180` become the nominal size. */
+function legacyNominal(user: UserFile): number | undefined {
+  const ui = user.ui ?? {};
+  if (typeof ui.sizePx === 'number' && Number.isInteger(ui.sizePx) && ui.sizePx >= 80 && ui.sizePx <= 300) return ui.sizePx;
+  if (typeof ui.size === 'string' && SIZES.includes(ui.size as Size)) return SIZE_PX[ui.size as Size];
+  return undefined;
+}
+
+export function prefsOf(user: UserFile): Prefs {
+  const engine = mergeConfig(user);
+  const out: Record<string, unknown> = {};
+  for (const spec of SPECS) out[spec.key] = stored(spec, user) ?? spec.default;
+  out.nominalPx = stored(SPEC.get('nominalPx')!, user) ?? legacyNominal(user) ?? SPEC.get('nominalPx')!.default;
+  out.stormThreshold = engine.highLoadThreshold;
+  out.minStateSeconds = engine.minStateMs / 1000;
+  const p = out as Prefs;
+  p.sizePx = shownPx(p.nominalPx, p.zoom, p.minPx, p.maxPx);
+  p.size = SIZES.find((s) => SIZE_PX[s] === p.nominalPx) ?? 'custom';
+  return p;
+}
+
+export const DEFAULT_PREFS: Prefs = prefsOf({});
+
+// ---- patches -------------------------------------------------------------------------------
+/** Validate a patch. Returns the cleaned patch, or an error naming the bad key. */
+export function validatePatch(raw: unknown): PrefsPatch | { error: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'patch must be an object' };
+  const out: PrefsPatch = {};
+  for (const [key, value] of Object.entries(raw)) {
+    // Compatibility: the menu's presets, and the size slider of v0.2.
+    if (key === 'size' && SIZES.includes(value as Size)) { out.nominalPx = SIZE_PX[value as Size]; continue; }
+    const spec = SPEC.get(key === 'sizePx' ? 'nominalPx' : key);
+    if (!spec) return { error: `invalid key or value: ${key}` };
+    if (value === null) { out[spec.key] = null; continue; }
+    const v = coerce(spec, value);
+    if (v === undefined) return { error: `invalid key or value: ${key}` };
+    out[spec.key] = v;
+  }
+  return out;
+}
+
+const STORM_EXIT_GAP = 10;
+
+/** Fold a validated patch into the user file, keeping every other key untouched. */
+export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
+  const next = structuredClone(user) as UserFile;
+  if (('nominalPx' in patch) && next.ui) {
+    // The nominal size replaces the older forms of it.
+    if (typeof next.ui.size !== 'object' || next.ui.size === null) delete next.ui.size;
+    delete next.ui.sizePx;
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    const spec = SPEC.get(key)!;
+    if (value === null) {
+      deletePath(next, spec.path);
+      if (key === 'stormThreshold') delete next.highLoadExitThreshold;
+      continue;
+    }
+    setPath(next, spec.path, spec.scale ? Math.round((value as number) * spec.scale) : value);
+    // The storm ends 10 points below where it starts.
+    if (key === 'stormThreshold') next.highLoadExitThreshold = Math.max(0, (value as number) - STORM_EXIT_GAP);
+  }
+  return next;
 }

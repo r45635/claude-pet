@@ -23,6 +23,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './entry.ts';
 import { LOG_DIR } from './paths.ts';
+import { LABELS } from './login.ts';
 import { fetchWidget, LOCAL_BUILD, resolveWidget } from './widget.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -35,7 +36,22 @@ export type Agent = {
   /** true = always restart; 'crash' = restart only after an abnormal exit. */
   keepAlive: true | 'crash';
   log: string;
+  /** Passed to the process: launchd starts it with a bare environment. */
+  env?: Record<string, string>;
 };
+
+/**
+ * The pet's own variables set when installing (CLAUDE_PET_HOME, _PORT, _CLAUDE) are written
+ * into the agents, or launchd would start them without. Never CLAUDE_PET_TOKEN: a plist is
+ * world-readable, and the token lives in ~/.claude-pet/token (0600).
+ */
+export function petEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of ['CLAUDE_PET_HOME', 'CLAUDE_PET_PORT', 'CLAUDE_PET_CLAUDE']) {
+    if (env[key]) out[key] = env[key]!;
+  }
+  return out;
+}
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -58,7 +74,11 @@ ${a.program.map((p) => `    <string>${esc(p)}</string>`).join('\n')}
   <key>ThrottleInterval</key><integer>10</integer>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
   <key>StandardOutPath</key><string>${esc(a.log)}</string>
-  <key>StandardErrorPath</key><string>${esc(a.log)}</string>
+  <key>StandardErrorPath</key><string>${esc(a.log)}</string>${a.env && Object.keys(a.env).length ? `
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(a.env).map(([k, v]) => `    <key>${esc(k)}</key><string>${esc(v)}</string>`).join('\n')}
+  </dict>` : ''}
 </dict>
 </plist>
 `;
@@ -88,16 +108,18 @@ export const cloneLaunch = (widget = resolveWidget() ?? LOCAL_BUILD): Launch =>
 export function agents(launch: Launch = cloneLaunch()): Agent[] {
   return [
     {
-      label: 'dev.r45635.claude-pet.daemon',
+      label: LABELS.daemon,
       program: launch.daemon,
       keepAlive: true,
       log: join(LOG_DIR, 'daemon.log'),
+      env: petEnv(),
     },
     {
-      label: 'dev.r45635.claude-pet.widget',
+      label: LABELS.widget,
       program: [launch.widget],
       keepAlive: 'crash',
       log: join(LOG_DIR, 'widget.log'),
+      env: petEnv(),
     },
   ];
 }

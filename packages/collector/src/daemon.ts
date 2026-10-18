@@ -24,7 +24,8 @@ import { existsSync, watch } from 'node:fs';
 import { mergeConfig } from '@claude-pet/core';
 import { CONFIG_FILE, REFERENCE_FILE } from './paths.ts';
 import { writeReference } from './reference.ts';
-import { applyPatch, prefsOf, readUserFile, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
+import { applyPatch, ConfigFileError, prefsOf, readUserFile, sanitizeEngine, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
+import { setLaunchAtLogin } from './login.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -39,7 +40,33 @@ ensureSpool();
 const runtime = new Runtime({ spoolFile: SPOOL_FILE, warmStartMs: 2 * 60 * 60_000 }); // turns can run for an hour
 
 const clients = new Set<ServerResponse>();
-let prefs: Prefs = prefsOf(readUserFile());
+
+// The config as last read: the file's prefs, and what was wrong with it. An unreadable file
+// keeps the last good config — and is never written over (prefs.ts, ConfigFileError).
+let prefs: Prefs = prefsOf({});
+let configWarnings: string[] = [];
+let configInvalid = false;
+let launchAtLoginApplied: boolean | null = null;
+
+function loadConfig(): void {
+  try {
+    const { user, warnings } = sanitizeEngine(readUserFile());
+    prefs = prefsOf(user);
+    runtime.engine.setConfig(mergeConfig(user)); // hot: no restart, state kept
+    configWarnings = warnings;
+    configInvalid = false;
+  } catch (err) {
+    if (!(err instanceof ConfigFileError)) throw err;
+    configWarnings = [err.message];
+    configInvalid = true;
+  }
+  for (const w of configWarnings) process.stderr.write(`config: ${w}\n`);
+  if (prefs.launchAtLogin !== launchAtLoginApplied) {
+    launchAtLoginApplied = prefs.launchAtLogin;
+    setLaunchAtLogin(prefs.launchAtLogin);
+  }
+}
+loadConfig();
 
 // Opt-in (settings panel). Off, nothing watches or opens the conversation files.
 const transcript = new TranscriptSource();
@@ -52,7 +79,7 @@ applyTranscriptPref();
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
 function view(): string {
-  return JSON.stringify({ ...runtime.snapshot(), prefs });
+  return JSON.stringify({ ...runtime.snapshot(), prefs, config: { invalid: configInvalid, warnings: configWarnings } });
 }
 
 function broadcast(): void {
@@ -93,10 +120,18 @@ async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<
     res.end(JSON.stringify(patch));
     return;
   }
-  const user = applyPatch(readUserFile(), patch);
-  writeUserFile(user);
-  prefs = prefsOf(user);
-  runtime.engine.setConfig(mergeConfig(user)); // hot: no restart, state kept
+  let current: ReturnType<typeof readUserFile>;
+  try {
+    current = readUserFile();
+  } catch (err) {
+    if (!(err instanceof ConfigFileError)) throw err;
+    // Writing now would replace the user's hand edits with {} + this patch: refuse.
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'config_invalid', detail: err.message }));
+    return;
+  }
+  writeUserFile(applyPatch(current, patch));
+  loadConfig();
   applyTranscriptPref();
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify(prefs));
@@ -166,6 +201,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         sources: snapshot.sources,
         clients: clients.size,
         tick_ms: tickMs,
+        config_invalid: configInvalid,
+        config_warnings: configWarnings,
       }),
     );
     return;
@@ -202,8 +239,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 
   // "Advanced settings…": open the file in the user's default text editor.
   if (url.pathname === '/open-config' && req.method === 'POST') {
-    if (!existsSync(CONFIG_FILE)) writeUserFile(readUserFile());
-    writeReference(REFERENCE_FILE, runtime.engine.config, prefs.temperament);
+    if (!existsSync(CONFIG_FILE)) writeUserFile({});
+    writeReference(REFERENCE_FILE, runtime.engine.config, prefs, configWarnings);
     execFile('open', ['-t', CONFIG_FILE, REFERENCE_FILE], () => {});
     res.writeHead(204);
     res.end();
@@ -249,9 +286,7 @@ watch(ROOT_DIR, (_event, name) => {
   if (name !== 'config.json') return;
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => {
-    const user = readUserFile();
-    prefs = prefsOf(user);
-    runtime.engine.setConfig(mergeConfig(user));
+    loadConfig();
     applyTranscriptPref();
     broadcast();
   }, 200);
@@ -262,7 +297,7 @@ watch(ROOT_DIR, (_event, name) => {
 const net = new NetSensor();
 async function netLoop(): Promise<void> {
   for (;;) {
-    const targets = prefs.paused ? [] : runtime.engine.sessionsToSample();
+    const targets = prefs.paused || !prefs.netSensor ? [] : runtime.engine.sessionsToSample();
     if (targets.length === 0) {
       await new Promise((r) => setTimeout(r, 1_000));
       continue;

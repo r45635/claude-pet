@@ -44,8 +44,9 @@ SUBAGENT_FINISHED   1.0        ERROR          3.0
 ```
 
 `BASH_STARTED` outweighs `FILE_READ` because a command is the visibly consequential act.
-These are **conventions**, not physics; they live in `config/default.json` and exist to be
-tuned by watching the creature next to a real session.
+These are **conventions**, not physics; their defaults live in `packages/core/src/config.ts`,
+and any of them can be overridden in `~/.claude-pet/config.json` (range-checked, see
+`docs/CONFIG.md`) to tune the creature by watching it next to a real session.
 
 ## Blend, turn work, and smoothing
 
