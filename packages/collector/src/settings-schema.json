@@ -9,6 +9,10 @@
       "doc": "Stop every animation. system follows macOS's Reduce motion." },
     { "key": "launchAtLogin", "path": "ui.launchAtLogin", "type": "bool", "default": true, "section": "general",
       "doc": "Start the daemon and the creature when you log in." },
+    { "key": "updatesCheck", "path": "ui.updates.check", "type": "bool", "default": true, "section": "general",
+      "doc": "Once a day, ask github.com whether a newer claude-pet (or avatar) exists. The request carries nothing but the URL (docs/PRIVACY.md)." },
+    { "key": "updatesAuto", "path": "ui.updates.auto", "type": "bool", "default": true, "section": "general",
+      "doc": "Install a detected update by itself (standalone install only; a signed release is required). Clones are told, never touched (docs/RISKS.md #12)." },
 
     { "key": "avatar", "path": "ui.avatar", "type": "id", "default": "classic", "section": "appearance",
       "doc": "The creature's look: classic or an installed avatar (docs/AVATARS.md)." },

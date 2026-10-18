@@ -7,9 +7,10 @@
  *      checkout's version (.github/workflows/release.yml publishes it) into
  *      ~/.claude-pet/bin/v<version>/.
  *
- * The download is the only outbound request in the codebase. It runs when the user asks
- * for it (`fetch`, or `autostart install` with no binary), never from the daemon or the
- * widget, and the archive is checked against its published SHA-256 before it is unpacked.
+ * The download runs when the user asks for it (`fetch`, or `autostart install` with no
+ * binary) — the daemon's only own outbound request is the daily update check (update.ts,
+ * docs/PRIVACY.md) — and the archive is checked against its published SHA-256 and release
+ * signature before it is unpacked.
  * It goes through curl, which, unlike a browser, does not set com.apple.quarantine: the
  * binary is ad-hoc signed, not notarized, and Gatekeeper would otherwise refuse it.
  *

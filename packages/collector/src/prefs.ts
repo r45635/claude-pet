@@ -59,6 +59,8 @@ export type Prefs = {
   theme: 'system' | 'light' | 'dark';
   reduceMotion: 'system' | 'on' | 'off';
   launchAtLogin: boolean;
+  updatesCheck: boolean;
+  updatesAuto: boolean;
   avatar: string;
   nominalPx: number;
   minPx: number;

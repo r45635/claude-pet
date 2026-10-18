@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * The local state API. Binds 127.0.0.1 only; nothing in this file can reach the network.
+ * The local state API. Binds 127.0.0.1 only. The one exception to "nothing here reaches
+ * the network": a daily release-update check against github.com (update.ts) — one HEAD
+ * request carrying nothing but the URL, off with the `updatesCheck` setting
+ * (docs/PRIVACY.md, docs/RISKS.md #12).
  *
  *   GET /snapshot          one-shot JSON
  *   GET /events            Server-Sent Events, one `data:` frame per tick
@@ -26,6 +29,9 @@ import { CONFIG_FILE, REFERENCE_FILE } from './paths.ts';
 import { writeReference } from './reference.ts';
 import { applyPatch, ConfigFileError, prefsOf, readUserFile, sanitizeEngine, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
 import { setLaunchAtLogin } from './login.ts';
+import { STANDALONE, VERSION } from './entry.ts';
+import { LOCAL_BUILD } from './widget.ts';
+import { checkForUpdate, freshUpdateState } from './update.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -77,9 +83,19 @@ function applyTranscriptPref(): void {
 }
 applyTranscriptPref();
 
+// Release updates: checked daily (update.ts), surfaced in every frame and in /health.
+let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
+async function updateCheckLoop(): Promise<void> {
+  if (!prefs.updatesCheck) return;
+  const before = JSON.stringify(update);
+  update = await checkForUpdate(update);
+  if (update.error) process.stderr.write(`${update.error}\n`);
+  if (JSON.stringify(update) !== before) broadcast();
+}
+
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
 function view(): string {
-  return JSON.stringify({ ...runtime.snapshot(), prefs, config: { invalid: configInvalid, warnings: configWarnings } });
+  return JSON.stringify({ ...runtime.snapshot(), version: VERSION, update, prefs, config: { invalid: configInvalid, warnings: configWarnings } });
 }
 
 function broadcast(): void {
@@ -203,6 +219,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         tick_ms: tickMs,
         config_invalid: configInvalid,
         config_warnings: configWarnings,
+        version: VERSION,
+        update,
       }),
     );
     return;
@@ -277,6 +295,9 @@ server.listen(PORT, '127.0.0.1', () => {
   process.stderr.write(`  curl -s "http://127.0.0.1:${PORT}/snapshot?token=$(cat ~/.claude-pet/token)" | jq .\n`);
   schedule();
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
+  // Update checks: one soon (off the login path), then daily. Never on the tick path.
+  setTimeout(() => void updateCheckLoop(), 30_000);
+  setInterval(() => void updateCheckLoop(), 24 * 3_600_000);
 });
 
 // Hand edits to config.json ("Advanced settings…") apply live too. The directory is

@@ -63,13 +63,17 @@ How little is read:
 results, thinking, text, tool inputs and `cwd`, and asserts it is in no signal that comes
 out.
 
-## Nothing leaves the machine
+## Nothing about you leaves the machine
 
 - the collector binds `127.0.0.1` only, with a per-run token in the SSE URL;
-- there is no outbound HTTP at runtime, and no analytics dependency. The only request in
-  the codebase is `packages/collector/src/widget.ts`: at install, when asked, it downloads
-  the prebuilt widget from this repository's GitHub Releases and checks its SHA-256. It
-  sends nothing but the request for that file;
+- no analytics dependency. The daemon makes exactly one kind of outbound request at
+  runtime, and only while the *Check for updates* setting is on (it is by default): once a
+  day it asks `github.com` which release and avatar catalog are the latest — HEAD/GET
+  requests to this project's repositories that carry **nothing but the URL**: no identifier,
+  no usage data, nothing read from your machine. Turning `updatesCheck` off stops them all;
+- at install time, when asked, `packages/collector/src/widget.ts` downloads the prebuilt
+  widget from this repository's GitHub Releases, checks its SHA-256 and its release
+  signature (docs/RISKS.md #12). It sends nothing but the request for that file;
 - `~/.claude-pet/` is `0700`; the spool is `0600`.
 
 ## Talking to the creature
