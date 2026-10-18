@@ -60,7 +60,9 @@ So `IDLE` alone works, `IDLE` + `ACTIVE` already reads well, and each extra stat
 ```
 
 Optional: `"names": {"fr": "Fantôme", "en": "Ghost"}` names the avatar per language in the
-menu and the settings panel (`name` is the fallback).
+menu and the settings panel (`name` is the fallback). `"license": "MIT"` (an SPDX identifier)
+says what others may do with your artwork — required for the avatar library, recommended
+everywhere. The examples in this repository are all MIT.
 
 For `"kind": "svg"`: `"svg": "creature.svg"` and optionally `"css": "skin.css"` instead of `states`.
 `id`: lowercase letters, digits and dashes, unique (`classic` is taken). Installing an avatar

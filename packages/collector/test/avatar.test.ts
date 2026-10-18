@@ -42,6 +42,15 @@ test('format: refuses paths, unknown states, reserved ids, missing IDLE', () => 
   assert.match(all, /unknown state/);
 });
 
+test('format: license is optional and loosely checked (an SPDX identifier)', () => {
+  const ok: string[] = [];
+  checkManifest({ ...images({ IDLE: 'idle.png' }), license: 'MIT' }, ok);
+  assert.deepEqual(ok, []);
+  const bad: string[] = [];
+  checkManifest({ ...images({ IDLE: 'idle.png' }), license: 42 }, bad);
+  assert.match(bad.join(), /license/);
+});
+
 test('format: the content decides the type, not the extension', () => {
   const r = validateDir(avatarDir(images({ IDLE: 'idle.png' }), { 'idle.png': '<html><script>x</script>' }));
   assert.match(r.errors.join(), /content is unknown, not \.png/);

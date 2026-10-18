@@ -3,6 +3,7 @@
   "id": "alien",
   "name": "Alien",
   "author": "claude-pet",
+  "license": "MIT",
   "version": "1.0.0",
   "kind": "images",
   "states": {
@@ -14,5 +15,10 @@
     "ERROR": "error.svg",
     "HIGH_LOAD": "storm.svg"
   },
-  "hitbox": { "cx": 80, "cy": 92, "rx": 50, "ry": 56 }
+  "hitbox": {
+    "cx": 80,
+    "cy": 92,
+    "rx": 50,
+    "ry": 56
+  }
 }
