@@ -4,9 +4,9 @@
  */
 
 import { Engine, mergeConfig, type PetSnapshot } from '@claude-pet/core';
-import { readFileSync } from 'node:fs';
 import { CONFIG_FILE } from './paths.ts';
 import { SpoolTailer } from './spool.ts';
+import { readUserFile, sanitizeEngine } from './prefs.ts';
 
 export type RuntimeOptions = {
   spoolFile?: string;
@@ -22,11 +22,12 @@ export type RuntimeOptions = {
   now?: () => number;
 };
 
+/** The engine config from the file, with invalid overrides left out (prefs.ts). */
 export function loadUserConfig(): ReturnType<typeof mergeConfig> {
   try {
-    return mergeConfig(JSON.parse(readFileSync(CONFIG_FILE, 'utf8')));
+    return mergeConfig(sanitizeEngine(readUserFile(CONFIG_FILE)).user);
   } catch {
-    return mergeConfig(undefined);
+    return mergeConfig(undefined); // unreadable: defaults until the daemon's watcher reloads
   }
 }
 

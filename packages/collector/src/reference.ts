@@ -7,6 +7,7 @@
 
 import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import type { EngineConfig } from '@claude-pet/core';
+import { SPECS } from './prefs.ts';
 
 /** Docs by dotted path. A block doc (e.g. `channels`) covers everything under it. */
 export const KEY_DOCS: Record<string, string> = {
@@ -61,12 +62,35 @@ function render(value: unknown, path: string, indent: string): string {
   return `{\n${lines.join(',\n')}\n${indent}}`;
 }
 
-export function referenceText(config: EngineConfig, temperament: string): string {
-  return `${HEADER.replace('%T', temperament)}\n${render(config, '', '')}\n`;
+type PrefsView = { temperament: string } & Record<string, unknown>;
+
+/** What is wrong with config.json right now, first: an unreadable file, ignored values. */
+function warningsBlock(warnings: string[]): string {
+  if (warnings.length === 0) return '';
+  return `//\n// ⚠️  Problems in config.json (these values are ignored until fixed):\n${warnings.map((w) => `//   - ${w}`).join('\n')}\n`;
 }
 
-export function writeReference(file: string, config: EngineConfig, temperament: string): void {
+/** The preferences, from the schema: where each lives in config.json, its value now, its range. */
+function prefsBlock(prefs: PrefsView): string {
+  const lines = SPECS.filter((spec) => spec.section).map((spec) => {
+    const range = spec.values ? spec.values.join(' | ')
+      : spec.type === 'bool' ? 'true | false'
+      : spec.min !== undefined ? `${spec.min}–${spec.max}` : spec.type;
+    const native = spec.nativeOnlyTrue ? ' (turning it on: menu only)' : '';
+    return `//   ${spec.path} = ${JSON.stringify(prefs[spec.key] ?? null)}   [${range}]${native}\n//       ${spec.doc}`;
+  });
+  return `//\n// Preferences — also in the settings panel and the right-click menu. In config.json they\n// live at the path shown ("ui.size.zoom" = {"ui": {"size": {"zoom": …}}}):\n${lines.join('\n')}\n`;
+}
+
+export function referenceText(config: EngineConfig, prefs: PrefsView | string, warnings: string[] = []): string {
+  const view = typeof prefs === 'string' ? { temperament: prefs } : prefs;
+  const head = HEADER.replace('%T', view.temperament);
+  const prefsPart = typeof prefs === 'string' ? '' : prefsBlock(view);
+  return `${head}${warningsBlock(warnings)}${prefsPart}\n// Engine — hand-tune only; each value is range-checked.\n${render(config, '', '')}\n`;
+}
+
+export function writeReference(file: string, config: EngineConfig, prefs: PrefsView, warnings: string[] = []): void {
   rmSync(file, { force: true }); // the previous copy is read-only
-  writeFileSync(file, referenceText(config, temperament), { mode: 0o600 });
+  writeFileSync(file, referenceText(config, prefs, warnings), { mode: 0o600 });
   chmodSync(file, 0o400);
 }

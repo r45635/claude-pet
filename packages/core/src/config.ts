@@ -2,8 +2,9 @@
  * Tunable constants for the state engine.
  *
  * Everything here is a convention chosen to make a cartoon legible, not a measurement.
- * `config/default.json` at the repo root overrides these at runtime; the shape is the
- * contract, the numbers are not.
+ * Any of them can be overridden in ~/.claude-pet/config.json (a temperament preset, then
+ * explicit keys, each range-checked by packages/collector/src/prefs.ts sanitizeEngine);
+ * the shape is the contract, the numbers are not.
  */
 
 export type ChannelName = 'generation' | 'tool' | 'file' | 'agent';

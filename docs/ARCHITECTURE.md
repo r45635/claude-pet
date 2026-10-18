@@ -78,8 +78,6 @@ claude-pet/
 │   └── simulator/         # Phase 1 — synthetic sessions, no Claude Code needed
 ├── apps/
 │   └── widget/            # Phase 3 — Tauri 2 shell, placeholder SVG creature
-├── config/
-│   └── default.json       # user-overridable weights/thresholds/window geometry
 ├── docs/
 └── scripts/
 ```
