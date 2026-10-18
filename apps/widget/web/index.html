@@ -45,10 +45,10 @@
      --dur and --amp are written by JS from the snapshot. */
   .shaker, .body, .eyes, .arm-wait { transform-box: fill-box; }
   .shaker { transform-origin: 50% 100%; }
-  .body {
-    transform-origin: 50% 70%;
-    animation: breathe var(--dur, 3.2s) ease-in-out infinite;
-  }
+  /* The state → animation bindings themselves (breathing, shaking, gestures, step
+     bounce) are data in behavior.js, compiled into the "behavior-css" style element
+     at startup. Only the keyframes library and the decorative rules live here. */
+  .body { transform-origin: 50% 70%; }
   @keyframes breathe {
     0%, 100% { transform: scale(1, 1) translateY(0); }
     50%      { transform: scale(calc(1 + var(--amp, .03)), calc(1 - var(--amp, .03) * .6))
@@ -99,10 +99,8 @@
   .arm-wait { transform-origin: 100% 100%; animation: wave 1.6s ease-in-out infinite; }
   .bulb-ring { animation: ring 1.4s ease-in-out infinite; }
 
-  /* The visual tier (storm, distress) drives the shaking. */
-  /* Only the creature shakes: the "why" bubble and the pastilles must stay readable. */
-  .critter[data-state="HIGH_LOAD"] .shaker { animation: shake .12s linear infinite; }
-  .critter[data-state="ERROR"] .shaker     { animation: shake .4s linear infinite; }
+  /* The visual tier (storm, distress) drives the shaking — bound in behavior.js.
+     Only the creature shakes: the "why" bubble and the pastilles must stay readable. */
 
   /* Asleep or disconnected = fully still. An always-visible window that animates while
      nothing happens costs ~8% CPU (measured): macOS recomposites the whole transparent
@@ -147,17 +145,10 @@
   .critter.mini { transform-box: fill-box; transform-origin: 50% 100%; }
   /* Same colour as the parent: a dark rim keeps a kid readable when it walks past it. */
   .critter.mini .shell { stroke: rgba(20, 22, 28, .6); stroke-width: 7; paint-order: stroke; }
-  .critter.mini.walking.lean-l { animation: step-l calc(.3s * var(--k, 1)) ease-in-out infinite; }
-  .critter.mini.walking.lean-r { animation: step-r calc(.3s * var(--k, 1)) ease-in-out infinite; }
   @keyframes step-l { 0%, 100% { transform: rotate(-9deg) translateY(0) scale(1.06, .94); }
                       50% { transform: rotate(-9deg) translateY(-22px) scale(.96, 1.05); } }
   @keyframes step-r { 0%, 100% { transform: rotate(9deg) translateY(0) scale(1.06, .94); }
                       50% { transform: rotate(9deg) translateY(-22px) scale(.96, 1.05); } }
-  .critter.mini:not(.walking)[data-state="READING"] { animation: nod calc(2.4s * var(--k, 1)) ease-in-out infinite; }
-  .critter.mini:not(.walking)[data-state="CODING"] { animation: tap calc(.36s * var(--k, 1)) cubic-bezier(.3, 0, .3, 1) infinite; }
-  .critter.mini:not(.walking)[data-state="TOOL_CALL"] { animation: hammer calc(.8s * var(--k, 1)) cubic-bezier(.6, 0, .2, 1) infinite; }
-  .critter.mini:not(.walking)[data-state="THINKING"] { animation: float calc(2.6s * var(--k, 1)) ease-in-out infinite; }
-  .critter.mini:not(.walking)[data-state="DONE"] { animation: cheer calc(1.6s * var(--k, 1)) cubic-bezier(.3, 0, .25, 1) infinite; }
   @keyframes nod { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(6deg) translateY(4px); }
                    50% { transform: rotate(-3deg); } 80% { transform: rotate(5deg); } }
   @keyframes tap { 0%, 100% { transform: translateY(0) scale(1.07, .93); } 45% { transform: translateY(-24px) scale(.96, 1.05); } }
@@ -471,6 +462,7 @@
 
 <script type="module">
   import { buildImageProto, buildSvgProto, scopeCss, resolveStates, DEFAULT_GEO } from './avatar.js';
+  import { DEFAULT_BEHAVIOR, compileBehavior } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
@@ -961,6 +953,11 @@
       .catch((err) => diag(`layout: ${err}`));
   }
   // ---- avatar -----------------------------------------------------------------------------
+  // Behavior first, avatar CSS after: on equal specificity the avatar's rules win.
+  const behaviorStyle = document.createElement('style');
+  behaviorStyle.id = 'behavior-css';
+  behaviorStyle.textContent = compileBehavior(DEFAULT_BEHAVIOR);
+  document.head.appendChild(behaviorStyle);
   const avatarStyle = document.createElement('style');
   avatarStyle.id = 'avatar-css';
   document.head.appendChild(avatarStyle);
