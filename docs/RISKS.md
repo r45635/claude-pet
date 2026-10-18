@@ -114,9 +114,14 @@ commands, with nobody there to answer a permission prompt.
   rotated after the change).
 - **Off by default (v0.3.0), gated natively:** `chat_ask` (Rust) reads `ui.chat.enabled` from
   `config.json` at every question and refuses unless it is `true`. The page can turn it off
-  but never on (`update_prefs` refuses `chatEnabled: true`), so a compromised page or avatar
-  cannot re-enable it; turning it on is the native menu's "Enable chat…", after a native
-  confirmation that says what it means.
+  but never on, so a compromised page or avatar cannot re-enable it; turning it on is the
+  native menu's "Enable chat…", after a native confirmation that says what it means.
+  Enforced twice: Rust's `update_prefs` refuses `chatEnabled: true`, **and** the daemon
+  refuses any native-only write (schema `nativeOnly`/`nativeOnlyTrue`) that lacks the
+  `X-Claude-Pet-Native` header — which only Rust sends, and a webview cannot (a custom header
+  needs a CORS preflight; the daemon refuses every preflight). Until 2026-10-18 only the Rust
+  check existed: the page holds the daemon token, so a direct `fetch` POST could have turned
+  the chat on. Verified closed in headless Chrome (header request blocked, plain one 403).
 - **Guards:** `auto` mode (Claude Code's classifier) rather than `bypassPermissions`; one run
   at a time; a stop button; a dedicated working folder `~/.claude-pet/chat` — which Bash
   can still leave, so it is a default, not a sandbox.

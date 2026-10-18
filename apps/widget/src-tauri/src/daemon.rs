@@ -1,6 +1,7 @@
 //! Writes to the daemon (menu preferences) go through Rust, over a plain HTTP/1.1 request
 //! on 127.0.0.1 — no webview `fetch`, no CORS, no extra crate. The page only *reads* the
-//! daemon (its SSE feed).
+//! daemon (its SSE feed). Every request carries `X-Claude-Pet-Native: 1`, which the daemon
+//! requires for native-only writes: a webview cannot send it (daemon.ts, isNative).
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -25,7 +26,7 @@ impl Daemon {
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
         let request = format!(
             "POST {path}?token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+             X-Claude-Pet-Native: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             self.token,
             self.addr,
             body.len()
