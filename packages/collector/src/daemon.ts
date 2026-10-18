@@ -32,6 +32,7 @@ import { setLaunchAtLogin } from './login.ts';
 import { STANDALONE, VERSION } from './entry.ts';
 import { LOCAL_BUILD } from './widget.ts';
 import { checkForUpdate, freshUpdateState, installStandalone, restartDetached } from './update.ts';
+import { catalogView, downloadAvatar, fetchCatalog, installedAvatars, sweepDownloads, type Catalog } from './catalog.ts';
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
@@ -85,9 +86,26 @@ applyTranscriptPref();
 
 // Release updates: checked daily (update.ts), surfaced in every frame and in /health.
 let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
+// The avatar library's signed catalog (catalog.ts), refreshed with the update check.
+let catalog: Catalog | null = null;
+let catalogError: string | null = 'library: not fetched yet (it refreshes with Check for updates)';
+let catalogAt: string | null = null;
+async function refreshCatalog(): Promise<void> {
+  const result = await fetchCatalog();
+  catalogAt = new Date().toISOString();
+  if ('error' in result) {
+    catalogError = result.error; // the last good catalog stays usable
+    process.stderr.write(`${result.error}\n`);
+  } else {
+    catalog = result;
+    catalogError = null;
+  }
+}
+
 let autoTried: string | null = null; // one automatic attempt per detected version, no retry loop
 async function updateCheckLoop(): Promise<void> {
   if (!prefs.updatesCheck) return;
+  void refreshCatalog();
   const before = JSON.stringify(update);
   update = await checkForUpdate(update);
   if (update.error) process.stderr.write(`${update.error}\n`);
@@ -115,6 +133,31 @@ async function runInstall(tag: string, allowUnsigned: boolean): Promise<void> {
   update = { ...update, installing: false, available: false };
   broadcast();
   restartDetached();
+}
+
+/**
+ * POST /avatars/install {"id"} — download a library package for Rust to import. Native-only:
+ * the id must be in the verified catalog, the bytes must match its signed sha256, and the
+ * reply is a local path; Rust's avatars::import does the untrusted-content checks and the
+ * install, then deletes the download.
+ */
+async function postAvatarInstall(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const reply = (status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
+  if (!isNative(req)) return reply(403, { error: 'native_only' });
+  let id: unknown = null;
+  try {
+    id = JSON.parse((await readBody(req)) || '{}').id;
+  } catch {
+    /* refused below */
+  }
+  const entry = catalog?.avatars.find((a) => a.id === id);
+  if (!entry) return reply(404, { error: 'not in the library catalog' });
+  const result = await downloadAvatar(entry);
+  if ('error' in result) return reply(502, result);
+  reply(200, { path: result.path, sha256: entry.sha256, version: entry.version, name: entry.name });
 }
 
 /**
@@ -336,6 +379,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  // The avatar library for the native menu: cached, never a blocking fetch.
+  if (url.pathname === '/avatars/catalog') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(catalogView(catalog, catalogError, catalogAt, installedAvatars())));
+    return;
+  }
+
+  if (url.pathname === '/avatars/install' && req.method === 'POST') {
+    void postAvatarInstall(req, res);
+    return;
+  }
+
   // "Advanced settings…": open the file in the user's default text editor.
   if (url.pathname === '/open-config' && req.method === 'POST') {
     if (!existsSync(CONFIG_FILE)) writeUserFile({});
@@ -375,6 +430,7 @@ server.listen(PORT, '127.0.0.1', () => {
   process.stderr.write(`claude-pet daemon on http://127.0.0.1:${PORT}\n`);
   process.stderr.write(`  curl -s "http://127.0.0.1:${PORT}/snapshot?token=$(cat ~/.claude-pet/token)" | jq .\n`);
   schedule();
+  sweepDownloads();
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
   // Update checks: one soon (off the login path), then daily. Never on the tick path.
   setTimeout(() => void updateCheckLoop(), 30_000);

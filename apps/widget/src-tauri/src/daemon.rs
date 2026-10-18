@@ -21,11 +21,25 @@ impl Daemon {
 
     /// POST `body` (JSON, sent as text/plain like the rest) to `path`; returns the body.
     pub fn post(&self, path: &str, body: &str) -> Result<String, String> {
+        self.request("POST", path, body, 5)
+    }
+
+    /// The same, for a call that downloads (an avatar package): up to two minutes.
+    pub fn post_slow(&self, path: &str, body: &str) -> Result<String, String> {
+        self.request("POST", path, body, 120)
+    }
+
+    /// GET `path`; returns the body.
+    pub fn get(&self, path: &str) -> Result<String, String> {
+        self.request("GET", path, "", 5)
+    }
+
+    fn request(&self, method: &str, path: &str, body: &str, timeout_s: u64) -> Result<String, String> {
         let mut stream = TcpStream::connect(&self.addr).map_err(|e| format!("daemon unreachable: {e}"))?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(timeout_s)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
         let request = format!(
-            "POST {path}?token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\n\
+            "{method} {path}?token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\n\
              X-Claude-Pet-Native: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             self.token,
             self.addr,

@@ -1078,6 +1078,9 @@
     renderWhy({ text, family: '' });
     flashTimer = setTimeout(() => { last = ''; if (lastFrame) render(lastFrame); }, 4_000);
   }
+  T?.event.listen('avatar-removed', ({ payload }) => {
+    flash(t('avatar.removed', { name: String(payload.name).slice(0, 24) }));
+  });
   T?.event.listen('avatar', ({ payload }) => {
     if (payload.ok) {
       avatarId = '';

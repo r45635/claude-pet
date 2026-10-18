@@ -141,7 +141,16 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
         }
     }
     let chat_on = settings::chat_enabled(&settings::user_config(&root()));
-    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update).map_err(|e| e.to_string())?;
+    // The library, from the daemon's cache (localhost, never a network wait here).
+    let catalog: Value = pet.daemon.as_ref()
+        .and_then(|d| d.get("/avatars/catalog").ok())
+        .and_then(|body| serde_json::from_str(&body).ok())
+        .unwrap_or_else(|| serde_json::json!({ "error": "daemon unreachable", "avatars": [] }));
+    let library = menu::library_items(&catalog, &locale);
+    if let Ok(mut m) = app.state::<MenuLibrary>().0.lock() {
+        *m = (catalog, prefs["avatar"].as_str().unwrap_or("classic").to_owned());
+    }
+    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref()).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
@@ -149,6 +158,8 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
 struct MenuLocale(std::sync::Mutex<String>);
 /// The daemon's update state as the menu last showed it.
 struct MenuUpdate(std::sync::Mutex<Value>);
+/// The library catalog and the current avatar id, as the menu last showed them.
+struct MenuLibrary(std::sync::Mutex<(Value, String)>);
 
 /// The settings' description, for the page to build its panel from.
 #[tauri::command]
@@ -252,6 +263,114 @@ fn explain_update(app: &AppHandle) {
         .show(move |open| {
             if open {
                 let _ = std::process::Command::new("open").arg(&url).status();
+            }
+        });
+}
+
+/// "Install"/"Update" from the library: confirm with what the signed catalog says (name,
+/// version, author, license, size), then let the daemon download and verify the package,
+/// and install it here with the same checks as a drop. Off the menu's thread: a download
+/// takes a while. Every outcome reaches the page as an `avatar` event.
+fn confirm_library_install(app: &AppHandle, id: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let catalog = app.state::<MenuLibrary>().0.lock().map(|m| m.0.clone()).unwrap_or(Value::Null);
+    let Some(entry) = catalog["avatars"].as_array().and_then(|a| a.iter().find(|e| e["id"] == id)).cloned() else { return };
+    let text = |k: &str, max: usize| -> String { entry[k].as_str().unwrap_or("?").chars().take(max).collect() };
+    let name = entry["names"][&locale].as_str().map(|n| n.chars().take(60).collect()).unwrap_or_else(|| text("name", 60));
+    let kb = entry["bytes"].as_u64().unwrap_or(0).div_ceil(1024);
+    let w = menu::Words::new(&locale);
+    let body = w.get("dialog.avatarInstall.body")
+        .replace("{name}", &name)
+        .replace("{version}", &text("version", 20))
+        .replace("{author}", &text("author", 60))
+        .replace("{license}", &text("license", 40))
+        .replace("{kb}", &kb.to_string());
+    let handle = app.clone();
+    let id = id.to_owned();
+    app.dialog()
+        .message(body)
+        .title(w.get("dialog.avatarInstall.title").replace("{name}", &name))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get("dialog.avatarInstall.ok"), w.get("dialog.cancel")))
+        .show(move |confirmed| {
+            if confirmed {
+                std::thread::spawn(move || install_from_library(&handle, &id));
+            }
+        });
+}
+
+fn install_from_library(app: &AppHandle, id: &str) {
+    let result = (|| -> Result<(String, String), String> {
+        let pet = app.state::<Pet>();
+        let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
+        let reply: Value = serde_json::from_str(&daemon.post_slow("/avatars/install", &serde_json::json!({ "id": id }).to_string())?)
+            .map_err(|e| e.to_string())?;
+        let path = PathBuf::from(reply["path"].as_str().ok_or("no package path")?);
+        // The daemon only ever downloads into ~/.claude-pet/.avatar-dl-*/: anything else is refused.
+        let folder = path.parent().filter(|p| {
+            p.parent() == Some(root().as_path())
+                && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".avatar-dl-"))
+        }).ok_or("unexpected package location")?.to_owned();
+        let imported = avatars::import(&root(), &path);
+        let _ = fs::remove_dir_all(&folder);
+        let (installed_id, name) = imported?;
+        if installed_id != id {
+            let _ = avatars::remove(&root(), &installed_id);
+            return Err(format!("the package installs \"{installed_id}\", not \"{id}\""));
+        }
+        let record = serde_json::json!({
+            "source": "library",
+            "sha256": reply["sha256"],
+            "installed_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        });
+        avatars::write_install_record(&root(), id, &record)?;
+        daemon.post("/config", &serde_json::json!({ "avatar": id }).to_string())?;
+        Ok((installed_id, name))
+    })();
+    match result {
+        Ok((id, name)) => {
+            let _ = app.emit("avatar", serde_json::json!({ "ok": true, "id": id, "name": name }));
+        }
+        Err(error) => {
+            eprintln!("library install {id}: {error}");
+            let _ = app.emit("avatar", serde_json::json!({ "ok": false, "error": error }));
+        }
+    }
+}
+
+/// "Remove current avatar…": confirm, delete it (and its backup), fall back to classic.
+fn confirm_remove_avatar(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let current = app.state::<MenuLibrary>().0.lock().map(|m| m.1.clone()).unwrap_or_default();
+    if current.is_empty() || current == "classic" {
+        return;
+    }
+    let name = avatars::list(&root()).into_iter()
+        .find(|a| a["id"] == current.as_str())
+        .and_then(|a| a["names"][&locale].as_str().or(a["name"].as_str()).map(str::to_owned))
+        .unwrap_or_else(|| current.clone());
+    let w = menu::Words::new(&locale);
+    let handle = app.clone();
+    app.dialog()
+        .message(w.get("dialog.avatarRemove.body").replace("{name}", &name))
+        .title(w.get("dialog.avatarRemove.title").replace("{name}", &name))
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get("dialog.avatarRemove.ok"), w.get("dialog.cancel")))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            // Switch away first, so the page never asks for an avatar that is gone.
+            if let Some(d) = &handle.state::<Pet>().daemon {
+                let _ = d.post("/config", r#"{"avatar":"classic"}"#);
+            }
+            match avatars::remove(&root(), &current) {
+                Ok(()) => {
+                    let _ = handle.emit("avatar-removed", serde_json::json!({ "name": name }));
+                }
+                Err(e) => eprintln!("remove avatar {current}: {e}"),
             }
         });
 }
@@ -360,6 +479,12 @@ fn on_menu(app: &AppHandle, id: &str) {
         "update:install" => confirm_update(app, false),
         "update:install-unsigned" => confirm_update(app, true),
         "update:how" => explain_update(app),
+        "avatar:remove" => confirm_remove_avatar(app),
+        lib if lib.starts_with("lib:install:") || lib.starts_with("lib:update:") => {
+            if let Some(id) = lib.rsplit(':').next().filter(|id| avatars::valid_id(id)) {
+                confirm_library_install(app, id);
+            }
+        }
         "chat:disable" => {
             pet.chat.cancel();
             post("/config", r#"{"chatEnabled":false}"#);
@@ -475,6 +600,7 @@ fn main() {
             app.manage(hit::HitRegions::default());
             app.manage(MenuLocale(std::sync::Mutex::new("en".into())));
             app.manage(MenuUpdate(std::sync::Mutex::new(Value::Null)));
+            app.manage(MenuLibrary(std::sync::Mutex::new((Value::Null, "classic".into()))));
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))

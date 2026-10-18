@@ -173,8 +173,9 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 ## Make it your own
 
-Right-click → **Avatar** switches the creature's look; drag a `.claudepet` file onto it to
-install a new one. An avatar is one picture per state (any drawing tool or image AI) or an SVG
+Right-click → **Avatar** switches the creature's look, installs new ones from the
+[avatar library](https://github.com/r45635/claude-pet-avatars) (**Library ▸**, signed, with
+updates and *Remove current avatar…*), or drag any `.claudepet` file onto it. An avatar is one picture per state (any drawing tool or image AI) or an SVG
 following the creature's template — validated, sandboxed, and it never changes what the pet
 does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avatars/`](avatars).
 
