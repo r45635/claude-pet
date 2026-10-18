@@ -111,3 +111,15 @@ commands, with nobody there to answer a permission prompt.
 - **Guards:** `auto` mode (Claude Code's classifier) rather than `bypassPermissions`; one run
   at a time; a stop button; a dedicated working folder `~/.claude-pet/chat` — which Bash
   can still leave, so it is a default, not a sandbox.
+
+## 11. An avatar is someone else's file — 🔴 high consequence
+
+A `.claudepet` comes from anywhere, and the widget's page holds the chat's IPC: a full agent
+(§10). A script smuggled into an avatar's SVG could drive it.
+
+- **Mitigation:** one set of rules (`packages/collector/src/avatar-format.json`) enforced at
+  import and at load (flat names, zip-slip refused, sizes bounded before reading, file types
+  checked by content); SVG through an allow-list sanitizer (`web/avatar.js`); CSS scoped to the
+  avatar, no `@import`/`@font-face`/`@media`/escapes/external `url()`.
+- **Guard:** `npm run test:avatar-sanitizer` (14 poisoned SVGs, none may survive) and a
+  Content-Security-Policy on the window, so a missed case still cannot reach the network.

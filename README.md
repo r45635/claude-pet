@@ -25,9 +25,9 @@ it yourself).
 | 0 | telemetry investigation | ✅ `docs/CLAUDE_CODE_TELEMETRY.md` |
 | 1 | event simulator | ✅ deterministic, 4 profiles |
 | 2 | state engine + tests | ✅ |
-| 3 | Tauri widget | ✅ transparent window, ~0.2% CPU / ~55 MB idle (measured) |
-| 4 | real Claude Code integration | 🟡 `npm run install-hooks` — wired, engine not yet tuned on real sessions |
-| 5 | refinement | 🟡 launch at login, sizes, one creature per session and subagent, settings, usage-limit gauge |
+| 3 | Tauri widget | ✅ transparent window, clicks only on the creature, ~0.5% CPU / ~55 MB idle (measured) |
+| 4 | real Claude Code integration | 🟡 wired (hooks + network sensor); tuning on real sessions continues (`npm run replay`) |
+| 5 | refinement | 🟡 done: launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars. Left: menu bar, fatigue, OTEL token rates |
 
 ## Install
 
@@ -47,8 +47,8 @@ again. `~/.claude-pet/app/claude-pet` also has `status`, `restart`, `snapshot` a
 The archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub Actions
 (`.github/workflows/release.yml`) for every version tag. Download it with `curl`, not a
 browser: the binaries are not notarized by Apple, and a browser download would be
-quarantined by Gatekeeper. While the repository is private, `curl` cannot see it; use
-`gh release download -R r45635/claude-pet -p claude-pet-aarch64-apple-darwin.tar.gz`.
+quarantined by Gatekeeper. `gh release download -R r45635/claude-pet -p
+claude-pet-aarch64-apple-darwin.tar.gz` works too.
 
 ### From a clone
 
@@ -130,7 +130,7 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 | [`EVENT_SCHEMA.md`](docs/EVENT_SCHEMA.md) | the normalized `PetEvent`, and what it structurally cannot contain |
 | [`LOAD_SCORE.md`](docs/LOAD_SCORE.md) | the decaying-reservoir model, and why the blend is a power mean |
 | [`MVP_SCOPE.md`](docs/MVP_SCOPE.md) | in / out, and the definition of done |
-| [`RISKS.md`](docs/RISKS.md) | nine risks, each with a mitigation and a guard |
+| [`RISKS.md`](docs/RISKS.md) | eleven risks, each with a mitigation and a guard |
 | [`ROADMAP.md`](docs/ROADMAP.md) | the phase order and why it survives this machine |
 | [`PRIVACY.md`](docs/PRIVACY.md) | what is never read, what is reduced, how it is enforced |
 | [`AVATARS.md`](docs/AVATARS.md) | make your own creature: the `.claudepet` format, states, the SVG contract, safety |

@@ -1,0 +1,41 @@
+# Public repository: a commit's author and committer stay anonymous, and no commit is
+# attributed to an AI assistant. Rewriting a public history to fix this afterwards breaks
+# every clone (it was done once, 2026-10-18) — so the check runs before the merge.
+#
+# Allowed identities: GitHub's anonymous addresses (<id>+<login>@users.noreply.github.com or
+# <login>@users.noreply.github.com) and GitHub itself (web merges). Set yours with:
+#   git config user.email "<id>+<login>@users.noreply.github.com"
+name: commit-metadata
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Anonymous identities, no AI attribution
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bad=0
+          while IFS='|' read -r sha author committer; do
+            for who in "$author" "$committer"; do
+              case "$who" in
+                *@users.noreply.github.com|noreply@github.com) ;;
+                *) echo "::error::$sha: '$who' is not an anonymous GitHub address"; bad=1 ;;
+              esac
+            done
+          done < <(git log --format='%h|%ae|%ce' "$BASE..$HEAD")
+          if git log --format='%h %B' "$BASE..$HEAD" | grep -i -E 'co-authored-by:.*(claude|anthropic)|generated with \[?claude code'; then
+            echo "::error::a commit message attributes the work to an AI assistant"
+            bad=1
+          fi
+          exit $bad
