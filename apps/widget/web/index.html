@@ -219,14 +219,14 @@
   html.chat #drag { inset: auto; }
   #chat[hidden] { display: none; }
   #bubble { position: fixed; left: 10px; right: 10px; display: flex; flex-direction: column;
-            background: rgba(27, 30, 39, .98); color: #eceff4; border-radius: 22px;
-            border: 1px solid #323745;
-            box-shadow: 0 18px 40px rgba(0, 0, 0, .4);
+            background: var(--panel-bg); color: var(--panel-fg); border-radius: 22px;
+            border: 1px solid var(--panel-border);
+            box-shadow: 0 18px 40px var(--panel-shadow);
             font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
   /* The tail: a rotated square on the edge facing the creature, at its centre (--tail-x). */
   #bubble::after { content: ""; position: absolute; left: var(--tail-x, 40px); width: 16px; height: 16px;
-                   margin-left: -8px; background: rgb(27, 30, 39); transform: rotate(45deg);
-                   border: 1px solid #323745; }
+                   margin-left: -8px; background: var(--panel-bg-solid); transform: rotate(45deg);
+                   border: 1px solid var(--panel-border); }
   .above #bubble::after { bottom: -9px; border-top: 0; border-left: 0; }
   .below #bubble::after { top: -9px; border-bottom: 0; border-right: 0; }
   #bubble header { display: flex; align-items: center; gap: 10px; padding: 10px 8px 6px 16px;
@@ -236,26 +236,26 @@
                            background: #5a6273; transition: background .3s ease; }
   #bubble.busy header::before { background: var(--c-think); }
   #who { flex: 1; }
-  #close { width: 32px; height: 32px; border: 0; background: none; color: #9aa3b5; font-size: 18px;
+  #close { width: 32px; height: 32px; border: 0; background: none; color: var(--panel-muted); font-size: 18px;
            line-height: 1; cursor: pointer; border-radius: 10px; }
-  #close:hover { background: rgba(255, 255, 255, .08); color: #eceff4; }
+  #close:hover { background: var(--panel-hover); color: var(--panel-fg); }
   #messages { flex: 1; overflow-y: auto; padding: 4px 16px 8px; display: flex;
               flex-direction: column; gap: 10px; }
-  #messages:empty::before { content: attr(data-empty); color: #8b93a7; }
+  #messages:empty::before { content: attr(data-empty); color: var(--panel-muted); }
   .you { align-self: flex-end; max-width: 80%; background: var(--skin-base); color: var(--ink);
          padding: 7px 13px; border-radius: 16px 16px 4px 16px; white-space: pre-wrap; }
-  .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; color: #dde2ea; }
-  .claude.typing { color: #8b93a7; }
-  .claude pre { background: #12141a; padding: 8px 10px; border-radius: 10px; overflow-x: auto;
+  .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; color: var(--panel-fg); }
+  .claude.typing { color: var(--panel-muted); }
+  .claude pre { background: var(--code-bg); padding: 8px 10px; border-radius: 10px; overflow-x: auto;
                 font: 12px/1.4 ui-monospace, Menlo, monospace; margin: 4px 0; }
-  .claude code { font: 12.5px ui-monospace, Menlo, monospace; background: #2a2f3b;
+  .claude code { font: 12.5px ui-monospace, Menlo, monospace; background: var(--code-inline);
                  padding: 2px 6px; border-radius: 6px; }
-  #status { min-height: 16px; padding: 0 16px; color: #9aa3b5; font-size: 12px; }
+  #status { min-height: 16px; padding: 0 16px; color: var(--panel-muted); font-size: 12px; }
   #ask { display: flex; align-items: flex-end; gap: 8px; margin: 6px 10px 10px;
-         padding: 4px 4px 4px 14px; border-radius: 18px; background: #232733;
-         border: 1px solid #353b4a; }
+         padding: 4px 4px 4px 14px; border-radius: 18px; background: var(--panel-field);
+         border: 1px solid var(--panel-border); }
   #ask:focus-within { border-color: rgba(143, 184, 255, .7); }
-  #input { flex: 1; resize: none; border: 0; outline: none; background: none; color: #eceff4;
+  #input { flex: 1; resize: none; border: 0; outline: none; background: none; color: var(--panel-fg);
            font: inherit; padding: 7px 0; max-height: 90px; }
   #send { flex: none; width: 34px; height: 34px; border: 0; border-radius: 12px;
           background: var(--skin-base); color: var(--ink); font-size: 16px; font-weight: 700;
@@ -267,30 +267,52 @@
      and the new values come back on the feed. Size is a display pref; the others are
      engine knobs. */
   #gear { width: 32px; height: 32px; border: 0; border-radius: 10px; background: none;
-          color: #9aa3b5; cursor: pointer; display: grid; place-items: center; }
-  #gear:hover, #bubble.settings #gear { background: rgba(255, 255, 255, .08); color: #eceff4; }
-  #settings { flex: 1; padding: 6px 16px 14px; display: flex; flex-direction: column; gap: 18px;
+          color: var(--panel-muted); cursor: pointer; display: grid; place-items: center; }
+  #bubble[data-chat="off"] #gear { display: none; }
+  #gear:hover, #bubble.settings #gear { background: var(--panel-hover); color: var(--panel-fg); }
+  #settings { flex: 1; padding: 2px 16px 12px; display: flex; flex-direction: column; gap: 4px;
               overflow-y: auto; }
   #settings[hidden], #bubble.settings #messages, #bubble.settings #status,
   #bubble.settings #ask { display: none; }
-  .setting { display: flex; flex-direction: column; gap: 6px; }
-  .setting label { display: flex; justify-content: space-between; align-items: baseline;
-                   font-weight: 600; }
-  .setting output { font-variant-numeric: tabular-nums; color: var(--skin-base); }
-  .setting input[type=range] { width: 100%; accent-color: var(--skin-base); margin: 2px 0; }
-  .setting input[type=checkbox] { accent-color: var(--skin-base); margin: 0; width: 16px; height: 16px; }
-  .setting p { margin: 0; font-size: 12px; line-height: 1.4; color: #9aa3b5; }
-  .setting .reset { align-self: flex-start; border: 0; background: none; padding: 0;
-                    color: #9aa3b5; font: inherit; font-size: 12px; text-decoration: underline;
-                    cursor: pointer; }
-  .setting .reset:hover { color: #eceff4; }
-  #settings-status { min-height: 16px; font-size: 12px; color: #9aa3b5; }
+  #settings h3 { margin: 12px 0 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+                 color: var(--panel-muted); }
+  .setting { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px;
+             padding: 6px 0; border-bottom: 1px solid var(--panel-border); }
+  .setting label { font-weight: 600; font-size: 13px; }
+  .setting output { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 12px; }
+  .setting input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0; }
+  .setting input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+  .setting select { font: inherit; font-size: 12px; color: var(--panel-fg); background: var(--panel-field);
+                    border: 1px solid var(--panel-border); border-radius: 8px; padding: 3px 6px; max-width: 150px; }
+  .setting p { grid-column: 1 / -1; margin: 0; font-size: 11.5px; line-height: 1.35; color: var(--panel-muted); }
+  .setting .reset { grid-column: 1 / -1; justify-self: start; border: 0; background: none; padding: 0;
+                    color: var(--panel-muted); font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }
+  .setting .reset:hover { color: var(--panel-fg); }
+  .setting input:disabled { opacity: .45; }
+  #settings footer { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
+  #advanced { border: 1px solid var(--panel-border); background: var(--panel-field); color: var(--panel-fg);
+              font: inherit; font-size: 12px; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  #settings-status { min-height: 16px; font-size: 12px; color: var(--panel-muted); }
+
+  /* Colours of the bubble and the panel: dark by default, light on request or with macOS. */
+  :root { --panel-bg: rgba(27, 30, 39, .98); --panel-bg-solid: rgb(27, 30, 39); --panel-fg: #eceff4;
+          --panel-muted: #9aa3b5; --panel-border: #323745; --panel-field: #232733;
+          --panel-hover: rgba(255, 255, 255, .08); --panel-shadow: rgba(0, 0, 0, .4);
+          --code-bg: #12141a; --code-inline: #2a2f3b; --accent: var(--skin-base); }
+  html[data-theme="light"] { --panel-bg: rgba(250, 250, 252, .98); --panel-bg-solid: rgb(250, 250, 252);
+          --panel-fg: #1d2230; --panel-muted: #5f6878; --panel-border: #d9dde6; --panel-field: #eef0f5;
+          --panel-hover: rgba(0, 0, 0, .06); --panel-shadow: rgba(0, 0, 0, .18);
+          --code-bg: #eef0f5; --code-inline: #e4e7ef; --accent: #3d7fd9; }
+
+  /* Reduce motion: every animation and transition, not only the subagents'. */
+  html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before,
+  html[data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; }
 
   #hud { font-variant-numeric: tabular-nums; white-space: pre; opacity: .85; }
   #hud[hidden] { display: none; }
 </style>
 
-<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-signal="none">
+<svg id="pet" viewBox="0 0 160 160" data-visual="IDLE" data-signal="none" role="img" data-i18n-aria="pet.label">
   <defs>
     <!-- One creature. JS clones it per session and per subagent (see renderCritters). -->
     <g id="critter-proto" class="critter" data-state="IDLE">
@@ -422,7 +444,7 @@
 <div id="chat" hidden>
   <div id="bubble">
     <header><span id="who" data-i18n="chat.header">Claude</span>
-      <button id="gear" type="button" title="Settings" aria-label="Settings" aria-pressed="false">
+      <button id="gear" type="button" title="Settings" aria-label="Settings" aria-pressed="false" data-i18n-title="chat.settings" data-i18n-aria="chat.settings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
@@ -430,30 +452,13 @@
         </svg>
       </button>
       <button id="close" type="button" title="Close (Esc)" data-i18n-title="chat.close" data-i18n-aria="chat.close">×</button></header>
+    <!-- Built from the settings' description (settings-schema.json): one row per setting. -->
     <div id="settings" hidden>
-      <div class="setting">
-        <label for="size">Size <output id="size-out" for="size"></output></label>
-        <input id="size" type="range" min="80" max="300" step="10" />
-        <p>How big the creatures are. Right-click → Size has Small, Medium and Large as shortcuts.</p>
-        <button class="reset" type="button" data-key="sizePx">Back to default</button>
-      </div>
-      <div class="setting">
-        <label for="storm">Storm threshold <output id="storm-out" for="storm"></output></label>
-        <input id="storm" type="range" min="30" max="100" step="1" />
-        <p>Load at which the creature starts to storm. Higher = calmer. It calms down 10 points lower.</p>
-        <button class="reset" type="button" data-key="stormThreshold">Back to the temperament's value</button>
-      </div>
-      <div class="setting">
-        <label for="hold">Minimum time per state <output id="hold-out" for="hold"></output></label>
-        <input id="hold" type="range" min="0" max="10" step="0.5" />
-        <p>Each look stays at least this long, so a quick "done" can be seen. Waking up, errors, questions and storms still show at once.</p>
-        <button class="reset" type="button" data-key="minStateSeconds">Back to default</button>
-      </div>
-      <div class="setting">
-        <label for="transcripts">Read conversation files <input id="transcripts" type="checkbox" /></label>
-        <p>More accurate: each subagent shows its own model working or its tool running, and real token counts. Only the kind of each line and token counts are kept; the text is never stored. Off by default.</p>
-      </div>
-      <div id="settings-status" role="status"></div>
+      <div id="settings-form"></div>
+      <footer>
+        <button id="advanced" type="button" data-i18n="settings.advanced">Advanced settings…</button>
+        <div id="settings-status" role="status"></div>
+      </footer>
     </div>
     <div id="messages" data-i18n-empty="chat.empty"></div>
     <div id="status" aria-live="polite"></div>
@@ -686,7 +691,7 @@
     const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
     pet.dataset.multi = String(multi);
     const asleep = prefs.paused;
-    animatingNow = !asleep && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
+    animatingNow = !asleep && !motionReduced && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
     const groups = multi
       ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
                                agents: urgentFirst(x.agents ?? []) }))
@@ -925,10 +930,19 @@
   let appliedSize = 0;
   // While the size slider is in hand or its value on the way, it is the size: the live
   // preview must not snap back to the saved one carried by every frame.
+  // Shown size = nominal × zoom, kept between min and max (same rule as the daemon's).
+  // A size control in hand or on its way previews live.
   function petPx() {
-    const s = SETTINGS.size;
-    if (s.held || s.pending !== undefined) return Number(s.input.value);
-    return Number.isFinite(prefs.sizePx) ? prefs.sizePx : 150;
+    const live = (key, fallback) => {
+      const r = ROWS.get(key);
+      if (r && (r.held || r.pending !== undefined)) return Number(r.input.value);
+      return Number.isFinite(prefs[key]) ? prefs[key] : fallback;
+    };
+    const lo = Math.min(live('minPx', 80), live('maxPx', 300));
+    const hi = Math.max(live('minPx', 80), live('maxPx', 300));
+    const anyLive = ['nominalPx', 'zoom', 'minPx', 'maxPx'].some((k) => ROWS.get(k)?.held || ROWS.get(k)?.pending !== undefined);
+    if (!anyLive && Number.isFinite(prefs.sizePx)) return prefs.sizePx;
+    return Math.round(Math.min(hi, Math.max(lo, live('nominalPx', 150) * live('zoom', 1))));
   }
   function applySize() {
     const px = petPx();
@@ -1017,13 +1031,46 @@
   };
 
   let appliedLocale = '';
+  // A click on the creature: the chat when it is on; otherwise it says how to turn it on.
+  function clickCreature() {
+    if (chatOpen) { toggleChat(false); return; }
+    if (prefs.chatEnabled) openPanel('chat');
+    else flash(t('chat.offHint'));
+  }
+
+  // Window and comfort prefs that live in the page: theme, motion, opacity, on-top.
+  const darkMq = matchMedia('(prefers-color-scheme: dark)');
+  const motionMq = matchMedia('(prefers-reduced-motion: reduce)');
+  let motionReduced = false;
+  let appliedOnTop = null;
+  function applyComfort() {
+    const root = document.documentElement;
+    root.dataset.theme = prefs.theme === 'light' || (prefs.theme !== 'dark' && !darkMq.matches) ? 'light' : 'dark';
+    motionReduced = prefs.reduceMotion === 'on' || (prefs.reduceMotion !== 'off' && motionMq.matches);
+    root.dataset.reduceMotion = String(motionReduced);
+    pet.style.opacity = String(Number.isFinite(prefs.opacity) ? prefs.opacity : 1);
+    if (T && typeof prefs.alwaysOnTop === 'boolean' && prefs.alwaysOnTop !== appliedOnTop) {
+      appliedOnTop = prefs.alwaysOnTop;
+      invoke('set_always_on_top', { on: prefs.alwaysOnTop }).catch((err) => diag(`on top: ${err}`));
+    }
+    // The gear (switch to the conversation) only makes sense with the chat on.
+    bubbleEl.dataset.chat = prefs.chatEnabled ? 'on' : 'off';
+    if (!prefs.chatEnabled && chatOpen && !bubbleEl.classList.contains('settings')) toggleChat(false);
+  }
+  darkMq.addEventListener('change', applyComfort);
+  motionMq.addEventListener('change', () => { applyComfort(); last = ''; });
+
   function applyPrefs(p) {
     if (!p) return;
+    const chatWas = prefs.chatEnabled;
     prefs = p;
+    applyComfort();
+    if (chatWas !== p.chatEnabled && ROWS.size) buildSettings(); // the chat row's note changes
     const locale = setLocale(p.locale ?? 'auto');
     if (locale !== appliedLocale) {
       appliedLocale = locale;
       translateDom();
+      if (ROWS.size) buildSettings(); // the panel in the new language
       last = ''; // re-render: why bubble, tooltips, gauge in the new language
     }
     loadAvatar(p.avatar ?? 'classic');
@@ -1049,7 +1096,7 @@
       cleanup();
       T?.window.getCurrentWindow().startDragging().catch((err) => diag(`drag: ${err}`));
     };
-    const up = () => { cleanup(); if (!moved) toggleChat(); };
+    const up = () => { cleanup(); if (!moved) clickCreature(); };
     const cleanup = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); };
     addEventListener('mousemove', move);
     addEventListener('mouseup', up);
@@ -1084,7 +1131,16 @@
     bubble.style.setProperty('--tail-x', `${petLeft + sq / 2 - 10}px`);
   }
 
+  /** Open the panel on the conversation or the settings, or close it (null). */
+  async function openPanel(mode) {
+    if (mode === 'chat' && !prefs.chatEnabled) mode = null; // native-gated: see main.rs
+    if (mode && chatOpen) { showSettings(mode === 'settings'); return; } // just switch
+    if (mode) showSettings(mode === 'settings');
+    await toggleChat(Boolean(mode));
+  }
+
   async function toggleChat(open = !chatOpen) {
+    if (open && !prefs.chatEnabled && !bubbleEl.classList.contains('settings')) open = false;
     chatOpen = open;
     if (!open) showSettings(false); // it opens on the conversation next time
     const sq = petPx() + 30;
@@ -1098,7 +1154,7 @@
     chatEl.hidden = !open;
     if (open) {
       place(layout);
-      setTimeout(() => input.focus(), 30);
+      if (!bubbleEl.classList.contains('settings')) setTimeout(() => input.focus(), 30);
     } else {
       pet.style.left = pet.style.top = '';
       for (const k of ['left', 'top', 'width', 'height']) drag.style[k] = '';
@@ -1144,7 +1200,7 @@
 
   function onChat(ev) {
     switch (ev.kind) {
-      case 'open': toggleChat(true); break;
+      case 'open': openPanel('chat'); break;
       case 'reset': messagesEl.replaceChildren(); statusEl.textContent = t('chat.newConversation'); break;
       case 'start':
         current = addMessage('claude typing', '…');
@@ -1194,89 +1250,155 @@
   document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); send(); });
   document.getElementById('close').addEventListener('click', () => toggleChat(false));
 
-  // ---- settings ---------------------------------------------------------------------------
+  // ---- settings panel -----------------------------------------------------------------
+  // One row per setting of settings-schema.json (handed over by Rust; the harness fetches
+  // it), grouped by section, worded in the current language. A change goes to Rust, which
+  // drops what the page may not write (turning the chat on), then to the daemon, which
+  // validates and saves; the saved values come back on the feed.
   const bubbleEl = document.getElementById('bubble');
   const gear = document.getElementById('gear');
   const settingsEl = document.getElementById('settings');
+  const formEl = document.getElementById('settings-form');
   const settingsStatus = document.getElementById('settings-status');
-  const SETTINGS = {
-    size: { key: 'sizePx', input: document.getElementById('size'),
-            out: document.getElementById('size-out'), fmt: (v) => `${v} px` },
-    storm: { key: 'stormThreshold', input: document.getElementById('storm'),
-             out: document.getElementById('storm-out'), fmt: (v) => `${v}` },
-    hold: { key: 'minStateSeconds', input: document.getElementById('hold'),
-            out: document.getElementById('hold-out'), fmt: (v) => `${v} s` },
+  const ROWS = new Map(); // key → { spec, input, out }
+  let schema = [];
+  let avatarsList = [];
+
+  const unitOf = {
+    nominalPx: (v) => `${fmt.number(v)} px`, minPx: (v) => `${fmt.number(v)} px`, maxPx: (v) => `${fmt.number(v)} px`,
+    zoom: (v) => `×${fmt.number(v, 1)}`, opacity: (v) => fmt.percent(v * 100),
+    minStateSeconds: (v) => fmt.seconds(v * 1000), stormThreshold: (v) => fmt.number(v),
   };
+  // Enum values already worded in the menu reuse those words.
+  const valueLabel = (key, value) => (key === 'temperament' ? t(`menu.temperament.${value}`)
+    : key === 'chatModel' ? t(`menu.model.${value}`) : t(`set.${key}.${value}`));
+
+  function buildSettings() {
+    formEl.replaceChildren();
+    ROWS.clear();
+    let section = '';
+    for (const spec of schema) {
+      if (!spec.section) continue;
+      if (spec.section !== section) {
+        section = spec.section;
+        const h = document.createElement('h3');
+        h.textContent = t(`set.section.${section}`);
+        formEl.append(h);
+      }
+      const row = document.createElement('div');
+      row.className = 'setting';
+      const label = document.createElement('label');
+      label.textContent = t(`set.${spec.key}.label`);
+      label.htmlFor = `set-${spec.key}`;
+      let input;
+      let out = null;
+      if (spec.type === 'bool') {
+        input = Object.assign(document.createElement('input'), { type: 'checkbox' });
+      } else if (spec.type === 'enum' || spec.type === 'id') {
+        input = document.createElement('select');
+        const options = spec.type === 'id' ? avatarsList.map((a) => [a.id, a.name]) : spec.values.map((v) => [v, valueLabel(spec.key, v)]);
+        for (const [value, text] of options) input.append(new Option(text, value));
+      } else {
+        input = Object.assign(document.createElement('input'), { type: 'range', min: spec.min, max: spec.max, step: spec.step ?? 1 });
+        out = document.createElement('output');
+      }
+      input.id = `set-${spec.key}`;
+      const doc = document.createElement('p');
+      doc.textContent = spec.key === 'chatEnabled' && !prefs.chatEnabled ? `${t(`set.${spec.key}.doc`)} ${t('settings.chatOnlyFromMenu')}` : t(`set.${spec.key}.doc`);
+      row.append(label, out ?? input);
+      if (out) row.append(input);
+      row.append(doc);
+      if (spec.type !== 'bool' && spec.type !== 'id') {
+        const reset = Object.assign(document.createElement('button'), { type: 'button', className: 'reset', textContent: t('settings.default') });
+        reset.addEventListener('click', () => save(spec.key, null));
+        row.append(reset);
+      }
+      const r = { spec, input, out, held: false, pending: undefined, pendingUntil: 0 };
+      ROWS.set(spec.key, r);
+      if (out) {
+        input.addEventListener('pointerdown', () => { r.held = true; });
+        input.addEventListener('input', () => { out.textContent = (unitOf[spec.key] ?? String)(Number(input.value)); applySize(); });
+        input.addEventListener('change', () => { r.held = false; save(spec.key, Number(input.value)); input.blur(); });
+      } else {
+        input.addEventListener('change', () => save(spec.key, spec.type === 'bool' ? input.checked : input.value));
+      }
+      formEl.append(row);
+    }
+    renderSettings(prefs);
+  }
+  addEventListener('pointerup', () => { for (const r of ROWS.values()) r.held = false; });
+
+  // Every frame (100 ms–1 s) carries the saved prefs. A control must not be pushed back to
+  // them while in the user's hand, nor while a new value is on its way (`pending`, until a
+  // frame agrees or 3 s pass).
+  function renderSettings(p) {
+    for (const [key, r] of ROWS) {
+      const value = p[key];
+      if (value === undefined) continue;
+      if (r.pending !== undefined && (value === r.pending || Date.now() > r.pendingUntil)) r.pending = undefined;
+      if (r.held || r.pending !== undefined) continue;
+      if (r.spec.type === 'bool') r.input.checked = Boolean(value);
+      else r.input.value = String(value);
+      if (r.out) r.out.textContent = (unitOf[key] ?? String)(Number(r.input.value));
+      // The page can turn the chat off, never on (Rust refuses it): grey it out when off.
+      if (key === 'chatEnabled') r.input.disabled = !value;
+    }
+  }
+
+  async function save(key, value) {
+    const r = ROWS.get(key);
+    if (r) { r.pending = value ?? undefined; r.pendingUntil = Date.now() + 3000; }
+    settingsStatus.textContent = t('settings.saving');
+    try {
+      applyPrefs(await invoke('update_prefs', { patch: { [key]: value } }));
+      settingsStatus.textContent = t('settings.saved');
+    } catch (err) {
+      if (r) r.pending = undefined;
+      settingsStatus.textContent = String(err).includes('chat_native_only') ? t('chat.error.chat_native_only') : saveError(err);
+      renderSettings(prefs);
+    }
+  }
+
+  async function loadSchema() {
+    try {
+      const text = T ? await invoke('settings_schema')
+        : await (await fetch(new URL('../../../packages/collector/src/settings-schema.json', location.href))).text();
+      schema = JSON.parse(text).prefs;
+      avatarsList = T ? await invoke('list_avatars', { locale: currentLocale() }) : [{ id: 'classic', name: t('menu.avatar.classic') }];
+    } catch (err) { diag(`settings schema: ${err}`); }
+    buildSettings();
+  }
+
   function showSettings(open) {
     bubbleEl.classList.toggle('settings', open);
     settingsEl.hidden = !open;
     gear.setAttribute('aria-pressed', String(open));
     document.getElementById('who').textContent = t(open ? 'chat.settings' : 'chat.header');
     settingsStatus.textContent = '';
+    if (open) void loadSchema(); // fresh avatar list and words each time it opens
   }
+  // The gear switches between the conversation and the settings — only with the chat on.
   gear.addEventListener('click', () => showSettings(!bubbleEl.classList.contains('settings')));
-  // Values come from the feed; a slider being dragged is not overwritten under the finger.
-  // Every frame (100 ms–1 s) carries the saved prefs. A slider must not be pushed back to
-  // them while it is in the user's hand (WebKit does not focus a range on click, so focus
-  // is no guide), nor while a new value is on its way: frames built before the daemon
-  // applied it still carry the old one. `pending` holds until a frame agrees, or 3 s.
-  const transcriptsBox = document.getElementById('transcripts');
-  let transcriptsPending;
-  function renderSettings(p) {
-    if (typeof p.readTranscripts === 'boolean') {
-      if (transcriptsPending === p.readTranscripts) transcriptsPending = undefined;
-      if (transcriptsPending === undefined) transcriptsBox.checked = p.readTranscripts;
-    }
-    for (const s of Object.values(SETTINGS)) {
-      const value = p[s.key];
-      if (typeof value !== 'number') continue;
-      if (s.pending !== undefined && (value === s.pending || Date.now() > s.pendingUntil)) s.pending = undefined;
-      if (!s.held && s.pending === undefined && Number(s.input.value) !== value) s.input.value = String(value);
-      s.out.textContent = s.fmt(Number(s.input.value));
-    }
-  }
-  async function savePref(s, value) {
-    s.pending = value ?? undefined;
-    s.pendingUntil = Date.now() + 3000;
-    settingsStatus.textContent = t('settings.saving');
-    try {
-      applyPrefs(await invoke('update_prefs', { patch: { [s.key]: value } }));
-      settingsStatus.textContent = t('settings.saved');
-    } catch (err) {
-      s.pending = undefined;
-      settingsStatus.textContent = saveError(err);
-    }
-  }
-  for (const s of Object.values(SETTINGS)) {
-    s.held = false;
-    s.input.addEventListener('pointerdown', () => { s.held = true; });
-    // pointerup can land outside the window; `change` always follows the end of a drag.
-    addEventListener('pointerup', () => { s.held = false; });
-    s.input.addEventListener('input', () => {
-      s.out.textContent = s.fmt(Number(s.input.value));
-      if (s === SETTINGS.size) applySize();
-    });
-    s.input.addEventListener('change', () => {
-      s.held = false;
-      savePref(s, Number(s.input.value));
-      s.input.blur();
-    });
-  }
-  transcriptsBox.addEventListener('change', async () => {
-    transcriptsPending = transcriptsBox.checked;
-    settingsStatus.textContent = t('settings.saving');
-    try {
-      applyPrefs(await invoke('update_prefs', { patch: { readTranscripts: transcriptsBox.checked } }));
-      settingsStatus.textContent = t('settings.saved');
-    } catch (err) {
-      transcriptsPending = undefined;
-      settingsStatus.textContent = saveError(err);
-    }
+  document.getElementById('advanced').addEventListener('click', () => {
+    invoke('open_advanced').catch((err) => diag(`advanced: ${err}`));
   });
-  for (const button of settingsEl.querySelectorAll('.reset')) {
-    const s = Object.values(SETTINGS).find((x) => x.key === button.dataset.key);
-    button.addEventListener('click', () => savePref(s, null));
+
+  // ---- zoom: ⌘+ / ⌘− / ⌘0 on the creature, or the menu ------------------------------
+  function zoom(dir) {
+    const current = Number.isFinite(prefs.zoom) ? prefs.zoom : 1;
+    if (dir === 'reset') { save('zoom', null); return; }
+    const next = Math.round(Math.min(2, Math.max(0.5, current + (dir === 'in' ? 0.1 : -0.1))) * 10) / 10;
+    if (next !== current) save('zoom', next);
   }
+  T?.event.listen('zoom', ({ payload }) => zoom(payload.dir));
+  addEventListener('keydown', (e) => {
+    if (!e.metaKey || e.target === input) return;
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); zoom('in'); }
+    else if (e.key === '-') { e.preventDefault(); zoom('out'); }
+    else if (e.key === '0') { e.preventDefault(); zoom('reset'); }
+  });
+  T?.event.listen('panel', ({ payload }) => openPanel(payload.mode));
+
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 90)}px`;
@@ -1333,6 +1455,23 @@
       });
       document.title = `ready ${id} ${state}`;
     })().catch((err) => { document.title = `failed ${err.message}`; });
+  }
+
+  // Browser-harness demo of the settings panel: #demo=settings&lang=fr&theme=light[&chat=on]
+  if (params.get('demo') === 'settings') {
+    prefs = { ...prefs, locale: params.get('lang') ?? 'auto', theme: params.get('theme') ?? 'dark', reduceMotion: 'system',
+              launchAtLogin: true, avatar: 'classic', nominalPx: 150, minPx: 80, maxPx: 300, zoom: 1.2, opacity: 1,
+              alwaysOnTop: true, showSessions: true, temperament: 'normal', stormThreshold: 75, minStateSeconds: 2,
+              paused: false, netSensor: true, readTranscripts: false, chatEnabled: params.get('chat') === 'on', chatModel: 'default' };
+    setLocale(prefs.locale);
+    translateDom();
+    applyComfort();
+    chatOpen = true;
+    document.documentElement.classList.add('chat', 'widget');
+    document.body.style.background = '#3b4252';
+    chatEl.hidden = false;
+    place({ above: true, right: true });
+    showSettings(true);
   }
 
   if (params.get('demo') === 'chat') {

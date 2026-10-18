@@ -268,10 +268,14 @@ const STORM_EXIT_GAP = 10;
 /** Fold a validated patch into the user file, keeping every other key untouched. */
 export function applyPatch(user: UserFile, patch: PrefsPatch): UserFile {
   const next = structuredClone(user) as UserFile;
-  if (('nominalPx' in patch) && next.ui) {
-    // The nominal size replaces the older forms of it.
-    if (typeof next.ui.size !== 'object' || next.ui.size === null) delete next.ui.size;
+  // Older forms of the size (ui.size: "small", ui.sizePx) become ui.size.nominalPx first:
+  // writing ui.size.zoom over a string would otherwise drop the size the user had chosen.
+  const legacy = legacyNominal(next);
+  if (next.ui && (typeof next.ui.size !== 'object' || next.ui.size === null || 'sizePx' in next.ui)) {
+    const keep = typeof next.ui.size === 'object' && next.ui.size !== null ? next.ui.size : {};
+    delete next.ui.size;
     delete next.ui.sizePx;
+    if (legacy !== undefined || Object.keys(keep).length) next.ui.size = { ...(legacy !== undefined ? { nominalPx: legacy } : {}), ...keep };
   }
   for (const [key, value] of Object.entries(patch)) {
     const spec = SPEC.get(key)!;
