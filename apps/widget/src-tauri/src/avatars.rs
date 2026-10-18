@@ -384,6 +384,34 @@ pub fn load(root: &Path, id: &str) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
+/// Uninstall: the avatar's folder and its `.bak`. The built-in `classic` cannot be removed.
+pub fn remove(root: &Path, id: &str) -> Result<(), String> {
+    if !valid_id(id) || format()["builtin"].as_array().is_some_and(|b| b.iter().any(|x| x == id)) {
+        return Err(format!("\"{id}\" cannot be removed"));
+    }
+    let target = dir(root).join(id);
+    if !target.join("manifest.json").exists() {
+        return Err(format!("\"{id}\" is not installed"));
+    }
+    fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+    let _ = fs::remove_dir_all(dir(root).join(format!("{id}.bak")));
+    Ok(())
+}
+
+/// Where an installed avatar came from: `.install.json` in its folder, written after a
+/// library install (absent = dropped by hand). load() and list() never read it: they only
+/// read manifest.json and the files it references.
+pub fn write_install_record(root: &Path, id: &str, record: &Value) -> Result<(), String> {
+    if !valid_id(id) {
+        return Err("bad avatar id".into());
+    }
+    let folder = dir(root).join(id);
+    if !folder.join("manifest.json").exists() {
+        return Err(format!("\"{id}\" is not installed"));
+    }
+    fs::write(folder.join(".install.json"), record.to_string()).map_err(|e| e.to_string())
+}
+
 /// Install a `.claudepet`: every entry flat, bounded and checked before anything is
 /// written; then an atomic swap, keeping the previous version as `<id>.bak`.
 pub fn import(root: &Path, archive: &Path) -> Result<(String, String), String> {
@@ -473,6 +501,24 @@ mod tests {
         w.finish().unwrap();
     }
     const MANIFEST: &[u8] = br#"{"format":1,"id":"demo","name":"Demo","kind":"images","states":{"IDLE":"idle.png"}}"#;
+
+    #[test]
+    fn remove_deletes_the_avatar_and_its_backup_but_never_classic() {
+        let root = tmp_root("rm");
+        let pkg = root.join("demo.claudepet");
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", PNG)]);
+        import(&root, &pkg).unwrap();
+        import(&root, &pkg).unwrap(); // leaves demo.bak
+        write_install_record(&root, "demo", &json!({"source": "library", "sha256": "ab"})).unwrap();
+        assert!(load(&root, "demo").is_ok(), "the record does not disturb load()");
+        assert_eq!(list(&root).len(), 1, "nor list()");
+        remove(&root, "demo").unwrap();
+        assert!(!dir(&root).join("demo").exists() && !dir(&root).join("demo.bak").exists());
+        assert!(remove(&root, "classic").is_err());
+        assert!(remove(&root, "../etc").is_err());
+        assert!(remove(&root, "demo").unwrap_err().contains("not installed"));
+        assert!(write_install_record(&root, "demo", &json!({})).is_err());
+    }
 
     #[test]
     fn ids_are_checked_by_structure() {

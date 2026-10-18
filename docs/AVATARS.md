@@ -6,7 +6,26 @@ install it; **right-click → Avatar** to switch. Everything else keeps working 
 like: the states, breathing, storms, subagents walking around, the chat, clicks.
 
 Examples ship in [`avatars/`](../avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
-commented template) and `cowboy` (SVG, with a hat that moves with the mood).
+commented template), `cowboy` (SVG, with a hat that moves with the mood) and five seasonal ones.
+
+## The library — install, update, remove from the menu
+
+Ready-made avatars live in their own repository,
+[r45635/claude-pet-avatars](https://github.com/r45635/claude-pet-avatars). Right-click →
+**Avatar**:
+
+- **Library ▸** lists the avatars you don't have yet; pick one, confirm (the dialog shows its
+  version, author, license and size), and it is installed and shown.
+- **Update <name>…** appears when the library ships a different version of one you have.
+- **Remove current avatar…** deletes the avatar on screen (and its backup) and goes back to
+  Classic. A dropped `.claudepet` is removed the same way.
+
+How it stays safe: the library's `index.json` is signed with claude-pet's release key and the
+app refuses it unsigned or altered; each package must match the SHA-256 the signed index
+gives; and it is then installed exactly like a dropped file, with every check below. The
+catalog refreshes once a day with *Check for updates* (off = *Library unavailable*). A library
+install leaves a `.install.json` (source, SHA-256, date) in the avatar's folder; nothing reads it
+to draw the avatar. To contribute one, see the library's README — a `license` is required.
 
 ## Two ways to make one
 

@@ -135,8 +135,15 @@ A `.claudepet` comes from anywhere, and the widget's page holds the chat's IPC: 
   import and at load (flat names, zip-slip refused, sizes bounded before reading, file types
   checked by content); SVG through an allow-list sanitizer (`web/avatar.js`); CSS scoped to the
   avatar, no `@import`/`@font-face`/`@media`/escapes/external `url()`.
+- **The library** (`packages/collector/src/catalog.ts`): its `index.json` must verify against
+  the pinned release key (no unsigned fallback) and each package must match the index's
+  SHA-256 — that gates *distribution*. The package is then imported by Rust exactly like a
+  drop — that gates *content*. The daemon downloads but never unzips; its install route is
+  native-only (§10) and only serves ids from the verified catalog; Rust only imports from the
+  daemon's own `.avatar-dl-*` folder, and refuses a package that installs another id.
 - **Guard:** `npm run test:avatar-sanitizer` (14 poisoned SVGs, none may survive) and a
-  Content-Security-Policy on the window, so a missed case still cannot reach the network.
+  Content-Security-Policy on the window, so a missed case still cannot reach the network;
+  catalog tests (unsigned/tampered/foreign-key index, malformed entries, swapped package).
 
 ## 12. Downloaded releases are a supply chain — 🟠 medium, high consequence
 
