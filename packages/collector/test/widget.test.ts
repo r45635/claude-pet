@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GITHUB_REPO, VERSION } from '../src/entry.ts';
-import { assetName, checksumMatches, downloadedPath, releaseUrl, TARGET } from '../src/widget.ts';
+import { assetName, checksumMatches, downloadedPath, releaseUrl, RELEASE_PUBKEY, TARGET, verifySignature } from '../src/widget.ts';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const WORKFLOW = readFileSync(join(REPO, '.github', 'workflows', 'release.yml'), 'utf8');
@@ -28,6 +28,24 @@ test('widget: release URL and download path', () => {
   assert.match(GITHUB_REPO, /^[\w.-]+\/[\w.-]+$/);
   assert.equal(releaseUrl('v0.1.0', 'x.tar.gz', 'o/r'), 'https://github.com/o/r/releases/download/v0.1.0/x.tar.gz');
   assert.equal(downloadedPath('v0.1.0', '/h/.claude-pet'), '/h/.claude-pet/bin/v0.1.0/claude-pet-widget');
+});
+
+test('signing: only the key holder verifies; tampering and garbage refuse', () => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const pem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const data = Buffer.from('abc123  claude-pet-widget-v9.9.9.tar.gz\n');
+  const sig = sign(null, data, privateKey).toString('base64');
+  assert.equal(verifySignature(data, `${sig}\n`, pem), true);
+  assert.equal(verifySignature(Buffer.from('tampered'), sig, pem), false);
+  assert.equal(verifySignature(data, sig), false, 'a throwaway key must not verify against the pinned one');
+  assert.equal(verifySignature(data, 'not base64 at all!', pem), false);
+});
+
+test('signing: the embedded pubkey is the committed pem, and tag builds sign', () => {
+  const pem = readFileSync(join(REPO, 'packages', 'collector', 'src', 'release-pubkey.pem'), 'utf8');
+  assert.equal(RELEASE_PUBKEY, pem);
+  assert.match(WORKFLOW, /sign-release\.ts release\/\*\.sha256/);
+  assert.match(WORKFLOW, /RELEASE_SIGNING_KEY secret is missing/);
 });
 
 test('widget: the archive must match its published SHA-256', () => {

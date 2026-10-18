@@ -90,6 +90,16 @@ jobs:
           ./dist/claude-pet/claude-pet version
           mkdir -p release && mv dist/*.tar.gz dist/*.sha256 release/
 
+      # Tag builds must be signed (docs/RISKS.md #12): the .sig proves the artifact came out
+      # of this workflow holding the secret, which the .sha256 alone cannot. PR builds skip it.
+      - name: Sign
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::RELEASE_SIGNING_KEY secret is missing"; exit 1; }
+          node scripts/sign-release.ts release/*.sha256
+
       - uses: actions/upload-artifact@v7
         with:
           name: claude-pet-${{ steps.version.outputs.tag }}

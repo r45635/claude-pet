@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,29 @@ export function checksumMatches(archive: Buffer, sha256File: string): boolean {
   return /^[0-9a-f]{64}$/.test(expected) && createHash('sha256').update(archive).digest('hex') === expected;
 }
 
+/**
+ * The pinned release public key (ed25519); CI signs with its private half. Embedded as a
+ * constant so the esbuild-bundled standalone carries it too; release-pubkey.pem next to
+ * this file is the canonical copy and a test pins the two to each other.
+ */
+export const RELEASE_PUBKEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA6K1IQ90s8nNejBQ/fm5uidIT5TYsFkLLKXP2tqteA/0=
+-----END PUBLIC KEY-----
+`;
+
+/**
+ * A `.sig` as written by scripts/sign-release.ts: base64 ed25519 over the exact bytes.
+ * Proves the artifact was produced by the key holder (this repo's CI) — see RISKS.md #12
+ * for what that does not cover.
+ */
+export function verifySignature(data: Buffer, sigBase64: string, pubkeyPem = RELEASE_PUBKEY): boolean {
+  try {
+    return verify(null, data, createPublicKey(pubkeyPem), Buffer.from(sigBase64.trim(), 'base64'));
+  } catch {
+    return false;
+  }
+}
+
 function has(cmd: string): boolean {
   try {
     execFileSync('/bin/sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' });
@@ -67,14 +90,20 @@ function download(tag: string, dir: string): void {
     for (const name of [asset, `${asset}.sha256`]) {
       execFileSync('curl', ['-fsSL', '--retry', '2', '-o', join(dir, name), releaseUrl(tag, name)], { stdio: 'ignore' });
     }
-    return;
   } catch {
     if (!has('gh')) throw new Error(`could not download ${releaseUrl(tag, asset)}`);
+    try {
+      execFileSync('gh', ['release', 'download', tag, '-R', GITHUB_REPO, '-p', asset, '-p', `${asset}.sha256`, '-D', dir, '--clobber'], { stdio: 'ignore' });
+    } catch {
+      throw new Error(`could not download ${asset} from ${GITHUB_REPO} (no release ${tag}, or no access)`);
+    }
   }
+  // The signature is optional on the wire (releases before v0.3 have none): its absence
+  // warns, its invalidity refuses — fetchWidget decides.
   try {
-    execFileSync('gh', ['release', 'download', tag, '-R', GITHUB_REPO, '-p', asset, '-p', `${asset}.sha256`, '-D', dir, '--clobber'], { stdio: 'ignore' });
+    execFileSync('curl', ['-fsSL', '--retry', '2', '-o', join(dir, `${asset}.sha256.sig`), releaseUrl(tag, `${asset}.sha256.sig`)], { stdio: 'ignore' });
   } catch {
-    throw new Error(`could not download ${asset} from ${GITHUB_REPO} (no release ${tag}, or no access)`);
+    /* no .sig published for this tag */
   }
 }
 
@@ -92,8 +121,17 @@ export function fetchWidget(tag = `v${VERSION}`, { force = false, root = ROOT_DI
     download(tag, tmp);
     const asset = assetName(tag);
     const archive = readFileSync(join(tmp, asset));
-    if (!checksumMatches(archive, readFileSync(join(tmp, `${asset}.sha256`), 'utf8'))) {
+    const sha256File = readFileSync(join(tmp, `${asset}.sha256`), 'utf8');
+    if (!checksumMatches(archive, sha256File)) {
       throw new Error(`${asset}: SHA-256 does not match the published one, not installed`);
+    }
+    const sigPath = join(tmp, `${asset}.sha256.sig`);
+    if (existsSync(sigPath)) {
+      if (!verifySignature(Buffer.from(sha256File), readFileSync(sigPath, 'utf8'))) {
+        throw new Error(`${asset}: the release signature does not verify, not installed`);
+      }
+    } else {
+      process.stderr.write(`warning: ${tag} is unsigned (released before signing existed); integrity checked, authenticity not\n`);
     }
     execFileSync('tar', ['-xzf', join(tmp, asset), '-C', tmp, BIN]);
     chmodSync(join(tmp, BIN), 0o755);

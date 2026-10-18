@@ -132,3 +132,21 @@ A `.claudepet` comes from anywhere, and the widget's page holds the chat's IPC: 
   avatar, no `@import`/`@font-face`/`@media`/escapes/external `url()`.
 - **Guard:** `npm run test:avatar-sanitizer` (14 poisoned SVGs, none may survive) and a
   Content-Security-Policy on the window, so a missed case still cannot reach the network.
+
+## 12. Downloaded releases are a supply chain — 🟠 medium, high consequence
+
+Release assets are built in GitHub Actions and downloaded by `curl` without quarantine
+(the binaries are ad-hoc signed, not notarized — Gatekeeper never sees them). A `.sha256`
+from the same release page proves integrity in transit, nothing more.
+
+- **Mitigation:** tag builds sign every `.sha256` with an ed25519 key held as an Actions
+  secret (`scripts/sign-release.ts` → `.sig`); the collector verifies against the public key
+  pinned in `packages/collector/src/widget.ts` (canonical copy: `release-pubkey.pem`).
+  An invalid signature always refuses the install; a missing one (releases that predate
+  signing) warns and proceeds for a manual fetch, and never qualifies for automatic install.
+- **What the signature proves — and does not:** it proves the artifact came out of this
+  repository's CI holding the secret (or from the key's owner). It does **not** protect
+  against a compromised GitHub account, a compromised Actions runner, or a malicious commit
+  that CI faithfully builds and signs; and the binaries remain un-notarized.
+- **Guard:** tag builds fail if the secret is absent; tests pin the signing step, the
+  pubkey/pem identity, and the verify/refuse behavior.
