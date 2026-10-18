@@ -9,6 +9,7 @@ mod daemon;
 mod avatars;
 mod hit;
 mod menu;
+mod settings;
 
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
@@ -96,6 +97,10 @@ fn chat_model() -> Option<String> {
 
 #[tauri::command]
 fn chat_ask(app: AppHandle, pet: State<'_, Pet>, text: String) -> Result<(), String> {
+    // The native gate: off unless config.json says true, read now, whatever the page did.
+    if !settings::chat_enabled(&settings::user_config(&root())) {
+        return Err("chat_disabled".into());
+    }
     if text.trim().is_empty() {
         return Err("empty_message".into());
     }
@@ -106,6 +111,7 @@ fn chat_ask(app: AppHandle, pet: State<'_, Pet>, text: String) -> Result<(), Str
 /// The daemon validates every key; the page never writes to it directly.
 #[tauri::command]
 fn update_prefs(pet: State<'_, Pet>, patch: Value) -> Result<Value, String> {
+    let patch = settings::filter_page_patch(patch)?;
     let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
     let body = daemon.post("/config", &patch.to_string())?;
     serde_json::from_str(&body).map_err(|e| e.to_string())
@@ -119,6 +125,9 @@ fn chat_cancel(pet: State<'_, Pet>) -> bool {
 #[tauri::command]
 fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, locale: Option<String>) -> Result<(), String> {
     let locale = locale.unwrap_or_else(|| "en".into());
+    if let Ok(mut l) = app.state::<MenuLocale>().0.lock() {
+        *l = locale.clone(); // for the native dialogs the menu opens
+    }
     let mut avatars = vec![("classic".to_owned(), "Classic".to_owned())];
     for a in avatars::list(&root()) {
         // A manifest may name the avatar per language ("names": {"fr": "…"}).
@@ -127,8 +136,65 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
             avatars.push((id.to_owned(), name.to_owned()));
         }
     }
-    let menu = menu::build(&app, &locale, &prefs, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
+    let chat_on = settings::chat_enabled(&settings::user_config(&root()));
+    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
+/// The language the menu was last opened in, for the native dialogs it opens.
+struct MenuLocale(std::sync::Mutex<String>);
+
+/// The settings' description, for the page to build its panel from.
+#[tauri::command]
+fn settings_schema() -> String {
+    settings::SCHEMA.to_owned()
+}
+
+/// Installed avatars for the settings panel: classic first, names in `locale`.
+#[tauri::command]
+fn list_avatars(locale: Option<String>) -> Vec<Value> {
+    let locale = locale.unwrap_or_else(|| "en".into());
+    let mut out = vec![serde_json::json!({ "id": "classic", "name": menu::Words::new(&locale).get("menu.avatar.classic") })];
+    for a in avatars::list(&root()) {
+        let name = a["names"][&locale].as_str().or(a["name"].as_str()).unwrap_or("?").to_owned();
+        out.push(serde_json::json!({ "id": a["id"], "name": name }));
+    }
+    out
+}
+
+#[tauri::command]
+fn set_always_on_top(window: Window, on: bool) -> Result<(), String> {
+    window.set_always_on_top(on).map_err(|e| e.to_string())
+}
+
+/// "Advanced settings…" from the panel: the same as the menu item.
+#[tauri::command]
+fn open_advanced(pet: State<'_, Pet>) -> Result<(), String> {
+    let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
+    daemon.post("/open-config", "").map(|_| ())
+}
+
+/// Turning the chat on: only here, after a native confirmation that says what it means.
+fn confirm_enable_chat(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let w = menu::Words::new(&locale);
+    let handle = app.clone();
+    app.dialog()
+        .message(w.get("dialog.enableChat.body"))
+        .title(w.get("dialog.enableChat.title"))
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get("dialog.enableChat.ok"), w.get("dialog.cancel")))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            if let Some(d) = &handle.state::<Pet>().daemon {
+                if let Err(e) = d.post("/config", r#"{"chatEnabled":true}"#) {
+                    eprintln!("enable chat: {e}");
+                }
+            }
+        });
 }
 
 /// An installed avatar, ready for the page (data: URLs and text, all checked).
@@ -231,6 +297,17 @@ fn on_menu(app: &AppHandle, id: &str) {
         return;
     }
     match id {
+        "chat:enable" => confirm_enable_chat(app),
+        "chat:disable" => {
+            pet.chat.cancel();
+            post("/config", r#"{"chatEnabled":false}"#);
+        }
+        "settings:open" => {
+            let _ = app.emit("panel", serde_json::json!({ "mode": "settings" }));
+        }
+        "zoom:in" | "zoom:out" | "zoom:reset" => {
+            let _ = app.emit("zoom", serde_json::json!({ "dir": &id[5..] }));
+        }
         "chat:open" => {
             let _ = app.emit("chat", serde_json::json!({ "kind": "open" }));
         }
@@ -268,6 +345,57 @@ fn set_hit_regions(hit: State<'_, hit::HitRegions>, shapes: Vec<hit::Shape>) {
     }
 }
 
+/// Where the creature stood and whether it stays on top, from config.json. A saved spot
+/// that is on no screen any more (a monitor unplugged) is ignored.
+fn restore_window(window: &tauri::WebviewWindow) {
+    let cfg = settings::user_config(&root());
+    let _ = window.set_always_on_top(settings::always_on_top(&cfg));
+    let Some((x, y)) = settings::saved_position(&cfg) else { return };
+    let on_screen = window.available_monitors().unwrap_or_default().iter().any(|m| {
+        let scale = m.scale_factor();
+        let p = m.position().to_logical::<f64>(scale);
+        let s = m.size().to_logical::<f64>(scale);
+        x >= p.x && y >= p.y && x < p.x + s.width - 20.0 && y < p.y + s.height - 20.0
+    });
+    if on_screen {
+        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    }
+}
+
+/// Save the creature's spot once a drag has settled (1 s without moving), but not while
+/// the chat or settings panel has grown the window: that position is not the creature's.
+fn spawn_position_saver(app: AppHandle, window: tauri::WebviewWindow) {
+    let pending: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>> = Default::default();
+    let mark = std::sync::Arc::clone(&pending);
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Moved(_) = event {
+            if let Ok(mut p) = mark.lock() {
+                *p = Some(std::time::Instant::now());
+            }
+        }
+    });
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let due = pending.lock().ok().and_then(|p| *p).is_some_and(|t| t.elapsed().as_millis() >= 1000);
+        if !due {
+            continue;
+        }
+        if let Ok(mut p) = pending.lock() {
+            *p = None;
+        }
+        let panel_open = app.state::<PanelState>().0.lock().map(|l| l.is_some()).unwrap_or(true);
+        if panel_open {
+            continue;
+        }
+        let (Ok(pos), Ok(scale)) = (window.outer_position(), window.scale_factor()) else { continue };
+        let p = pos.to_logical::<f64>(scale);
+        let body = serde_json::json!({ "position": { "x": p.x.round() as i64, "y": p.y.round() as i64 } }).to_string();
+        if let Some(d) = &app.state::<Pet>().daemon {
+            let _ = d.post("/config", &body);
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -283,6 +411,7 @@ fn main() {
             });
             app.manage(PanelState(std::sync::Mutex::new(None)));
             app.manage(hit::HitRegions::default());
+            app.manage(MenuLocale(std::sync::Mutex::new("en".into())));
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))
@@ -299,6 +428,8 @@ fn main() {
                 .build()?;
             if let Some(window) = app.get_webview_window("pet") {
                 hit::spawn_tracker(app.handle().clone(), window.clone());
+                restore_window(&window);
+                spawn_position_saver(app.handle().clone(), window.clone());
                 // Drop a .claudepet on the creature to install it (no plugin: a window event).
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -311,7 +442,9 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel, set_hit_regions, get_avatar])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel,
+            set_hit_regions, get_avatar, settings_schema, list_avatars, set_always_on_top, open_advanced])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }

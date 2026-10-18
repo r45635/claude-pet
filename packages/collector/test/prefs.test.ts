@@ -169,3 +169,14 @@ test('launch at login: launchctl enable/disable for both agents', () => {
   ]);
   assert.equal(launchctlArgs(true, 501)[0][0], 'enable');
 });
+
+test('size: zooming a file that still has the old size keeps that size (regression)', () => {
+  // Found live: ui.size "small" + a zoom patch dropped "small", then reset → 150 px.
+  const user = { ui: { size: 'small', avatar: 'ghost' } };
+  const zoomed = applyPatch(user, validatePatch({ zoom: 1.5 }) as never);
+  assert.deepEqual(zoomed.ui, { avatar: 'ghost', size: { nominalPx: SIZE_PX.small, zoom: 1.5 } });
+  const back = applyPatch(zoomed, validatePatch({ zoom: null }) as never);
+  assert.equal(prefsOf(back).sizePx, SIZE_PX.small, 'still small after the zoom is reset');
+  const px = applyPatch({ ui: { sizePx: 180 } }, validatePatch({ opacity: 0.5 }) as never);
+  assert.deepEqual(px.ui, { size: { nominalPx: 180 }, opacity: 0.5 });
+});

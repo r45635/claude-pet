@@ -68,23 +68,47 @@ fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars
         .build()
 }
 
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, busy: bool, avatars: &[(String, String)]) -> tauri::Result<Menu<R>> {
+/// Size ▸ the presets, then zoom in / out / actual size (also ⌘+ / ⌘− / ⌘0 on the creature).
+fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri::Result<tauri::menu::Submenu<R>> {
+    let mut sub = SubmenuBuilder::new(app, w.get("menu.size"));
+    for (value, label) in [("small", "menu.size.small"), ("medium", "menu.size.medium"), ("large", "menu.size.large")] {
+        let item = CheckMenuItemBuilder::with_id(format!("pref:size:{value}"), w.get(label))
+            .checked(prefs["size"] == value)
+            .build(app)?;
+        sub = sub.item(&item);
+    }
+    sub.separator()
+        .item(&MenuItemBuilder::with_id("zoom:in", w.get("menu.zoomIn")).accelerator("CmdOrCtrl+=").build(app)?)
+        .item(&MenuItemBuilder::with_id("zoom:out", w.get("menu.zoomOut")).accelerator("CmdOrCtrl+-").build(app)?)
+        .item(&MenuItemBuilder::with_id("zoom:reset", w.get("menu.zoomReset")).accelerator("CmdOrCtrl+0").build(app)?)
+        .build()
+}
+
+/// The menu. With the chat off (the default), its entries are replaced by one native
+/// "Enable chat…", which asks for confirmation — the page cannot turn it on.
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)]) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
-    let stop = MenuItemBuilder::with_id("chat:stop", w.get("menu.stopAnswering")).enabled(busy).build(app)?;
-    MenuBuilder::new(app)
-        .item(&item("chat:open", "menu.talk")?)
-        .item(&stop)
-        .item(&item("chat:new", "menu.newConversation")?)
-        .item(&radio(app, &w, prefs, "chatModel", "menu.chatModel",
-            &[("default", "menu.model.default"), ("sonnet", "menu.model.sonnet"), ("haiku", "menu.model.haiku")])?)
-        .item(&item("chat:folder", "menu.openChatFolder")?)
-        .separator()
+    let mut menu = MenuBuilder::new(app);
+    if chat_on {
+        let stop = MenuItemBuilder::with_id("chat:stop", w.get("menu.stopAnswering")).enabled(busy).build(app)?;
+        menu = menu
+            .item(&item("chat:open", "menu.talk")?)
+            .item(&stop)
+            .item(&item("chat:new", "menu.newConversation")?)
+            .item(&radio(app, &w, prefs, "chatModel", "menu.chatModel",
+                &[("default", "menu.model.default"), ("sonnet", "menu.model.sonnet"), ("haiku", "menu.model.haiku")])?)
+            .item(&item("chat:folder", "menu.openChatFolder")?)
+            .item(&item("chat:disable", "menu.disableChat")?);
+    } else {
+        menu = menu.item(&item("chat:enable", "menu.enableChat")?);
+    }
+    menu.separator()
+        .item(&item("settings:open", "menu.settings")?)
         .item(&avatar_menu(app, &w, prefs, avatars)?)
         .item(&radio(app, &w, prefs, "temperament", "menu.temperament",
             &[("zen", "menu.temperament.zen"), ("normal", "menu.temperament.normal"), ("nervous", "menu.temperament.nervous")])?)
-        .item(&radio(app, &w, prefs, "size", "menu.size",
-            &[("small", "menu.size.small"), ("medium", "menu.size.medium"), ("large", "menu.size.large")])?)
+        .item(&size_menu(app, &w, prefs)?)
         .item(&toggle(app, &w, prefs, "showSessions", "menu.sessionPastilles")?)
         .item(&toggle(app, &w, prefs, "paused", "menu.pause")?)
         .separator()
