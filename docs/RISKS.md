@@ -63,7 +63,11 @@ A creature on screen all day that burns 3% CPU is a worse tool than no creature.
 
 - **Mitigation:** CSS/SVG animations only (compositor-driven, no JS rAF loop); the daemon
   ticks at 100 ms only while events are flowing and drops to 1 s when idle; the webview
-  pauses animations on `IDLE`.
+  pauses animations on `IDLE`. The state → animation bindings compile from data
+  (`web/behavior.js`, docs/MOTION.md); the compiler never emits `animation-play-state` or
+  `!important` (test-pinned), so the pause rules keep covering every binding, avatar-defined
+  ones included, and `IDLE` itself binds **no** animation (rest pose, nothing to pause).
+  Enter one-shots and kid spawn/despawn ride `animationend` — no timers.
 - **Budget:** < 1% CPU idle, < 60 MB for the widget.
 - **Measured 2026-10-03 (MacBook Air M1, 4 processes: widget + 3 WebKit XPC):** with the
   breathing animation still looping in `IDLE`, **~8.5% CPU / ~64 MB** — macOS recomposites
