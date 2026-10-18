@@ -3,6 +3,7 @@
   "id": "saint-valentin",
   "name": "Saint-Valentin",
   "author": "claude-pet",
+  "license": "MIT",
   "version": "1.0.0",
   "kind": "svg",
   "svg": "creature.svg",

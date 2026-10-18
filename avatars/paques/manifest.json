@@ -3,6 +3,7 @@
   "id": "paques",
   "name": "Pâques",
   "author": "claude-pet",
+  "license": "MIT",
   "version": "1.0.0",
   "kind": "svg",
   "svg": "creature.svg",

@@ -220,6 +220,11 @@ pub fn check_manifest(m: &Value) -> Result<Vec<String>, String> {
         Some(n) if !n.is_empty() && n.chars().count() <= 60 => {}
         _ => return Err("\"name\" is required (1-60 characters)".into()),
     }
+    if !m["license"].is_null()
+        && !m["license"].as_str().is_some_and(|l| !l.is_empty() && l.chars().count() <= 40)
+    {
+        return Err("\"license\" must be 1-40 characters (an SPDX identifier)".into());
+    }
     let mut files: Vec<String> = vec![];
     let mut add = |field: &str, name: &Value, exts: &[&str]| -> Result<(), String> {
         let n = name.as_str().filter(|n| valid_file(n, exts)).ok_or(format!("{field}: not a plain file name with an allowed extension"))?;
@@ -305,7 +310,8 @@ pub fn list(root: &Path) -> Vec<Value> {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect()
             }).unwrap_or_default();
-            (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "names": names, "author": m["author"], "kind": m["kind"] }))
+            (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "names": names, "author": m["author"],
+                                                       "kind": m["kind"], "version": m["version"], "license": m["license"] }))
         })
         .collect();
     out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
@@ -530,6 +536,23 @@ mod tests {
             r#"{{"format":1,"id":"demo","name":"Demo","kind":"images","states":{{"IDLE":"idle.png"}},"animations":{animations}}}"#
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn license_is_loosely_checked_and_listed_with_the_version() {
+        let root = tmp_root("lic");
+        let pkg = root.join("demo.claudepet");
+        let manifest = br#"{"format":1,"id":"demo","name":"Demo","license":"MIT","version":"2.0.0","kind":"images","states":{"IDLE":"idle.png"}}"#;
+        zip_of(&pkg, &[("manifest.json", manifest), ("idle.png", PNG)]);
+        import(&root, &pkg).unwrap();
+        let listed = list(&root);
+        assert_eq!(listed[0]["version"], "2.0.0");
+        assert_eq!(listed[0]["license"], "MIT");
+        let bad: Value = serde_json::from_str(
+            r#"{"format":1,"id":"demo","name":"Demo","license":42,"kind":"images","states":{"IDLE":"idle.png"}}"#,
+        )
+        .unwrap();
+        assert!(check_manifest(&bad).unwrap_err().contains("license"));
     }
 
     #[test]

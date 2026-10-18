@@ -32,6 +32,7 @@ export type Manifest = {
   name: string;
   author?: string;
   version?: string;
+  license?: string;
   kind: Kind;
   states?: Record<string, string>;
   svg?: string;
@@ -64,6 +65,7 @@ export function checkManifest(raw: unknown, errors: string[]): { manifest: Manif
   if (!str(m.name, 60)) errors.push('"name" is required (1-60 characters)');
   if (m.author !== undefined && !str(m.author, 60)) errors.push('"author" must be 1-60 characters');
   if (m.version !== undefined && !str(m.version, 20)) errors.push('"version" must be 1-20 characters');
+  if (m.license !== undefined && !str(m.license, 40)) errors.push('"license" must be 1-40 characters (an SPDX identifier, e.g. "MIT")');
 
   const files: string[] = [];
   const fileRef = (field: string, name: unknown, exts: string[]) => {

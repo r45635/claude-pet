@@ -3,6 +3,7 @@
   "id": "ghost",
   "name": "Ghost",
   "author": "claude-pet",
+  "license": "MIT",
   "version": "1.1.0",
   "kind": "images",
   "states": {
@@ -15,9 +16,23 @@
   "animations": {
     "profile": "floaty",
     "states": {
-      "ERROR": { "enter": { "keyframes": "flicker", "dur": 450 } },
-      "HIGH_LOAD": { "keyframes": "bob", "dur": 700, "amp": 2 }
+      "ERROR": {
+        "enter": {
+          "keyframes": "flicker",
+          "dur": 450
+        }
+      },
+      "HIGH_LOAD": {
+        "keyframes": "bob",
+        "dur": 700,
+        "amp": 2
+      }
     }
   },
-  "hitbox": { "cx": 80, "cy": 86, "rx": 46, "ry": 58 }
+  "hitbox": {
+    "cx": 80,
+    "cy": 86,
+    "rx": 46,
+    "ry": 58
+  }
 }
