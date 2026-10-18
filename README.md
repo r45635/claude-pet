@@ -133,6 +133,7 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 | [`RISKS.md`](docs/RISKS.md) | eleven risks, each with a mitigation and a guard |
 | [`ROADMAP.md`](docs/ROADMAP.md) | the phase order and why it survives this machine |
 | [`PRIVACY.md`](docs/PRIVACY.md) | what is never read, what is reduced, how it is enforced |
+| [`CONFIG.md`](docs/CONFIG.md) | every setting, where to change it, ranges, languages, environment |
 | [`AVATARS.md`](docs/AVATARS.md) | make your own creature: the `.claudepet` format, states, the SVG contract, safety |
 
 ## Requirements
@@ -170,11 +171,21 @@ does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avata
 
 ## Talk to it
 
-Click the creature: a bubble opens; type (or use macOS dictation) and press Enter. The widget
-runs your own `claude` CLI headless in `~/.claude-pet/chat`, one continuous conversation,
-answer streamed into the bubble — and the creature animates from that session like any
-other. It is a **full agent** (`--permission-mode auto`): see `docs/RISKS.md` §10. Drag to
-move, right-click for the menu (New conversation, Chat model, Stop, …).
+**Off by default.** Right-click → **Enable chat…** (a native confirmation explains the risk),
+then click the creature: a bubble opens; type (or use macOS dictation) and press Enter. The
+widget runs your own `claude` CLI headless in `~/.claude-pet/chat`, one continuous
+conversation, answer streamed into the bubble — and the creature animates from that session
+like any other. It is a **full agent** (`--permission-mode auto`): see `docs/RISKS.md` §10.
+The page can switch it off but never on. Drag to move, right-click for the menu.
+
+## Settings and languages
+
+Right-click → **Settings…**: language (English, French — follows macOS by default), theme,
+reduce motion, start at login, avatar, size (nominal × zoom within min/max, ⌘+ / ⌘− / ⌘0),
+opacity, always on top, temperament, storm threshold, sensors, chat. Everything is one file,
+`~/.claude-pet/config.json`, editable by hand and applied live — an unreadable file is never
+overwritten, out-of-range values are ignored and reported. Every setting:
+[`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Wiring into Claude Code
 
