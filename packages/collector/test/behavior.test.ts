@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-ignore — a plain browser module, typed by its JSDoc only.
-import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior } from '../../../apps/widget/web/behavior.js';
+import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, enterStates, enterNames } from '../../../apps/widget/web/behavior.js';
 
 const lines = (css: string): string[] =>
   css.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).sort();
@@ -22,6 +22,13 @@ const CLASSIC_RULES = [
   '.critter.mini:not(.walking)[data-state="DONE"] { animation: cheer calc(1.6s * var(--k, 1)) cubic-bezier(.3, 0, .25, 1) infinite; }',
   '.critter.mini.walking.lean-l { animation: step-l calc(.3s * var(--k, 1)) ease-in-out infinite; }',
   '.critter.mini.walking.lean-r { animation: step-r calc(.3s * var(--k, 1)) ease-in-out infinite; }',
+  // Added by the behavior layer, not inherited from the old stylesheet: the IDLE rest
+  // pose, the DONE/ERROR enter one-shots, and the kid lifecycle.
+  '.critter[data-state="IDLE"] .body { animation: none; }',
+  '.critter[data-state="ERROR"].enter { animation: flinch .3s ease-out 1; }',
+  '.critter[data-state="DONE"].enter { animation: hop .5s ease-out 1; }',
+  '.critter.mini.spawn:not(.walking) { animation: spawn-in .35s ease-out 1; }',
+  '.critter.mini.despawn:not(.walking) { animation: despawn-out .3s ease-in 1 forwards; }',
 ].sort();
 
 test('compile: the default behavior is the exact CSS it replaced', () => {
@@ -47,11 +54,44 @@ test('compile: an avatar scope qualifies every selector', () => {
   assert.ok(!css.includes(' .critter.mini'), 'no unscoped mini selector may leak');
 });
 
-test('compile: the keyframe-name mapper is applied everywhere', () => {
+test('compile: the keyframe-name mapper reaches loops, gestures, walk and enters', () => {
   const css = compileBehavior(DEFAULT_BEHAVIOR, '', (n: string) => `av-x-${n}`);
   assert.ok(css.includes('animation: av-x-breathe '));
   assert.ok(css.includes('animation: av-x-step-l '));
-  assert.ok(!/animation: (?!av-x-)/.test(css));
+  assert.ok(css.includes('animation: av-x-hop '));
+  assert.ok(css.includes('animation: av-x-shake '));
+  // Only `animation: none` (the rest pose) and the fixed lifecycle escape the mapper.
+  const unmapped = [...css.matchAll(/animation: (?!av-x-)([\w-]+)/g)].map((m) => m[1]).sort();
+  assert.deepEqual([...new Set(unmapped)], ['despawn-out', 'none', 'spawn-in']);
+});
+
+test('compile: IDLE with no loop switches the every-state loop off', () => {
+  const css = compileBehavior(DEFAULT_BEHAVIOR);
+  assert.ok(css.includes('.critter[data-state="IDLE"] .body { animation: none; }'));
+});
+
+test('compile: an enter one-shot outranks its state loop and never loops', () => {
+  const css = compileBehavior({
+    states: {
+      '*': { loop: { target: 'body', kf: 'bob', dur: 1000 } },
+      DONE: { enter: { target: 'body', kf: 'tip', dur: 900, count: 2 } },
+    },
+  });
+  assert.ok(css.includes('.critter[data-state="DONE"].enter .body { animation: tip .9s ease 2; }'));
+  assert.ok(!css.includes('tip .9s ease infinite'));
+});
+
+test('compile: the kid lifecycle is widget-owned, never avatar-scoped', () => {
+  const scoped = compileBehavior(DEFAULT_BEHAVIOR, '.critter[data-avatar="ghost"]');
+  assert.ok(!scoped.includes('spawn-in'));
+  assert.ok(!scoped.includes('despawn-out'));
+  assert.ok(scoped.includes('.critter[data-avatar="ghost"][data-state="DONE"].enter { animation: hop .5s ease-out 1; }'));
+});
+
+test('enterStates/enterNames: the states that play an enter, and the names that end one', () => {
+  assert.deepEqual([...enterStates(DEFAULT_BEHAVIOR)].sort(), ['DONE', 'ERROR']);
+  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR)].sort(), ['flinch', 'hop']);
+  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR, (n: string) => `av-g-${n}`)].sort(), ['av-g-flinch', 'av-g-hop']);
 });
 
 test('compile: an unknown target is dropped, not guessed', () => {

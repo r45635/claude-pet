@@ -142,7 +142,9 @@
      family's tempo (from its session's load). A family where everyone sleeps is fully
      still: no timer, no animation (the idle CPU budget, docs/RISKS.md #6). */
   .kid-slot { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
-  .critter.mini { transform-box: fill-box; transform-origin: 50% 100%; }
+  /* Enter one-shots and the kid lifecycle animate the critter root, so every critter
+     transforms around its feet, not the viewBox origin. */
+  .critter { transform-box: fill-box; transform-origin: 50% 100%; }
   /* Same colour as the parent: a dark rim keeps a kid readable when it walks past it. */
   .critter.mini .shell { stroke: rgba(20, 22, 28, .6); stroke-width: 7; paint-order: stroke; }
   @keyframes step-l { 0%, 100% { transform: rotate(-9deg) translateY(0) scale(1.06, .94); }
@@ -158,11 +160,17 @@
   @keyframes cheer { 0%, 100% { transform: translateY(0) scale(1, 1); } 14% { transform: scale(1.18, .82); }
                      40% { transform: translateY(-90px) scale(.9, 1.12); } 58% { transform: translateY(-90px) rotate(360deg); }
                      74% { transform: translateY(0) scale(1.14, .86) rotate(360deg); } 86% { transform: rotate(360deg); } }
+  /* Enter one-shots (behavior.js binds them; the .enter class lasts exactly one play):
+     a small squash-and-hop for DONE, a recoil for ERROR. Kids appearing and leaving
+     grow from / sink into their feet. All transform/opacity only. */
+  @keyframes hop { 0%, 100% { transform: translateY(0) scale(1, 1); } 20% { transform: translateY(2px) scale(1.06, .94); }
+                   55% { transform: translateY(-14px) scale(.97, 1.04); } 80% { transform: translateY(0) scale(1.03, .97); } }
+  @keyframes flinch { 0%, 100% { transform: translate(0, 0) rotate(0); } 25% { transform: translate(-3px, 1px) rotate(-3deg); }
+                      60% { transform: translate(2px, 0) rotate(2deg); } }
+  @keyframes spawn-in { 0% { transform: scale(.2); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; }
+                        100% { transform: scale(1); opacity: 1; } }
+  @keyframes despawn-out { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(.3); opacity: 0; } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
-  @media (prefers-reduced-motion: reduce) {
-    .critter.mini { animation: none !important; }
-    .kid-slot { transition-duration: 0s !important; }
-  }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
   /* In the widget the window itself is the frame: no backdrop, no gap, nothing to scroll. */
@@ -462,7 +470,7 @@
 
 <script type="module">
   import { buildImageProto, buildSvgProto, scopeCss, resolveStates, DEFAULT_GEO } from './avatar.js';
-  import { DEFAULT_BEHAVIOR, compileBehavior } from './behavior.js';
+  import { DEFAULT_BEHAVIOR, compileBehavior, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
@@ -667,6 +675,39 @@
   let animatingNow = false;
   const animating = () => animatingNow;
 
+  // ---- enter one-shots --------------------------------------------------------------
+  // Entering a state may play a short animation: the .enter class lives exactly as long
+  // as that animation. One delegated listener takes it off — event-driven, no timer
+  // (docs/MOTION.md). The kid lifecycle classes (.spawn/.despawn) ride the same events.
+  const entering = enterStates(DEFAULT_BEHAVIOR);
+  const enterKfs = enterNames(DEFAULT_BEHAVIOR);
+  function setState(el, state) {
+    if (!el || el.getAttribute('data-state') === state) return;
+    el.setAttribute('data-state', state);
+    el.classList.remove('enter', 'spawn'); // never leave a one-shot frozen on a stale state
+    if (animatingNow && !motionReduced && entering.has(state)) el.classList.add('enter');
+  }
+  function onMotionEnd(e) {
+    if (enterKfs.has(e.animationName)) e.target.closest('.critter')?.classList.remove('enter');
+    else if (e.animationName === 'spawn-in') e.target.closest('.critter')?.classList.remove('spawn');
+    else if (e.animationName === 'despawn-out') e.target.closest('.kid-slot')?.remove();
+  }
+  pet.addEventListener('animationend', onMotionEnd);
+  pet.addEventListener('animationcancel', onMotionEnd);
+  /** A leaving kid plays out in a group of its own; any rebuild wipes it with the rest. */
+  function despawn(w) {
+    if (!animatingNow || motionReduced || !w.el || !w.slot) return;
+    w.el.classList.remove('walking', 'lean-l', 'lean-r', 'enter', 'spawn');
+    w.el.classList.add('despawn');
+    let gone = crittersLayer.querySelector(':scope > .leaving');
+    if (!gone) {
+      gone = document.createElementNS(SVG_NS, 'g');
+      gone.setAttribute('class', 'leaving');
+      crittersLayer.appendChild(gone);
+    }
+    gone.appendChild(w.slot);
+  }
+
   // Try every number of columns; keep the one where families come out biggest.
   function layoutCells(n, G, H) {
     let best = { f: 0, cols: 1, rows: 1 };
@@ -742,10 +783,12 @@
             const el = critter(id, true, t('subagent.tooltip', { type: a.type ?? t('subagent.unknown') }));
             let w = walkers.get(id);
             if (!w) {
-              // A newcomer starts at a random spot around its parent.
+              // A newcomer starts at a random spot around its parent, growing from its
+              // feet — unless it would be born frozen (asleep kids skip the entrance).
               const { x0: ax, x1: bx, y0: ay, y1: by } = CELL.area;
               w = { family: g.id, x: ax + Math.random() * (bx - ax), y: ay + Math.random() * (by - ay), timer: 0 };
               walkers.set(id, w);
+              if (animatingNow && !motionReduced && (asleep ? 'IDLE' : a.state) !== 'IDLE') el.classList.add('spawn');
             }
             stopWalker(w);
             el.classList.remove('walking');
@@ -766,17 +809,17 @@
         });
       }
       for (const id of [...critterEls.keys()]) if (!keepCritters.has(id)) critterEls.delete(id);
-      for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); }
+      for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); despawn(w); }
     }
 
     for (const g of groups) {
-      critterEls.get(`s:${g.id}`)?.setAttribute('data-state', g.state);
+      setState(critterEls.get(`s:${g.id}`), g.state);
       const states = [g.state];
       for (const a of g.agents.slice(0, MAX_KIDS)) {
         const state = asleep ? 'IDLE' : a.state;
         states.push(state);
         const id = `a:${g.id}:${a.id}`;
-        critterEls.get(id)?.setAttribute('data-state', state);
+        setState(critterEls.get(id), state);
         // A kid that starts doing something again sets off on its next walk.
         const w = walkers.get(id);
         if (w && !w.timer && WANDERS.has(state) && animatingNow) schedule(id, 400 + Math.random() * 800);

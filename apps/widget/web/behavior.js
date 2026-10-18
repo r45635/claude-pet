@@ -33,8 +33,15 @@
 export const DEFAULT_BEHAVIOR = {
   states: {
     '*': { loop: { target: 'body', kf: 'breathe', dur: 'auto', ease: 'ease-in-out' } },
+    // Asleep = at rest, not frozen mid-breath: no loop at all snaps the body back to
+    // its drawn pose (the pause rules in index.html still freeze everything else).
+    IDLE: { loop: null },
     HIGH_LOAD: { also: { target: 'shaker', kf: 'shake', dur: 120, ease: 'linear' } },
-    ERROR: { also: { target: 'shaker', kf: 'shake', dur: 400, ease: 'linear' } },
+    ERROR: {
+      also: { target: 'shaker', kf: 'shake', dur: 400, ease: 'linear' },
+      enter: { target: 'root', kf: 'flinch', dur: 300, ease: 'ease-out' },
+    },
+    DONE: { enter: { target: 'root', kf: 'hop', dur: 500, ease: 'ease-out' } },
   },
   mini: {
     READING: { kf: 'nod', dur: 2400, ease: 'ease-in-out' },
@@ -104,14 +111,28 @@ export function mergeBehavior(base, override) {
  */
 export function compileBehavior(behavior, scope = '', kfName = (n) => n) {
   const out = [];
-  const motion = (m, tempo) =>
-    `animation: ${kfName(m.kf)} ${durText(m.dur, tempo)} ${m.ease ?? 'ease'} infinite;`;
+  const motion = (m, tempo, count = 'infinite') =>
+    `animation: ${kfName(m.kf)} ${durText(m.dur, tempo)} ${m.ease ?? 'ease'} ${count};`;
 
+  const starTarget = behavior.states?.['*']?.loop?.target ?? null;
   for (const [state, entry] of Object.entries(behavior.states ?? {})) {
     if (!entry) continue;
+    // `loop: null` on a state switches the every-state loop off there: the element
+    // returns to its drawn rest pose instead of freezing mid-cycle.
+    if (state !== '*' && 'loop' in entry && entry.loop === null && starTarget) {
+      out.push(`${critterSel(state, starTarget, scope)} { animation: none; }`);
+    }
     for (const m of [entry.loop, entry.also]) {
       if (!m || !((m.target ?? 'root') in TARGETS)) continue; // unknown target: drop, never guess
       out.push(`${critterSel(state, m.target ?? 'root', scope)} { ${motion(m, false)} }`);
+    }
+    // The enter one-shot plays while the short-lived .enter class is on (index.html
+    // removes it on animationend). Its selector outranks the same state's loop, so
+    // "anticipation, then the loop" is sequenced by CSS alone.
+    const e = entry.enter;
+    if (e && state !== '*' && (e.target ?? 'root') in TARGETS) {
+      const base = `${scope || '.critter'}[data-state="${state}"].enter`;
+      out.push(`${base}${TARGETS[e.target ?? 'root']} { ${motion(e, false, String(e.count ?? 1))} }`);
     }
   }
 
@@ -127,5 +148,34 @@ export function compileBehavior(behavior, scope = '', kfName = (n) => n) {
     out.push(`${mini}.walking.${side} { ${motion(m, true)} }`);
   }
 
+  // Kid lifecycle (fixed, not an avatar surface): last in the sheet so it outranks the
+  // gesture rules above at equal specificity while the .spawn/.despawn class is on.
+  if (!scope) {
+    out.push(`${mini}.spawn:not(.walking) { animation: spawn-in .35s ease-out 1; }`);
+    out.push(`${mini}.despawn:not(.walking) { animation: despawn-out .3s ease-in 1 forwards; }`);
+  }
+
   return `${out.join('\n')}\n`;
+}
+
+/** The states whose arrival plays an enter one-shot. */
+export function enterStates(behavior) {
+  return new Set(
+    Object.entries(behavior.states ?? {})
+      .filter(([state, entry]) => state !== '*' && entry?.enter)
+      .map(([state]) => state),
+  );
+}
+
+/**
+ * The animation names whose end means "take the .enter class off" — the delegated
+ * animationend listener in index.html ignores every other animation.
+ */
+export function enterNames(behavior, kfName = (n) => n) {
+  return new Set(
+    Object.values(behavior.states ?? {})
+      .map((entry) => entry?.enter?.kf)
+      .filter(Boolean)
+      .map((kf) => kfName(kf)),
+  );
 }
