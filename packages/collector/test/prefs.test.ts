@@ -180,3 +180,12 @@ test('size: zooming a file that still has the old size keeps that size (regressi
   const px = applyPatch({ ui: { sizePx: 180 } }, validatePatch({ opacity: 0.5 }) as never);
   assert.deepEqual(px.ui, { size: { nominalPx: 180 }, opacity: 0.5 });
 });
+
+test('native-only: the schema decides which writes need the native side', async () => {
+  const { nativeOnlyKey } = await import('../src/prefs.ts');
+  assert.equal(nativeOnlyKey({ chatEnabled: true }), 'chatEnabled', 'turning the chat on');
+  assert.equal(nativeOnlyKey({ chatEnabled: false }), null, 'the page may turn it off');
+  assert.equal(nativeOnlyKey({ position: { x: 1, y: 2 } }), 'position');
+  assert.equal(nativeOnlyKey({ avatar: 'ghost', zoom: 1.2 }), null);
+  assert.equal(nativeOnlyKey(null), null);
+});

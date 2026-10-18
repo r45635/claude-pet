@@ -40,6 +40,20 @@ export type Spec = {
 export const SPECS = SCHEMA.prefs as Spec[];
 const SPEC = new Map(SPECS.map((s) => [s.key, s]));
 
+/**
+ * The first key in `patch` that only the native side may write — a `nativeOnly` setting,
+ * or `true` for a `nativeOnlyTrue` one — or null. The daemon refuses such a patch unless
+ * the request is native (daemon.ts, isNative): the page holds the token too.
+ */
+export function nativeOnlyKey(patch: unknown): string | null {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return null;
+  for (const [key, value] of Object.entries(patch)) {
+    const spec = SPEC.get(key);
+    if (spec?.nativeOnly || (spec?.nativeOnlyTrue && value === true)) return key;
+  }
+  return null;
+}
+
 // ---- size: nominal × zoom, kept between min and max ----------------------------------------
 export const SIZES = ['small', 'medium', 'large'] as const;
 export type Size = (typeof SIZES)[number];

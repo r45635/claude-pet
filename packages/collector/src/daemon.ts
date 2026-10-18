@@ -27,7 +27,7 @@ import { existsSync, watch } from 'node:fs';
 import { mergeConfig } from '@claude-pet/core';
 import { CONFIG_FILE, REFERENCE_FILE } from './paths.ts';
 import { writeReference } from './reference.ts';
-import { applyPatch, ConfigFileError, prefsOf, readUserFile, sanitizeEngine, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
+import { applyPatch, ConfigFileError, nativeOnlyKey, prefsOf, readUserFile, sanitizeEngine, validatePatch, writeUserFile, type Prefs } from './prefs.ts';
 import { setLaunchAtLogin } from './login.ts';
 import { STANDALONE, VERSION } from './entry.ts';
 import { LOCAL_BUILD } from './widget.ts';
@@ -136,6 +136,12 @@ async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<
     res.end(JSON.stringify(patch));
     return;
   }
+  const nativeKey = nativeOnlyKey(patch);
+  if (nativeKey && !isNative(req)) {
+    res.writeHead(403, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'native_only', key: nativeKey }));
+    return;
+  }
   let current: ReturnType<typeof readUserFile>;
   try {
     current = readUserFile();
@@ -188,6 +194,18 @@ function authorized(url: URL): boolean {
   return url.searchParams.get('token') === TOKEN;
 }
 
+/**
+ * The token proves "on this Mac", not "not the page": the widget's page holds it too. What
+ * only the native side may do (turn the chat on, consent to an unsigned update…) also
+ * requires this header, which Rust's localhost client sends (src-tauri/src/daemon.rs). A
+ * webview cannot attach a custom header to a cross-origin request without a CORS
+ * preflight, and the daemon refuses every preflight — so the page can never send it.
+ */
+const NATIVE_HEADER = 'x-claude-pet-native';
+function isNative(req: IncomingMessage): boolean {
+  return req.headers[NATIVE_HEADER] === '1';
+}
+
 function handle(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
 
@@ -195,6 +213,13 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // without this header EventSource is blocked as cross-origin. Wildcard is safe here:
   // CORS only decides who may *read* a response, and the token still gates every route.
   res.setHeader('access-control-allow-origin', '*');
+  // No preflight is ever granted: that is what keeps custom headers (isNative) out of the
+  // page's reach. Nothing legitimate needs one — the page only reads, via EventSource.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
 
   if (!authorized(url)) {
     res.writeHead(401, { 'content-type': 'application/json' });
