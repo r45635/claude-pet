@@ -171,6 +171,16 @@
                       60% { transform: translate(2px, 0) rotate(2deg); } }
   @keyframes spawn-in { 0% { transform: scale(.2); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; }
                         100% { transform: scale(1); opacity: 1; } }
+  /* perk = attention on WAITING (anticipation squash, then a lift); brace = the squash
+     before a storm's shaking; bob and drift-* are the floaty profile's loop and glide
+     (bob deepens with load like breathe does). */
+  @keyframes perk { 0%, 100% { transform: translateY(0) scale(1, 1); } 25% { transform: translateY(1px) scale(1.04, .96); }
+                    60% { transform: translateY(-7px) scale(.98, 1.03) rotate(2deg); } }
+  @keyframes brace { 0%, 100% { transform: translateY(0) scale(1, 1); } 40% { transform: translateY(2px) scale(1.08, .9); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0) rotate(-1deg); }
+                   50% { transform: translateY(calc(var(--amp, .03) * var(--amp-k, 1) * -90px)) rotate(1deg); } }
+  @keyframes drift-l { 0%, 100% { transform: rotate(-6deg) translateY(-2px); } 50% { transform: rotate(-7deg) translateY(-8px); } }
+  @keyframes drift-r { 0%, 100% { transform: rotate(6deg) translateY(-2px); } 50% { transform: rotate(7deg) translateY(-8px); } }
   @keyframes despawn-out { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(.3); opacity: 0; } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }

@@ -91,6 +91,7 @@ the manifest — no widget code involved:
 ```json
 "css": "skin.css",
 "animations": {
+  "profile": "floaty",
   "states": {
     "THINKING": { "keyframes": "bob", "dur": 2600, "ease": "ease-in-out", "amp": 1.2 },
     "CODING":   { "keyframes": "wiggle", "dur": "auto" },
@@ -101,10 +102,12 @@ the manifest — no widget code involved:
 }
 ```
 
+- **`profile`** — the base feel: `classic` (squash and stretch), `floaty` (glides and bobs,
+  never stomps — the shipped `ghost` uses it), or `mechanical` (stepped, hard, no squash).
 - **`keyframes`** — a name from your `skin.css`, or a built-in: `breathe`, `shake`, `nod`,
-  `tap`, `hammer`, `float`, `cheer`, `hop`, `flinch`, `step-l`, `step-r`. It replaces the
-  default loop for that state; `null` means *no loop* (the pose itself). The widget's defaults
-  stay wherever you say nothing.
+  `tap`, `hammer`, `float`, `cheer`, `hop`, `flinch`, `perk`, `brace`, `bob`, `drift-l`,
+  `drift-r`, `step-l`, `step-r`. It replaces the default loop for that state; `null` means
+  *no loop* (the pose itself). The widget's defaults stay wherever you say nothing.
 - **`target`** — what moves: `body` (the default; breathes today), `shaker` (shakes in storms),
   `eyes`, or `root` (the whole creature — enters default to it).
 - **`dur`** — whole milliseconds (80–10000), or `"auto"`: the widget's load-driven speed.

@@ -36,11 +36,15 @@ export const DEFAULT_BEHAVIOR = {
     // Asleep = at rest, not frozen mid-breath: no loop at all snaps the body back to
     // its drawn pose (the pause rules in index.html still freeze everything else).
     IDLE: { loop: null },
-    HIGH_LOAD: { also: { target: 'shaker', kf: 'shake', dur: 120, ease: 'linear' } },
+    HIGH_LOAD: {
+      also: { target: 'shaker', kf: 'shake', dur: 120, ease: 'linear' },
+      enter: { target: 'shaker', kf: 'brace', dur: 240, ease: 'ease-in' },
+    },
     ERROR: {
       also: { target: 'shaker', kf: 'shake', dur: 400, ease: 'linear' },
       enter: { target: 'root', kf: 'flinch', dur: 300, ease: 'ease-out' },
     },
+    WAITING: { enter: { target: 'root', kf: 'perk', dur: 350, ease: 'ease-out' } },
     DONE: { enter: { target: 'root', kf: 'hop', dur: 500, ease: 'ease-out' } },
   },
   mini: {
@@ -56,9 +60,62 @@ export const DEFAULT_BEHAVIOR = {
   },
 };
 
-/** Motion profiles: the same map shaped for a different character feel. */
+/**
+ * Motion profiles: the same map shaped for a different character feel. An avatar picks
+ * one with `"animations": { "profile": … }` and overrides single states on top.
+ */
 export const PROFILES = {
   classic: DEFAULT_BEHAVIOR,
+  // Weightless: everything glides and bobs, nothing stomps — ghosts, jellyfish, balloons.
+  floaty: {
+    states: {
+      '*': { loop: { target: 'body', kf: 'bob', dur: 'auto', ease: 'ease-in-out' } },
+      IDLE: { loop: null },
+      HIGH_LOAD: { also: { target: 'shaker', kf: 'shake', dur: 260, ease: 'ease-in-out' } },
+      ERROR: {
+        also: { target: 'shaker', kf: 'shake', dur: 520, ease: 'ease-in-out' },
+        enter: { target: 'root', kf: 'flinch', dur: 420, ease: 'ease-out' },
+      },
+      WAITING: { enter: { target: 'root', kf: 'perk', dur: 500, ease: 'ease-out' } },
+      DONE: { enter: { target: 'root', kf: 'hop', dur: 700, ease: 'ease-out' } },
+    },
+    mini: {
+      READING: { kf: 'bob', dur: 3000, ease: 'ease-in-out' },
+      CODING: { kf: 'bob', dur: 1400, ease: 'ease-in-out' },
+      TOOL_CALL: { kf: 'bob', dur: 1000, ease: 'ease-in-out' },
+      THINKING: { kf: 'float', dur: 3200, ease: 'ease-in-out' },
+      DONE: { kf: 'hop', dur: 1800, ease: 'ease-in-out' },
+    },
+    walk: {
+      left: { kf: 'drift-l', dur: 520, ease: 'ease-in-out' },
+      right: { kf: 'drift-r', dur: 520, ease: 'ease-in-out' },
+    },
+  },
+  // A machine: stepped easing, hard short moves, no squash — robots, clockwork.
+  mechanical: {
+    states: {
+      '*': { loop: { target: 'body', kf: 'breathe', dur: 'auto', ease: 'steps(3, end)' } },
+      IDLE: { loop: null },
+      HIGH_LOAD: { also: { target: 'shaker', kf: 'shake', dur: 100, ease: 'steps(2, end)' } },
+      ERROR: {
+        also: { target: 'shaker', kf: 'shake', dur: 300, ease: 'steps(2, end)' },
+        enter: { target: 'root', kf: 'flinch', dur: 220, ease: 'steps(3, end)' },
+      },
+      WAITING: { enter: { target: 'root', kf: 'perk', dur: 240, ease: 'steps(2, end)' } },
+      DONE: { enter: { target: 'root', kf: 'hop', dur: 360, ease: 'steps(4, end)' } },
+    },
+    mini: {
+      READING: { kf: 'nod', dur: 2000, ease: 'steps(4, end)' },
+      CODING: { kf: 'tap', dur: 400, ease: 'steps(2, end)' },
+      TOOL_CALL: { kf: 'hammer', dur: 700, ease: 'steps(3, end)' },
+      THINKING: { kf: 'float', dur: 2400, ease: 'steps(6, end)' },
+      DONE: { kf: 'cheer', dur: 1500, ease: 'steps(8, end)' },
+    },
+    walk: {
+      left: { kf: 'step-l', dur: 240, ease: 'steps(2, end)' },
+      right: { kf: 'step-r', dur: 240, ease: 'steps(2, end)' },
+    },
+  },
 };
 
 const TARGETS = { root: '', shaker: ' .shaker', body: ' .body', eyes: ' .eyes' };
@@ -69,10 +126,11 @@ const TARGETS = { root: '', shaker: ' .shaker', body: ' .body', eyes: ' .eyes' }
  * (behavior.test.ts) keeps this copy honest — the page cannot import JSON on its own.
  */
 export const MOTION_RULES = {
-  profiles: ['classic'],
+  profiles: ['classic', 'floaty', 'mechanical'],
   targets: ['root', 'shaker', 'body', 'eyes'],
   keyframePattern: /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/,
-  builtinKeyframes: ['breathe', 'shake', 'nod', 'tap', 'hammer', 'float', 'cheer', 'hop', 'flinch', 'step-l', 'step-r'],
+  builtinKeyframes: ['breathe', 'shake', 'nod', 'tap', 'hammer', 'float', 'cheer', 'hop', 'flinch',
+                     'perk', 'brace', 'bob', 'drift-l', 'drift-r', 'step-l', 'step-r'],
   easings: ['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out'],
   bezierRange: [-0.5, 1.5],
   durMs: [80, 10000],

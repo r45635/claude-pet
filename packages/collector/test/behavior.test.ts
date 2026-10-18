@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { FORMAT } from '../src/avatar-format.ts';
 // @ts-ignore — a plain browser module, typed by its JSDoc only.
 import { DEFAULT_BEHAVIOR, PROFILES, MOTION_RULES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from '../../../apps/widget/web/behavior.js';
@@ -30,6 +32,8 @@ const CLASSIC_RULES = [
   '.critter[data-state="IDLE"] .body { animation: none; }',
   '.critter[data-state="ERROR"].enter { animation: flinch .3s ease-out 1; }',
   '.critter[data-state="DONE"].enter { animation: hop .5s ease-out 1; }',
+  '.critter[data-state="HIGH_LOAD"].enter .shaker { animation: brace .24s ease-in 1; }',
+  '.critter[data-state="WAITING"].enter { animation: perk .35s ease-out 1; }',
   '.critter.mini.spawn:not(.walking) { animation: spawn-in .35s ease-out 1; }',
   '.critter.mini.despawn:not(.walking) { animation: despawn-out .3s ease-in 1 forwards; }',
 ].sort();
@@ -92,9 +96,34 @@ test('compile: the kid lifecycle is widget-owned, never avatar-scoped', () => {
 });
 
 test('enterStates/enterNames: the states that play an enter, and the names that end one', () => {
-  assert.deepEqual([...enterStates(DEFAULT_BEHAVIOR)].sort(), ['DONE', 'ERROR']);
-  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR)].sort(), ['flinch', 'hop']);
-  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR, (n: string) => `av-g-${n}`)].sort(), ['av-g-flinch', 'av-g-hop']);
+  assert.deepEqual([...enterStates(DEFAULT_BEHAVIOR)].sort(), ['DONE', 'ERROR', 'HIGH_LOAD', 'WAITING']);
+  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR)].sort(), ['brace', 'flinch', 'hop', 'perk']);
+  assert.deepEqual([...enterNames(DEFAULT_BEHAVIOR, (n: string) => `av-g-${n}`)].sort(),
+    ['av-g-brace', 'av-g-flinch', 'av-g-hop', 'av-g-perk']);
+});
+
+test('profiles: floaty and mechanical compile clean and move differently', () => {
+  for (const name of ['floaty', 'mechanical']) {
+    const css = compileBehavior(PROFILES[name], '.critter[data-avatar="x"]');
+    assert.ok(!/animation-play-state|!important/i.test(css), name);
+    assert.ok(css.includes('[data-state="IDLE"] .body { animation: none; }'), `${name} rests in IDLE`);
+  }
+  assert.ok(compileBehavior(PROFILES.floaty).includes('animation: drift-l'), 'floaty glides instead of stepping');
+  assert.ok(compileBehavior(PROFILES.mechanical).includes('steps(2, end)'), 'mechanical steps');
+  assert.ok(!compileBehavior(PROFILES.floaty).includes('step-l'));
+});
+
+test('the shipped ghost: floaty profile plus its own flicker, end to end', () => {
+  const dir = join(import.meta.dirname, '..', '..', '..', 'avatars', 'ghost');
+  const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  const own: Set<string> = keyframeNames(readFileSync(join(dir, 'skin.css'), 'utf8'));
+  const { override, dropped } = behaviorFromManifest(manifest.animations, own);
+  assert.deepEqual(dropped, []);
+  const merged = mergeBehavior(PROFILES[manifest.animations.profile], override);
+  const css = compileBehavior(merged, '.critter[data-avatar="ghost"]', (n: string) => (own.has(n) ? `av-ghost-${n}` : n));
+  assert.ok(css.includes('.critter[data-avatar="ghost"][data-state="ERROR"].enter { animation: av-ghost-flicker .45s ease 1; }'));
+  assert.ok(css.includes('.critter[data-avatar="ghost"][data-state="HIGH_LOAD"] .body { animation: bob .7s ease infinite; --amp-k: 2; }'));
+  assert.ok(css.includes('animation: drift-l'), 'ghost kids glide');
 });
 
 test('compile: an unknown target is dropped, not guessed', () => {

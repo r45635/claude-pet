@@ -3,13 +3,21 @@
   "id": "ghost",
   "name": "Ghost",
   "author": "claude-pet",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "kind": "images",
   "states": {
     "IDLE": "idle.svg",
     "ACTIVE": "active.svg",
     "THINKING": "thinking.svg",
     "ERROR": "error.svg"
+  },
+  "css": "skin.css",
+  "animations": {
+    "profile": "floaty",
+    "states": {
+      "ERROR": { "enter": { "keyframes": "flicker", "dur": 450 } },
+      "HIGH_LOAD": { "keyframes": "bob", "dur": 700, "amp": 2 }
+    }
   },
   "hitbox": { "cx": 80, "cy": 86, "rx": 46, "ry": 58 }
 }
