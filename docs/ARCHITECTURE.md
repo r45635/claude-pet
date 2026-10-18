@@ -98,7 +98,7 @@ This differs from the brief's suggested tree in two ways, both deliberate:
 | **npm workspaces** | already installed (npm 11.6.2); pnpm/bun are absent on this machine |
 | **TypeScript run directly by Node 25** | `node file.ts` works via type stripping — verified. No build step, no bundler, no watch mode for collector/core |
 | **`node --test`** | native test runner, zero dev dependencies |
-| **`typescript` as the only devDependency** | `tsc --noEmit` for typechecking only |
+| **devDependencies: `typescript`, `@types/node`, `esbuild`** | `tsc --noEmit` for typechecking; `esbuild` only to bundle the standalone binary. Nothing from npm ships at runtime |
 | **`sh` + `jq` for hooks** | ~5 ms vs ~80 ms for Node — measured; see `CLAUDE_CODE_TELEMETRY.md` |
 | **Tauri 2** | brief preference; ~5 MB binary and a system WKWebView vs Electron's ~100 MB and its own Chromium. Needed for transparent/borderless/always-on-top/click-through, all first-class in Tauri's window config |
 | **localhost SSE for the UI** | `EventSource` is 3 lines in the webview, auto-reconnects, and is readable with `curl`. A Unix socket would need a Tauri-side bridge to reach the webview — more Rust for no gain |

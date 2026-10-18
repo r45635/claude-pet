@@ -252,4 +252,5 @@ process alone. The before/after series for the animation-behavior layer is recor
 
 ## License
 
-MIT
+MIT — © 2026 Vincent Cruvellier, see [LICENSE](LICENSE). The widget binary links
+third-party Rust crates under their own licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
