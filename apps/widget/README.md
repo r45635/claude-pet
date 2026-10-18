@@ -5,8 +5,13 @@
     `~/.claude-pet/endpoint.json` and renders it transparent;
   - any browser, as a Rust-free harness:
     `open "apps/widget/web/index.html#token=<token>&debug"`. Press `d` for the debug overlay.
-- `src-tauri/` — a transparent, undecorated, always-on-top 180×180 window, no Dock icon.
-  Its only capability is `start-dragging`: no fs, shell or network plugin.
+- `src-tauri/` — a transparent, undecorated, always-on-top window (the creature's square, larger
+  while chatting), no Dock icon. Webview permissions: `start-dragging`, `set-size`, `close` —
+  no fs, shell or network plugin; everything else goes through the app's own commands (chat,
+  menu, preferences, avatars, hit regions). A Content-Security-Policy allows only the app
+  itself, `data:` images, the local daemon and the IPC.
+- `web/avatar.js` — avatars: prototype builders, the SVG allow-list sanitizer, CSS scoping
+  (`docs/AVATARS.md`); `web/avatar-test.html` runs poisoned SVGs through it.
 
 ## Prebuilt
 
@@ -82,6 +87,6 @@ Every choice is written by the daemon to `~/.claude-pet/config.json` and applied
 as are hand edits to that file. Explicit engine overrides in the file always win over the
 temperament preset.
 
-Drag the creature anywhere to move it. Click-through
-(`window.setIgnoreCursorEvents(true)`) is Phase 5, behind a toggle, because a creature you
-cannot click is a creature you cannot move.
+Drag the creature anywhere to move it. Only what is drawn takes clicks: the page reports
+each creature's body, the why bubble, the tray and the open chat panel, and `src-tauri/src/hit.rs`
+follows the cursor and lets clicks fall through everywhere else in the window.
