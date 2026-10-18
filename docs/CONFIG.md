@@ -31,6 +31,8 @@ Generated from [`packages/collector/src/settings-schema.json`](../packages/colle
 | General | `ui.theme` | `system` · `light` · `dark` | `"system"` | panel, file | Colours of the bubble and the settings panel. |
 | General | `ui.reduceMotion` | `system` · `on` · `off` | `"system"` | panel, file | Stop every animation. system follows macOS's Reduce motion. |
 | General | `ui.launchAtLogin` | `true` · `false` | `true` | panel, file | Start the daemon and the creature when you log in. |
+| General | `ui.updates.check` | `true` · `false` | `true` | panel, file | Once a day, ask github.com whether a newer claude-pet (or avatar) exists. The request carries nothing but the URL (docs/PRIVACY.md). |
+| General | `ui.updates.auto` | `true` · `false` | `true` | panel, file | Install a detected update by itself (standalone install only; a signed release is required). Clones are told, never touched (docs/RISKS.md #12). |
 | Appearance | `ui.avatar` | an avatar id | `"classic"` | panel, file | The creature's look: classic or an installed avatar (docs/AVATARS.md). |
 | Appearance | `ui.size.nominalPx` | 80–300 (step 10) | `150` | panel, file | The creature's size at 100 % zoom, in pixels. |
 | Appearance | `ui.size.minPx` | 60–300 (step 10) | `80` | panel, file | Zooming out never goes below this size. |
