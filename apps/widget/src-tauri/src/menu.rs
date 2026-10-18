@@ -2,7 +2,7 @@
 //! `pref:<key>:<value>` becomes a POST /config patch, the rest are local actions.
 
 use serde_json::{json, Map, Value};
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
 /// The menu's words, from the same files as the page (web/i18n), bundled in the binary.
@@ -86,10 +86,13 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
 
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)]) -> tauri::Result<Menu<R>> {
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
     let mut menu = MenuBuilder::new(app);
+    if let Some(u) = update_item(app, &w, update)? {
+        menu = menu.item(&u).separator();
+    }
     if chat_on {
         let stop = MenuItemBuilder::with_id("chat:stop", w.get("menu.stopAnswering")).enabled(busy).build(app)?;
         menu = menu
@@ -118,6 +121,40 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
         .build()
 }
 
+/// A release tag as the daemon reports it (`v1.2.3`, `v1.2.3-rc.1`); anything else is not shown.
+pub fn valid_tag(t: &str) -> bool {
+    let Some(rest) = t.strip_prefix('v') else { return false };
+    let (core, pre) = rest.split_once('-').unwrap_or((rest, ""));
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| !p.is_empty() && p.len() <= 6 && p.bytes().all(|b| b.is_ascii_digit()))
+        && pre.len() <= 20
+        && pre.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+}
+
+/// What the update item does, from the daemon's update state: install it (standalone, signed
+/// or after a warning), say it is installing, or explain how (a clone is never touched).
+pub fn update_action(update: &Value) -> Option<(&'static str, &'static str, bool)> {
+    if update["available"] != true || !update["latest"].as_str().is_some_and(valid_tag) {
+        return None;
+    }
+    Some(if update["installing"] == true {
+        ("update:installing", "menu.update.installing", false)
+    } else if update["layout"] != "standalone" {
+        ("update:how", "menu.update.how", true)
+    } else if update["unsigned"] == true {
+        ("update:install-unsigned", "menu.update.installUnsigned", true)
+    } else {
+        ("update:install", "menu.update.install", true)
+    })
+}
+
+fn update_item<R: Runtime>(app: &AppHandle<R>, w: &Words, update: &Value) -> tauri::Result<Option<MenuItem<R>>> {
+    let Some((id, key, enabled)) = update_action(update) else { return Ok(None) };
+    let label = w.get(key).replace("{v}", update["latest"].as_str().unwrap_or(""));
+    MenuItemBuilder::with_id(id, label).enabled(enabled).build(app).map(Some)
+}
+
 /// `pref:size:small` → `{"size":"small"}`; `pref:paused:true` → `{"paused":true}`.
 pub fn pref_patch(id: &str) -> Option<String> {
     let rest = id.strip_prefix("pref:")?;
@@ -134,7 +171,8 @@ pub fn pref_patch(id: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{pref_patch, Words};
+    use super::{pref_patch, update_action, valid_tag, Words};
+    use serde_json::json;
 
     #[test]
     fn ids_become_config_patches() {
@@ -150,5 +188,42 @@ mod tests {
         assert_eq!(Words::new("en").get("menu.quit"), "Quit claude-pet");
         assert_eq!(Words::new("xx").get("menu.size"), "Size", "unknown language: English");
         assert_eq!(Words::new("fr").get("menu.nope"), "menu.nope", "unknown key: the key itself");
+    }
+
+    #[test]
+    fn the_update_item_says_what_will_happen() {
+        let base = json!({"available": true, "latest": "v0.4.0", "layout": "standalone", "installing": false, "unsigned": false});
+        assert_eq!(update_action(&base).unwrap().0, "update:install");
+        let mut u = base.clone();
+        u["unsigned"] = json!(true);
+        assert_eq!(update_action(&u).unwrap().0, "update:install-unsigned");
+        u["installing"] = json!(true);
+        assert_eq!(update_action(&u).unwrap(), ("update:installing", "menu.update.installing", false));
+        let mut clone = base.clone();
+        clone["layout"] = json!("clone");
+        assert_eq!(update_action(&clone).unwrap().0, "update:how", "a clone is told, never touched");
+        let mut none = base.clone();
+        none["available"] = json!(false);
+        assert_eq!(update_action(&none), None);
+        let mut odd = base.clone();
+        odd["latest"] = json!("v0.4.0<script>");
+        assert_eq!(update_action(&odd), None, "only a well-formed tag reaches a label");
+    }
+
+    #[test]
+    fn tags_are_checked_by_structure() {
+        for ok in ["v0.4.0", "v1.20.300", "v1.0.0-rc.1"] {
+            assert!(valid_tag(ok), "{ok}");
+        }
+        for bad in ["0.4.0", "v0.4", "v0.4.0 ", "v0.4.0-<x>", "vx.y.z", ""] {
+            assert!(!valid_tag(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_crate_and_package_json_name_the_same_repository() {
+        let pkg: serde_json::Value = serde_json::from_str(include_str!("../../../../package.json")).unwrap();
+        let repo = pkg["repository"].as_str().unwrap().trim_start_matches("github:");
+        assert_eq!(env!("CARGO_PKG_REPOSITORY"), format!("https://github.com/{repo}"));
     }
 }

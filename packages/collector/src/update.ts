@@ -8,8 +8,17 @@
  * detected version.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { GITHUB_REPO, VERSION } from './entry.ts';
+import { LABELS } from './login.ts';
+import { APP_DIR, ROOT_DIR } from './paths.ts';
+import { checksumMatches, releaseUrl, verifySignature } from './widget.ts';
+
+/** The standalone release archive (scripts/build-standalone.ts) and what it must contain. */
+export const STANDALONE_ARCHIVE = 'claude-pet-aarch64-apple-darwin.tar.gz';
+const APP_FILES = ['claude-pet', 'claude-pet-widget', 'hooks/claude-pet-hook.sh', 'hooks/claude-pet-statusline.sh'];
 
 export type UpdateState = {
   available: boolean;
@@ -19,6 +28,8 @@ export type UpdateState = {
   error: string | null;
   pinnedLocalBuild: boolean;
   layout: 'standalone' | 'clone';
+  /** The detected release has no signature: only a human-confirmed install may proceed. */
+  unsigned: boolean;
 };
 
 export const freshUpdateState = (layout: UpdateState['layout'], pinnedLocalBuild: boolean): UpdateState => ({
@@ -29,6 +40,7 @@ export const freshUpdateState = (layout: UpdateState['layout'], pinnedLocalBuild
   error: null,
   pinnedLocalBuild,
   layout,
+  unsigned: false,
 });
 
 /** `v1.2.3` or `v1.2.3-rc1` → comparable parts; null when it is not a release tag. */
@@ -76,3 +88,97 @@ export async function checkForUpdate(state: UpdateState, current = `v${VERSION}`
   }
   return { ...state, checkedAt, latest, error: null, available: compareTags(latest, current) > 0 };
 }
+
+// ---- installation (standalone layout only) --------------------------------------------------
+
+const run = (cmd: string, args: string[]): Promise<void> =>
+  new Promise((ok, ko) => execFile(cmd, args, { timeout: 180_000 }, (e) => (e ? ko(e) : ok())));
+
+/** Puts `file` of release `tag` at `dest`; rejects when it is not published. */
+export type FetchAsset = (tag: string, file: string, dest: string) => Promise<void>;
+const curlAsset: FetchAsset = (tag, file, dest) =>
+  run('curl', ['-fsSL', '--retry', '2', '--max-time', '170', '-o', dest, releaseUrl(tag, file)]);
+
+export type InstallResult = { ok: true } | { ok: false; error: string; unsigned?: true };
+
+/**
+ * Download, verify and swap in the standalone release `tag`. Nothing in ~/.claude-pet/app is
+ * touched until the archive's SHA-256 and signature have both passed and the unpacked folder
+ * holds every expected file; the previous version is kept as app.old (rollback:
+ * `mv ~/.claude-pet/app.old ~/.claude-pet/app`, then `claude-pet restart`).
+ *
+ * A missing signature (a release made before signing existed) refuses unless
+ * `allowUnsigned` — which only a human's explicit confirmation may set; an invalid one
+ * always refuses. Never throws: every failure comes back as `{ok:false, error}`.
+ */
+export async function installStandalone(
+  tag: string,
+  { allowUnsigned = false, root = ROOT_DIR, app = APP_DIR, fetchAsset = curlAsset, pubkey }:
+    { allowUnsigned?: boolean; root?: string; app?: string; fetchAsset?: FetchAsset; pubkey?: string } = {},
+): Promise<InstallResult> {
+  if (!parseTag(tag)) return { ok: false, error: `not a release tag: ${tag}` };
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const tmp = mkdtempSync(join(root, '.update-'));
+  try {
+    const archive = join(tmp, STANDALONE_ARCHIVE);
+    try {
+      await fetchAsset(tag, STANDALONE_ARCHIVE, archive);
+      await fetchAsset(tag, `${STANDALONE_ARCHIVE}.sha256`, `${archive}.sha256`);
+    } catch {
+      return { ok: false, error: `could not download ${STANDALONE_ARCHIVE} for ${tag}` };
+    }
+    const sha256File = readFileSync(`${archive}.sha256`, 'utf8');
+    if (!checksumMatches(readFileSync(archive), sha256File)) {
+      return { ok: false, error: `${tag}: SHA-256 does not match the published one, not installed` };
+    }
+    let sig: string | null = null;
+    try {
+      await fetchAsset(tag, `${STANDALONE_ARCHIVE}.sha256.sig`, `${archive}.sha256.sig`);
+      sig = readFileSync(`${archive}.sha256.sig`, 'utf8');
+    } catch {
+      sig = null;
+    }
+    if (sig === null && !allowUnsigned) {
+      return { ok: false, unsigned: true, error: `${tag} is not signed; only a confirmed manual install may proceed` };
+    }
+    if (sig !== null && !verifySignature(Buffer.from(sha256File), sig, pubkey)) {
+      return { ok: false, error: `${tag}: the release signature does not verify, not installed` };
+    }
+
+    await run('tar', ['-xzf', archive, '-C', tmp]);
+    const unpacked = join(tmp, 'claude-pet');
+    const missing = APP_FILES.filter((f) => !existsSync(join(unpacked, f)));
+    if (missing.length > 0) return { ok: false, error: `${tag}: archive incomplete, missing ${missing.join(', ')}` };
+    for (const f of ['claude-pet', 'claude-pet-widget']) chmodSync(join(unpacked, f), 0o755);
+
+    // The swap: one rollback copy, the newest previous version.
+    const old = `${app}.old`;
+    rmSync(old, { recursive: true, force: true });
+    if (existsSync(app)) renameSync(app, old);
+    try {
+      renameSync(unpacked, app);
+    } catch (e) {
+      if (existsSync(old) && !existsSync(app)) renameSync(old, app); // put the working version back
+      return { ok: false, error: `${tag}: could not swap in the new version (${(e as Error).message})` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `${tag}: ${(e as Error).message}` };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Restart onto the new binaries: the widget first, the daemon last, from a detached shell —
+ * the daemon calling kickstart -k on its own label would be killed mid-call (autostart.ts).
+ * The widget's KeepAlive is crash-only, so it is kickstarted explicitly, never left to it.
+ */
+export function restartDetached(uid = process.getuid?.() ?? 501): void {
+  const k = (label: string) => `launchctl kickstart -k gui/${uid}/${label}`;
+  spawn('/bin/sh', ['-c', `sleep 1; ${k(LABELS.widget)}; sleep 1; ${k(LABELS.daemon)}`], {
+    detached: true,
+    stdio: 'ignore',
+  }).unref();
+}
+
