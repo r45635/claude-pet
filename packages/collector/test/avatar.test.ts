@@ -68,6 +68,60 @@ test('format: a stylesheet may not reach outside the avatar', () => {
   }
 });
 
+test('animations: a valid section passes; pictures may ship css', () => {
+  const manifest = {
+    ...images({ IDLE: 'idle.png' }),
+    css: 'skin.css',
+    animations: {
+      profile: 'classic',
+      states: {
+        THINKING: { target: 'body', keyframes: 'bob', dur: 2600, ease: 'ease-in-out', amp: 1.2 },
+        IDLE: { keyframes: null },
+        DONE: { enter: { keyframes: 'tip', dur: 900, ease: [0.3, 0, 0.3, 1], count: 2 } },
+        ERROR: { fallback: 'DONE' },
+      },
+    },
+  };
+  const r = validateDir(avatarDir(manifest, {
+    'idle.png': PNG,
+    'skin.css': '@keyframes bob { to { opacity: .9 } } @keyframes tip { to { opacity: .8 } }',
+  }));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.files, ['idle.png', 'skin.css']);
+});
+
+test('animations: unknown states, keys, targets and ranges are refused', () => {
+  const cases: [unknown, RegExp][] = [
+    [{ states: { NAP: { keyframes: 'x' } } }, /unknown state/],
+    [{ states: { DONE: { target: 'tentacle', keyframes: 'x' } } }, /target/],
+    [{ states: { DONE: { keyframes: 'a}body{' } } }, /keyframes/],
+    [{ states: { DONE: { keyframes: 'x', dur: 999999999 } } }, /dur/],
+    [{ states: { DONE: { keyframes: 'x', ease: 'bouncy' } } }, /ease/],
+    [{ states: { DONE: { keyframes: 'x', amp: 99 } } }, /amp/],
+    [{ states: { DONE: { enter: { keyframes: 'x', count: 0 } } } }, /count/],
+    [{ states: { DONE: { fallback: 'NOPE' } } }, /fallback/],
+    [{ states: { DONE: { fallback: 'DONE', dur: 500 } } }, /nothing else/],
+    [{ states: { DONE: { keyframes: 'x', onload: 'evil' } } }, /unknown key/],
+    [{ profile: 'vivid' }, /profile/],
+    [[1], /object/],
+  ];
+  for (const [animations, why] of cases) {
+    const errors: string[] = [];
+    checkManifest({ ...images({ IDLE: 'idle.png' }), animations }, errors);
+    assert.match(errors.join('\n'), why, JSON.stringify(animations));
+  }
+});
+
+test('animations: a bound keyframes name must exist in the css or the built-ins', () => {
+  const manifest = {
+    ...images({ IDLE: 'idle.png' }),
+    animations: { states: { THINKING: { keyframes: 'nowhere' }, DONE: { keyframes: 'breathe' } } },
+  };
+  const r = validateDir(avatarDir(manifest, { 'idle.png': PNG }));
+  assert.match(r.errors.join('\n'), /THINKING.*"nowhere" is neither/);
+  assert.ok(!r.errors.join('\n').includes('DONE'), 'a built-in name is fine');
+});
+
 test('states: every state resolves through the fallbacks to an image', () => {
   const r = resolveStates({ IDLE: 'i', ACTIVE: 'a', ERROR: 'e' }, FORMAT.fallback, FORMAT.states);
   assert.equal(r.THINKING, 'a');

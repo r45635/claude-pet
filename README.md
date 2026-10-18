@@ -244,6 +244,12 @@ it to ~0.6 %.
 Lowering the active cost would mean lighter animations (fewer creatures moving at once,
 fewer steps, fewer full-window effects); not done yet.
 
+A reproducible measurement now ships as `npm run bench -- <quiet|moderate|heavy>`
+(`scripts/bench.ts`): it samples the widget **plus its WebKit XPC helpers** at 1 Hz while
+driving the simulator, so its numbers run higher than this table, which counted the widget
+process alone. The before/after series for the animation-behavior layer is recorded in
+[docs/MOTION.md](docs/MOTION.md).
+
 ## License
 
 MIT

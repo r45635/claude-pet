@@ -29,6 +29,18 @@
     "totalBytes": 10485760,
     "manifestBytes": 65536
   },
+  "animations": {
+    "profiles": ["classic", "floaty", "mechanical"],
+    "targets": ["root", "shaker", "body", "eyes"],
+    "keyframePattern": "^[A-Za-z_][A-Za-z0-9_-]{0,31}$",
+    "builtinKeyframes": ["breathe", "shake", "nod", "tap", "hammer", "float", "cheer", "hop", "flinch", "perk", "brace", "bob", "drift-l", "drift-r", "step-l", "step-r"],
+    "easings": ["linear", "ease", "ease-in", "ease-out", "ease-in-out"],
+    "bezierRange": [-0.5, 1.5],
+    "durMs": [80, 10000],
+    "ampRange": [0, 3],
+    "maxCount": 10
+  },
+  "cssForbidden": ["@import", "@font-face", "@namespace", "@charset", "javascript:", "expression(", "</", "\\"],
   "defaults": {
     "feet": [80, 146],
     "why": [66, 26],

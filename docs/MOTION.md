@@ -150,6 +150,30 @@ the widget process alone on a different machine. This table is the self-consiste
 reference the after-measurements in this series compare against — same tool, same
 machine, same scenarios, same seed.
 
+### After (the whole series: behavior layer, enters, manifest animations, profiles)
+
+Same machine, same tool, same seeds, widget built from `c513240`, measured 2026-10-18
+under `caffeinate -i` (a first run was discarded: the Mac idle-slept mid-run and
+stretched it — wall-clock gaps distort `ps` sampling; measure awake):
+
+| Scenario | CPU avg / max | vs baseline | RSS avg |
+|---|---|---|---|
+| quiet (0 events) | **0.1 % / 1.2 %** | 0.2 % / 1.4 % ✓ | 271 MB † |
+| quiet, fresh process (control) | **0.1 % / 0.5 %** | — | **179 MB** (baseline 186) ✓ |
+| moderate (102 events) | **13.1 % / 21.8 %** | 15.3 % / 24.0 % ✓ | 241 MB † |
+| heavy, subagents (607 events) | **19.5 % / 26.2 %** | 20.7 % / 27.3 % ✓ | 261 MB † |
+
+† Measured on a process that had just absorbed ~50 minutes of continuous stress runs:
+WebKit grows caches it does not return. The fresh-process control (179 MB, below the
+186 MB baseline) is the honest steady-state memory number; the behavior layer itself is
+one compiled stylesheet. Every CPU row improved: the rest pose means IDLE now runs
+**zero** animations instead of paused ones, and the enter one-shots replaced nothing
+heavier than what was already looping.
+
+Gates: idle < 1 % with no running animation ✓ · active ≤ baseline ✓ · multi-subagent ≤
+baseline ✓ · no new timers, listeners per creature, or rAF (two delegated listeners on
+`#pet` in total) ✓.
+
 ## Implementation sequence
 
 1. **This document + `scripts/bench.ts` + recorded baseline** (no product code).

@@ -13,6 +13,19 @@ import FORMAT from './avatar-format.json' with { type: 'json' };
 
 export { FORMAT };
 export type Kind = 'images' | 'svg';
+/** One motion: a keyframes binding with its timing, scale and (for enters) play count. */
+export type MotionSpec = {
+  target?: string;
+  keyframes?: string | null;
+  dur?: number | 'auto';
+  ease?: string | number[];
+  amp?: number;
+  count?: number;
+};
+export type Animations = {
+  profile?: string;
+  states?: Record<string, MotionSpec & { enter?: MotionSpec; fallback?: string }>;
+};
 export type Manifest = {
   format: 1;
   id: string;
@@ -23,6 +36,7 @@ export type Manifest = {
   states?: Record<string, string>;
   svg?: string;
   css?: string;
+  animations?: Animations;
   anchors?: { feet?: [number, number]; why?: [number, number] };
   hitbox?: { cx: number; cy: number; rx: number; ry: number };
 };
@@ -77,10 +91,12 @@ export function checkManifest(raw: unknown, errors: string[]): { manifest: Manif
     }
   } else if (m.kind === 'svg') {
     fileRef('svg', m.svg, ['svg']);
-    if (m.css !== undefined) fileRef('css', m.css, ['css']);
   } else {
     errors.push('"kind" must be "images" or "svg"');
   }
+  // Both kinds may ship a stylesheet: it is how pictures get motion too.
+  if (m.css !== undefined) fileRef('css', m.css, ['css']);
+  if (m.animations !== undefined) checkAnimations(m.animations, errors);
 
   const anchors = m.anchors as Record<string, unknown> | undefined;
   if (anchors !== undefined) {
@@ -95,6 +111,90 @@ export function checkManifest(raw: unknown, errors: string[]): { manifest: Manif
     errors.push('"hitbox" must be {cx, cy, rx, ry} in the 160×160 box');
   }
   return { manifest: errors.length ? null : (m as Manifest), files };
+}
+
+const A = FORMAT.animations;
+const KF = new RegExp(A.keyframePattern);
+
+/** One motion spec of the manifest's `animations` section, strictly. */
+function checkMotion(spec: unknown, where: string, enter: boolean, errors: string[]): void {
+  const s = spec as Record<string, unknown>;
+  if (!s || typeof s !== 'object' || Array.isArray(s)) {
+    errors.push(`${where}: must be an object`);
+    return;
+  }
+  const allowed = enter
+    ? ['target', 'keyframes', 'dur', 'ease', 'amp', 'count']
+    : ['target', 'keyframes', 'dur', 'ease', 'amp', 'enter', 'fallback'];
+  for (const key of Object.keys(s)) {
+    if (!allowed.includes(key)) errors.push(`${where}.${key}: unknown key`);
+  }
+  if (s.target !== undefined && !A.targets.includes(s.target as string)) {
+    errors.push(`${where}.target: must be one of ${A.targets.join(', ')}`);
+  }
+  if (s.keyframes !== undefined && s.keyframes !== null
+      && (typeof s.keyframes !== 'string' || !KF.test(s.keyframes))) {
+    errors.push(`${where}.keyframes: must match ${A.keyframePattern} (or null for no loop)`);
+  }
+  if (enter && s.keyframes === null) errors.push(`${where}.keyframes: an enter needs a keyframes name`);
+  if (s.dur !== undefined && s.dur !== 'auto'
+      && !(typeof s.dur === 'number' && Number.isInteger(s.dur) && s.dur >= A.durMs[0] && s.dur <= A.durMs[1])) {
+    errors.push(`${where}.dur: "auto" or whole milliseconds ${A.durMs[0]}-${A.durMs[1]}`);
+  }
+  if (s.ease !== undefined && !A.easings.includes(s.ease as string)
+      && !(Array.isArray(s.ease) && s.ease.length === 4
+           && s.ease.every((n) => typeof n === 'number' && n >= A.bezierRange[0] && n <= A.bezierRange[1]))) {
+    errors.push(`${where}.ease: a keyword (${A.easings.join(', ')}) or 4 cubic-bezier numbers in [${A.bezierRange}]`);
+  }
+  if (s.amp !== undefined && !(typeof s.amp === 'number' && s.amp >= A.ampRange[0] && s.amp <= A.ampRange[1])) {
+    errors.push(`${where}.amp: a number in [${A.ampRange}]`);
+  }
+  if (s.count !== undefined && !(typeof s.count === 'number' && Number.isInteger(s.count) && s.count >= 1 && s.count <= A.maxCount)) {
+    errors.push(`${where}.count: a whole number 1-${A.maxCount}`);
+  }
+}
+
+/** The manifest's optional `animations` section (docs/AVATARS.md). Strict: it is new
+ *  surface on an untrusted package, so unknown keys are errors, not extensions. */
+export function checkAnimations(raw: unknown, errors: string[]): void {
+  const a = raw as Record<string, unknown>;
+  if (!a || typeof a !== 'object' || Array.isArray(a)) {
+    errors.push('"animations" must be an object');
+    return;
+  }
+  for (const key of Object.keys(a)) {
+    if (!['profile', 'states'].includes(key)) errors.push(`animations.${key}: unknown key`);
+  }
+  if (a.profile !== undefined && !A.profiles.includes(a.profile as string)) {
+    errors.push(`animations.profile: must be one of ${A.profiles.join(', ')}`);
+  }
+  if (a.states === undefined) return;
+  const states = a.states as Record<string, unknown>;
+  if (!states || typeof states !== 'object' || Array.isArray(states)) {
+    errors.push('animations.states: must be an object');
+    return;
+  }
+  for (const [state, spec] of Object.entries(states)) {
+    if (!(FORMAT.states as string[]).includes(state)) {
+      errors.push(`animations.states.${state}: unknown state`);
+      continue;
+    }
+    const where = `animations.states.${state}`;
+    const s = spec as Record<string, unknown>;
+    if (s && typeof s === 'object' && typeof s.fallback === 'string') {
+      if (!(s.fallback in states)) errors.push(`${where}.fallback: "${s.fallback}" is not defined in animations.states`);
+      if (Object.keys(s).length > 1) errors.push(`${where}: a fallback entry carries nothing else`);
+      continue;
+    }
+    checkMotion(spec, where, false, errors);
+    if (s && typeof s === 'object' && s.enter !== undefined) checkMotion(s.enter, `${where}.enter`, true, errors);
+  }
+}
+
+/** The keyframes names a stylesheet defines — same scan as the page's scoper. */
+export function cssKeyframeNames(css: string): Set<string> {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  return new Set([...text.matchAll(/@keyframes\s+([A-Za-z_][\w-]*)/g)].map((m) => m[1]));
 }
 
 /** The real type of a file from its first bytes, never from its name. */
@@ -144,6 +244,7 @@ export function validateDir(dir: string): Report {
   const present = new Set(readdirSync(dir));
   if (files.length + 1 > FORMAT.limits.files) errors.push(`more than ${FORMAT.limits.files} files`);
   let total = 0;
+  let cssText = '';
   for (const name of files) {
     if (!present.has(name)) {
       errors.push(`${name}: referenced but missing`);
@@ -156,9 +257,11 @@ export function validateDir(dir: string): Report {
     const real = sniff(bytes);
     const expected = ext === 'jpeg' ? 'jpg' : ext;
     if (ext === 'css') {
-      if (/@import|@font-face|url\(\s*['"]?(?!#)/i.test(new TextDecoder().decode(bytes))) {
-        errors.push(`${name}: @import, @font-face and url() to anything but #id are not allowed`);
-      }
+      cssText = new TextDecoder().decode(bytes);
+      const lower = cssText.toLowerCase();
+      const bad = FORMAT.cssForbidden.find((token) => lower.includes(token.toLowerCase()));
+      if (bad) errors.push(`${name}: "${bad}" is not allowed`);
+      if (/url\(\s*['"]?(?!#)/i.test(cssText)) errors.push(`${name}: url() to anything but #id is not allowed`);
     } else if (real !== expected) {
       errors.push(`${name}: content is ${real ?? 'unknown'}, not .${ext}`);
     } else if (manifest.kind === 'images' && manifest.states?.IDLE === name && isAnimated(real, bytes)) {
@@ -166,5 +269,18 @@ export function validateDir(dir: string): Report {
     }
   }
   if (total > FORMAT.limits.totalBytes) errors.push(`files total more than ${FORMAT.limits.totalBytes} bytes`);
+
+  // With the files in hand, a bound keyframes name must exist: in the avatar's own
+  // stylesheet or in the widget's built-in library.
+  if (manifest.animations?.states) {
+    const known = new Set([...cssKeyframeNames(cssText), ...FORMAT.animations.builtinKeyframes]);
+    for (const [state, spec] of Object.entries(manifest.animations.states)) {
+      for (const [where, kf] of [[state, spec.keyframes], [`${state}.enter`, spec.enter?.keyframes]] as const) {
+        if (typeof kf === 'string' && !known.has(kf)) {
+          errors.push(`animations.states.${where}: keyframes "${kf}" is neither in the avatar's css nor a built-in (${FORMAT.animations.builtinKeyframes.join(', ')})`);
+        }
+      }
+    }
+  }
   return { manifest, files, errors, warnings };
 }

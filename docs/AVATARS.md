@@ -15,7 +15,8 @@ commented template) and `cowboy` (SVG, with a hat that moves with the mood).
 | For | anyone: draw in any tool, or generate with an image AI | people at ease with SVG |
 | Files | one picture per state: PNG, GIF, WebP, JPEG or SVG | one `creature.svg` (+ an optional `skin.css`) |
 | Minimum | `IDLE` only | the contract below |
-| Motion | the pet adds breathing, shaking, walking; GIF/WebP may animate themselves | same, plus your own CSS animations |
+| Motion | the pet adds breathing, shaking, walking; GIF/WebP may animate themselves | same |
+| Own motion | an optional `skin.css` + the `animations` section below | same, plus any scoped CSS rule |
 
 ## The common box
 
@@ -81,6 +82,49 @@ Start from [`avatars/mint/creature.svg`](../avatars/mint/creature.svg). The widg
 `skin.css` applies to your avatar only: a selector starting with `.critter` is the creature
 itself, anything else is inside it, and `@keyframes` names are made private. Plain rules and
 `@keyframes` only.
+
+## Motion: the `animations` section
+
+Both kinds (pictures too) may ship a `skin.css` with `@keyframes`, and bind them to states in
+the manifest — no widget code involved:
+
+```json
+"css": "skin.css",
+"animations": {
+  "profile": "floaty",
+  "states": {
+    "THINKING": { "keyframes": "bob", "dur": 2600, "ease": "ease-in-out", "amp": 1.2 },
+    "CODING":   { "keyframes": "wiggle", "dur": "auto" },
+    "IDLE":     { "keyframes": null },
+    "DONE":     { "enter": { "keyframes": "tip", "dur": 900, "count": 2 } },
+    "ERROR":    { "fallback": "HIGH_LOAD" }
+  }
+}
+```
+
+- **`profile`** — the base feel: `classic` (squash and stretch), `floaty` (glides and bobs,
+  never stomps — the shipped `ghost` uses it), or `mechanical` (stepped, hard, no squash).
+- **`keyframes`** — a name from your `skin.css`, or a built-in: `breathe`, `shake`, `nod`,
+  `tap`, `hammer`, `float`, `cheer`, `hop`, `flinch`, `perk`, `brace`, `bob`, `drift-l`,
+  `drift-r`, `step-l`, `step-r`. It replaces the default loop for that state; `null` means
+  *no loop* (the pose itself). The widget's defaults stay wherever you say nothing.
+- **`target`** — what moves: `body` (the default; breathes today), `shaker` (shakes in storms),
+  `eyes`, or `root` (the whole creature — enters default to it).
+- **`dur`** — whole milliseconds (80–10000), or `"auto"`: the widget's load-driven speed.
+- **`ease`** — `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, or four cubic-bezier
+  numbers.
+- **`amp`** — 0–3, scales the built-in keyframes' amplitude (they read
+  `var(--amp) * var(--amp-k)`); you never see raw load.
+- **`enter`** — a one-shot played on arriving in the state (plus `count`, 1–10), before the
+  loop takes over. Good for anticipation: a squash before the storm, a hop on DONE.
+- **`fallback`** — reuse another state's entry.
+
+Keep motion on `transform` and `opacity` — they stay on the compositor. Avoid animating
+paint (`fill`, `stroke`, filters) in a loop, and leave `IDLE` without one: every animation is
+**paused automatically** whenever the creature is asleep, paused or disconnected, and an IDLE
+loop would only be frozen mid-pose. Unknown names, states or out-of-range values are refused
+at import; anything that still slips through is dropped at load and the default motion plays
+instead — an avatar without an `animations` section behaves exactly as before.
 
 ## Limits and safety
 
