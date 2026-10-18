@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { FORMAT } from '../src/avatar-format.ts';
 // @ts-ignore — a plain browser module, typed by its JSDoc only.
-import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, enterStates, enterNames } from '../../../apps/widget/web/behavior.js';
+import { DEFAULT_BEHAVIOR, PROFILES, MOTION_RULES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from '../../../apps/widget/web/behavior.js';
+// @ts-ignore — same.
+import { FORBIDDEN_CSS, keyframeNames, scopeCss } from '../../../apps/widget/web/avatar.js';
 
 const lines = (css: string): string[] =>
   css.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).sort();
@@ -126,4 +129,82 @@ test('merge: an override replaces its states and keeps the rest', () => {
 
 test('merge: no override is a no-op', () => {
   assert.equal(compileBehavior(mergeBehavior(DEFAULT_BEHAVIOR, null)), compileBehavior(DEFAULT_BEHAVIOR));
+});
+
+// ---- the manifest's `animations` section (the page's last gate) --------------------------
+
+test('manifest: a valid section converts to typed motions', () => {
+  const { override, dropped } = behaviorFromManifest({
+    states: {
+      THINKING: { target: 'body', keyframes: 'bob', dur: 2600, ease: 'ease-in-out', amp: 1.2 },
+      CODING: { keyframes: 'wiggle', dur: 'auto' },
+      IDLE: { keyframes: null },
+      DONE: { enter: { keyframes: 'tip', dur: 900, ease: [0.3, 0, 0.3, 1], count: 2 } },
+      ERROR: { fallback: 'DONE' },
+    },
+  }, new Set(['bob', 'wiggle', 'tip']));
+  assert.deepEqual(dropped, []);
+  assert.deepEqual(override.states.THINKING.loop, { target: 'body', kf: 'bob', dur: 2600, ease: 'ease-in-out', amp: 1.2 });
+  assert.equal(override.states.CODING.loop.dur, 'auto');
+  assert.equal(override.states.IDLE.loop, null);
+  assert.deepEqual(override.states.DONE.enter, { target: 'root', kf: 'tip', dur: 900, ease: 'cubic-bezier(0.3, 0, 0.3, 1)', count: 2 });
+  assert.deepEqual(override.states.ERROR.enter, override.states.DONE.enter, 'fallback reuses the other state');
+  const css = compileBehavior(mergeBehavior(DEFAULT_BEHAVIOR, override), '.critter[data-avatar="x"]', (n: string) => `av-x-${n}`);
+  assert.ok(css.includes('.critter[data-avatar="x"][data-state="THINKING"] .body { animation: av-x-bob 2.6s ease-in-out infinite; --amp-k: 1.2; }'));
+});
+
+test('manifest: hostile or unknown values are dropped or clamped, never emitted', () => {
+  const { override, dropped } = behaviorFromManifest({
+    states: {
+      THINKING: { keyframes: 'x}body{background:url(//evil)' },
+      CODING: { keyframes: 'ghost-only' },             // defined nowhere
+      READING: { keyframes: 'breathe', dur: 9e9, amp: 99, ease: [9, -9, 0, 1] },
+      WAITING: { target: 'tentacle', keyframes: 'breathe' },
+      DONE: { enter: { keyframes: 'breathe', count: 99 } },
+    },
+  }, new Set());
+  assert.equal(dropped.length, 3, dropped.join('; '));
+  assert.equal(override.states.THINKING, undefined);
+  assert.equal(override.states.CODING, undefined);
+  assert.equal(override.states.WAITING, undefined);
+  const r = override.states.READING.loop;
+  assert.equal(r.dur, 10000, 'duration clamped');
+  assert.equal(r.amp, 3, 'amplitude clamped');
+  assert.equal(r.ease, 'cubic-bezier(1.5, -0.5, 0, 1)', 'bezier clamped');
+  assert.equal(override.states.DONE.enter.count, 10, 'count clamped');
+  const css = compileBehavior(mergeBehavior(DEFAULT_BEHAVIOR, override));
+  assert.ok(!css.includes('evil') && !css.includes('}body{'));
+});
+
+test('manifest: no section means no override', () => {
+  assert.deepEqual(behaviorFromManifest(undefined).override, { states: {} });
+  assert.deepEqual(behaviorFromManifest({ profile: 'classic' }).override, { states: {} });
+});
+
+// ---- conformance: the page's copies of the shared rules never drift ----------------------
+
+test('conformance: MOTION_RULES matches avatar-format.json', () => {
+  const A = FORMAT.animations;
+  assert.deepEqual(MOTION_RULES.profiles, A.profiles);
+  assert.deepEqual(MOTION_RULES.targets, A.targets);
+  assert.deepEqual(MOTION_RULES.builtinKeyframes, A.builtinKeyframes);
+  assert.deepEqual(MOTION_RULES.easings, A.easings);
+  assert.deepEqual(MOTION_RULES.bezierRange, A.bezierRange);
+  assert.deepEqual(MOTION_RULES.durMs, A.durMs);
+  assert.deepEqual(MOTION_RULES.ampRange, A.ampRange);
+  assert.equal(MOTION_RULES.maxCount, A.maxCount);
+  assert.equal(MOTION_RULES.keyframePattern.source, A.keyframePattern);
+  assert.ok(Object.keys(PROFILES).every((p) => A.profiles.includes(p)), 'every page profile is declared in the format');
+});
+
+test('conformance: every cssForbidden token is refused by the page sanitizer', () => {
+  for (const token of FORMAT.cssForbidden) {
+    assert.ok(FORBIDDEN_CSS.test(token), `FORBIDDEN_CSS misses ${JSON.stringify(token)}`);
+    assert.throws(() => scopeCss(`.critter { x: ${token} }`, 'x'), `scopeCss accepts ${JSON.stringify(token)}`);
+  }
+});
+
+test('conformance: keyframeNames sees through comments and matches the scoper', () => {
+  const css = '/* @keyframes fake */ @keyframes bob { to { opacity: 1 } }\n@keyframes drift-2 { to { opacity: 0 } }';
+  assert.deepEqual([...keyframeNames(css)].sort(), ['bob', 'drift-2']);
 });

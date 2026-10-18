@@ -49,10 +49,12 @@
      bounce) are data in behavior.js, compiled into the "behavior-css" style element
      at startup. Only the keyframes library and the decorative rules live here. */
   .body { transform-origin: 50% 70%; }
+  /* --amp follows load (set by JS); --amp-k is an avatar's bounded multiplier on it
+     (behavior.js), 1 when absent. */
   @keyframes breathe {
     0%, 100% { transform: scale(1, 1) translateY(0); }
-    50%      { transform: scale(calc(1 + var(--amp, .03)), calc(1 - var(--amp, .03) * .6))
-                          translateY(calc(var(--amp, .03) * -40px)); }
+    50%      { transform: scale(calc(1 + var(--amp, .03) * var(--amp-k, 1)), calc(1 - var(--amp, .03) * var(--amp-k, 1) * .6))
+                          translateY(calc(var(--amp, .03) * var(--amp-k, 1) * -40px)); }
   }
   @keyframes shake {
     0%, 100% { transform: translate(0, 0) rotate(0); }
@@ -469,8 +471,8 @@
 </div>
 
 <script type="module">
-  import { buildImageProto, buildSvgProto, scopeCss, resolveStates, DEFAULT_GEO } from './avatar.js';
-  import { DEFAULT_BEHAVIOR, compileBehavior, enterStates, enterNames } from './behavior.js';
+  import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO } from './avatar.js';
+  import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
@@ -679,8 +681,8 @@
   // Entering a state may play a short animation: the .enter class lives exactly as long
   // as that animation. One delegated listener takes it off — event-driven, no timer
   // (docs/MOTION.md). The kid lifecycle classes (.spawn/.despawn) ride the same events.
-  const entering = enterStates(DEFAULT_BEHAVIOR);
-  const enterKfs = enterNames(DEFAULT_BEHAVIOR);
+  let entering = enterStates(DEFAULT_BEHAVIOR);
+  let enterKfs = enterNames(DEFAULT_BEHAVIOR);
   function setState(el, state) {
     if (!el || el.getAttribute('data-state') === state) return;
     el.setAttribute('data-state', state);
@@ -1008,11 +1010,22 @@
   let avatarLoading = '';
 
   /** Swap the creature's prototype; the next render rebuilds every creature from it. */
-  function setAvatar(id, protoEl, avatarGeo, css) {
+  function setAvatar(id, protoEl, avatarGeo, css, animations, ownKf) {
     avatarId = id;
     proto = protoEl;
     geo = avatarGeo;
     avatarStyle.textContent = css;
+    // The avatar's motion: its profile plus its per-state overrides, compiled scoped on
+    // top of the default behavior. Dropped entries fall back to the default and say why.
+    const { override, dropped } = behaviorFromManifest(animations, ownKf);
+    for (const why of dropped) diag(`avatar ${id} animations: ${why}`);
+    const merged = mergeBehavior(PROFILES[animations?.profile] ?? DEFAULT_BEHAVIOR, override);
+    const mapKf = (n) => (ownKf?.has(n) ? `av-${id}-${n}` : n);
+    behaviorStyle.textContent = id === 'classic'
+      ? compileBehavior(DEFAULT_BEHAVIOR)
+      : compileBehavior(DEFAULT_BEHAVIOR) + compileBehavior(merged, `.critter[data-avatar="${id}"]`, mapKf);
+    entering = enterStates(id === 'classic' ? DEFAULT_BEHAVIOR : merged);
+    enterKfs = new Set([...enterNames(DEFAULT_BEHAVIOR), ...enterNames(merged, mapKf)]);
     crittersKey = '';
     critterEls.clear();
     last = '';
@@ -1023,8 +1036,10 @@
   function applyAvatar(avatar) {
     try {
       const protoEl = avatar.kind === 'svg' ? buildSvgProto(document, avatar) : buildImageProto(document, avatar);
-      const css = avatar.kind === 'svg' && avatar.css ? scopeCss(avatar.css, avatar.id) : '';
-      setAvatar(avatar.id, protoEl, { ...DEFAULT_GEO, ...(avatar.anchors ?? {}) }, css);
+      // Both kinds may ship CSS: it is how pictures get motion too.
+      const css = avatar.css ? scopeCss(avatar.css, avatar.id) : '';
+      const ownKf = avatar.css ? keyframeNames(avatar.css) : new Set();
+      setAvatar(avatar.id, protoEl, { ...DEFAULT_GEO, ...(avatar.anchors ?? {}) }, css, avatar.animations, ownKf);
     } catch (err) {
       diag(`avatar ${avatar.id}: ${err.message}`);
       setAvatar('classic', classicProto, DEFAULT_GEO, '');
@@ -1471,10 +1486,11 @@
           const type = format.imageTypes[f.split('.').pop().toLowerCase()];
           return new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result.replace(/^data:[^;]*/, `data:${type}`)); fr.readAsDataURL(blob); });
         };
-        const avatar = { id, kind: manifest.kind, anchors: manifest.anchors, hitbox: manifest.hitbox };
+        const avatar = { id, kind: manifest.kind, anchors: manifest.anchors, hitbox: manifest.hitbox,
+                         animations: manifest.animations };
+        if (manifest.css) avatar.css = await text(manifest.css);
         if (manifest.kind === 'svg') {
           avatar.svg = await text(manifest.svg);
-          if (manifest.css) avatar.css = await text(manifest.css);
         } else {
           const files = resolveStates(manifest.states, format.fallback, format.states);
           avatar.images = {};

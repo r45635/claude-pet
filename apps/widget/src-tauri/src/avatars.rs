@@ -75,10 +75,132 @@ fn image_exts() -> Vec<&'static str> {
 }
 
 /// A css file may not reach outside the avatar (the page re-checks when it scopes it).
+/// The forbidden tokens come from the format JSON, same list as the tooling and the page.
 fn css_ok(text: &str) -> bool {
     let t = text.to_ascii_lowercase();
-    !(t.contains("@import") || t.contains("@font-face") || t.contains("javascript:") || t.contains('\\'))
+    format()["cssForbidden"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .all(|token| !t.contains(&token.to_ascii_lowercase()))
         && t.match_indices("url(").all(|(i, _)| t[i + 4..].trim_start().trim_start_matches(['\'', '"']).starts_with('#'))
+}
+
+/// The format's keyframePattern (`^[A-Za-z_][A-Za-z0-9_-]{0,31}$`) without a regex crate.
+fn valid_keyframes(k: &str) -> bool {
+    let b = k.as_bytes();
+    !b.is_empty()
+        && b.len() <= 32
+        && (b[0].is_ascii_alphabetic() || b[0] == b'_')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'-')
+}
+
+/// One motion spec of the `animations` section, strictly: unknown keys and out-of-range
+/// values refuse the package (the page re-checks and drops; this refuses loudly).
+fn check_motion(at: &str, spec: &Value, enter: bool) -> Result<(), String> {
+    let rules = &format()["animations"];
+    let s = spec.as_object().ok_or(format!("{at}: must be an object"))?;
+    let allowed: &[&str] = if enter {
+        &["target", "keyframes", "dur", "ease", "amp", "count"]
+    } else {
+        &["target", "keyframes", "dur", "ease", "amp", "enter", "fallback"]
+    };
+    for key in s.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(format!("{at}.{key}: unknown key"));
+        }
+    }
+    if let Some(t) = s.get("target") {
+        if !rules["targets"].as_array().unwrap().iter().any(|x| x == t) {
+            return Err(format!("{at}.target: unknown target"));
+        }
+    }
+    match s.get("keyframes") {
+        None => {}
+        Some(Value::Null) if !enter => {}
+        Some(Value::String(k)) if valid_keyframes(k) => {}
+        _ => return Err(format!("{at}.keyframes: a short keyframes name, or null for no loop")),
+    }
+    let range = |key: &str| (rules[key][0].as_f64().unwrap(), rules[key][1].as_f64().unwrap());
+    match s.get("dur") {
+        None => {}
+        Some(v) if v == "auto" => {}
+        Some(Value::Number(n)) => {
+            let (lo, hi) = range("durMs");
+            let d = n.as_f64().unwrap_or(-1.0);
+            if d.fract() != 0.0 || d < lo || d > hi {
+                return Err(format!("{at}.dur: \"auto\" or whole milliseconds {lo}-{hi}"));
+            }
+        }
+        _ => return Err(format!("{at}.dur: \"auto\" or whole milliseconds")),
+    }
+    match s.get("ease") {
+        None => {}
+        Some(v) if rules["easings"].as_array().unwrap().contains(v) => {}
+        Some(Value::Array(nums)) => {
+            let (lo, hi) = range("bezierRange");
+            if nums.len() != 4 || !nums.iter().all(|n| n.as_f64().is_some_and(|x| x >= lo && x <= hi)) {
+                return Err(format!("{at}.ease: a keyword or 4 cubic-bezier numbers in [{lo}, {hi}]"));
+            }
+        }
+        _ => return Err(format!("{at}.ease: unknown easing")),
+    }
+    if let Some(a) = s.get("amp") {
+        let (lo, hi) = range("ampRange");
+        if !a.as_f64().is_some_and(|x| x >= lo && x <= hi) {
+            return Err(format!("{at}.amp: a number in [{lo}, {hi}]"));
+        }
+    }
+    if let Some(c) = s.get("count") {
+        let hi = rules["maxCount"].as_f64().unwrap();
+        if !c.as_f64().is_some_and(|x| x.fract() == 0.0 && x >= 1.0 && x <= hi) {
+            return Err(format!("{at}.count: a whole number 1-{hi}"));
+        }
+    }
+    Ok(())
+}
+
+/// The manifest's optional `animations` section (docs/AVATARS.md).
+fn check_animations(m: &Value) -> Result<(), String> {
+    let a = match m.get("animations") {
+        None | Some(Value::Null) => return Ok(()),
+        Some(v) => v.as_object().ok_or("\"animations\" must be an object")?,
+    };
+    for key in a.keys() {
+        if key != "profile" && key != "states" {
+            return Err(format!("animations.{key}: unknown key"));
+        }
+    }
+    if let Some(p) = a.get("profile") {
+        if !format()["animations"]["profiles"].as_array().unwrap().iter().any(|x| x == p) {
+            return Err("animations.profile: unknown profile".into());
+        }
+    }
+    let Some(states_v) = a.get("states") else { return Ok(()) };
+    let states = states_v.as_object().ok_or("animations.states: must be an object")?;
+    let known: Vec<&str> = format()["states"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    for (state, spec) in states {
+        let at = format!("animations.states.{state}");
+        if !known.contains(&state.as_str()) {
+            return Err(format!("{at}: unknown state"));
+        }
+        let s = spec.as_object().ok_or(format!("{at}: must be an object"))?;
+        if let Some(f) = s.get("fallback") {
+            if !f.as_str().is_some_and(|f| states.contains_key(f)) {
+                return Err(format!("{at}.fallback: not a state defined in animations.states"));
+            }
+            if s.len() > 1 {
+                return Err(format!("{at}: a fallback entry carries nothing else"));
+            }
+            continue;
+        }
+        check_motion(&at, spec, false)?;
+        if let Some(e) = s.get("enter") {
+            check_motion(&format!("{at}.enter"), e, true)?;
+        }
+    }
+    Ok(())
 }
 
 /// Check a manifest; returns the files it references.
@@ -122,12 +244,14 @@ pub fn check_manifest(m: &Value) -> Result<Vec<String>, String> {
         }
         Some("svg") => {
             add("svg", &m["svg"], &["svg"])?;
-            if !m["css"].is_null() {
-                add("css", &m["css"], &["css"])?;
-            }
         }
         _ => return Err("\"kind\" must be \"images\" or \"svg\"".into()),
     }
+    // Both kinds may ship a stylesheet: it is how pictures get motion too.
+    if !m["css"].is_null() {
+        add("css", &m["css"], &["css"])?;
+    }
+    check_animations(m)?;
     Ok(files)
 }
 
@@ -215,10 +339,17 @@ pub fn load(root: &Path, id: &str) -> Result<Value, String> {
     }
 
     let mut out = Map::new();
-    for key in ["id", "name", "kind", "anchors", "hitbox"] {
+    for key in ["id", "name", "kind", "anchors", "hitbox", "animations"] {
         if !m[key].is_null() {
             out.insert(key.into(), m[key].clone());
         }
+    }
+    let text = |f: &Value| -> Result<String, String> {
+        let n = f.as_str().unwrap_or("");
+        String::from_utf8(contents[n].clone()).map_err(|_| format!("{n}: not UTF-8"))
+    };
+    if !m["css"].is_null() {
+        out.insert("css".into(), Value::String(text(&m["css"])?));
     }
     if m["kind"] == "images" {
         let fmt = format();
@@ -242,14 +373,7 @@ pub fn load(root: &Path, id: &str) -> Result<Value, String> {
         }
         out.insert("images".into(), Value::Object(images));
     } else {
-        let text = |f: &Value| -> Result<String, String> {
-            let n = f.as_str().unwrap_or("");
-            String::from_utf8(contents[n].clone()).map_err(|_| format!("{n}: not UTF-8"))
-        };
         out.insert("svg".into(), Value::String(text(&m["svg"])?));
-        if !m["css"].is_null() {
-            out.insert("css".into(), Value::String(text(&m["css"])?));
-        }
     }
     Ok(Value::Object(out))
 }
@@ -393,5 +517,63 @@ mod tests {
         assert!(!css_ok(".a { background: url(https://x/y) }"));
         assert!(!css_ok("@import 'x.css';"));
         assert!(!css_ok(".a { color: \\72 ed }"));
+        // Every forbidden token of the shared format JSON is refused, not just the
+        // historical four: the three checks (TS, Rust, page) share this one list.
+        for token in format()["cssForbidden"].as_array().unwrap() {
+            let css = format!(".a {{ x: {} }}", token.as_str().unwrap());
+            assert!(!css_ok(&css), "{css}");
+        }
+    }
+
+    fn with_animations(animations: &str) -> Value {
+        serde_json::from_str(&format!(
+            r#"{{"format":1,"id":"demo","name":"Demo","kind":"images","states":{{"IDLE":"idle.png"}},"animations":{animations}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn animations_are_checked_strictly() {
+        let ok = r#"{"profile":"classic","states":{
+            "THINKING":{"target":"body","keyframes":"bob","dur":2600,"ease":"ease-in-out","amp":1.2},
+            "IDLE":{"keyframes":null},
+            "DONE":{"enter":{"keyframes":"tip","dur":900,"ease":[0.3,0,0.3,1],"count":2}},
+            "ERROR":{"fallback":"DONE"}}}"#;
+        assert!(check_manifest(&with_animations(ok)).is_ok());
+
+        for (bad, why) in [
+            (r#"{"states":{"NAP":{"keyframes":"x"}}}"#, "unknown state"),
+            (r#"{"states":{"DONE":{"target":"tentacle","keyframes":"x"}}}"#, "unknown target"),
+            (r#"{"states":{"DONE":{"keyframes":"a}body{"}}}"#, "keyframes"),
+            (r#"{"states":{"DONE":{"keyframes":"x","dur":999999999}}}"#, "dur"),
+            (r#"{"states":{"DONE":{"keyframes":"x","ease":"bouncy"}}}"#, "ease"),
+            (r#"{"states":{"DONE":{"keyframes":"x","ease":[9,0,0,1]}}}"#, "ease"),
+            (r#"{"states":{"DONE":{"keyframes":"x","amp":99}}}"#, "amp"),
+            (r#"{"states":{"DONE":{"enter":{"keyframes":"x","count":0}}}}"#, "count"),
+            (r#"{"states":{"DONE":{"enter":{"keyframes":null}}}}"#, "keyframes"),
+            (r#"{"states":{"DONE":{"fallback":"NOPE"}}}"#, "fallback"),
+            (r#"{"states":{"DONE":{"fallback":"DONE","dur":500}}}"#, "nothing else"),
+            (r#"{"states":{"DONE":{"keyframes":"x","onload":"evil"}}}"#, "unknown key"),
+            (r#"{"profile":"vivid"}"#, "profile"),
+            (r#"[1]"#, "object"),
+        ] {
+            let err = check_manifest(&with_animations(bad)).unwrap_err();
+            assert!(err.contains(why), "{bad} → {err}");
+        }
+    }
+
+    #[test]
+    fn pictures_may_ship_css_and_animations_and_load_keeps_them() {
+        let root = tmp_root("anim");
+        let pkg = root.join("demo.claudepet");
+        let manifest = br#"{"format":1,"id":"demo","name":"Demo","kind":"images",
+            "states":{"IDLE":"idle.png"},"css":"skin.css",
+            "animations":{"states":{"DONE":{"enter":{"keyframes":"tip","dur":900}}}}}"#;
+        zip_of(&pkg, &[("manifest.json", manifest), ("idle.png", PNG),
+                       ("skin.css", b"@keyframes tip { to { transform: rotate(-12deg) } }")]);
+        import(&root, &pkg).unwrap();
+        let a = load(&root, "demo").unwrap();
+        assert!(a["css"].as_str().unwrap().contains("@keyframes tip"));
+        assert_eq!(a["animations"]["states"]["DONE"]["enter"]["dur"], 900);
     }
 }

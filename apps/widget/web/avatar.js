@@ -164,7 +164,15 @@ export function buildSvgProto(doc, avatar) {
 
 // ---- CSS -------------------------------------------------------------------------------
 
-const FORBIDDEN_CSS = /@import|@font-face|@namespace|@charset|javascript:|expression\s*\(|<\/|\\/i;
+// The token list lives in avatar-format.json (cssForbidden) for the tooling and the
+// importer; a conformance test keeps this regex covering every token.
+export const FORBIDDEN_CSS = /@import|@font-face|@namespace|@charset|javascript:|expression\s*\(|<\/|\\/i;
+
+/** The @keyframes names a stylesheet defines (before scoping renames them). */
+export function keyframeNames(css) {
+  const text = String(css).replace(/\/\*[\s\S]*?\*\//g, '');
+  return new Set([...text.matchAll(/@keyframes\s+([A-Za-z_][\w-]*)/g)].map((m) => m[1]));
+}
 
 function scopeSelector(sel, scope) {
   const s = sel.trim();

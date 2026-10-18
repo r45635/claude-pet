@@ -63,6 +63,23 @@ export const PROFILES = {
 
 const TARGETS = { root: '', shaker: ' .shaker', body: ' .body', eyes: ' .eyes' };
 
+/**
+ * The vocabulary a manifest's `animations` section may use. The same values live in
+ * avatar-format.json for the creator tooling and the Rust importer; a conformance test
+ * (behavior.test.ts) keeps this copy honest — the page cannot import JSON on its own.
+ */
+export const MOTION_RULES = {
+  profiles: ['classic'],
+  targets: ['root', 'shaker', 'body', 'eyes'],
+  keyframePattern: /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/,
+  builtinKeyframes: ['breathe', 'shake', 'nod', 'tap', 'hammer', 'float', 'cheer', 'hop', 'flinch', 'step-l', 'step-r'],
+  easings: ['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out'],
+  bezierRange: [-0.5, 1.5],
+  durMs: [80, 10000],
+  ampRange: [0, 3],
+  maxCount: 10,
+};
+
 /** 120 → '.12s', 2400 → '2.4s' — the shorthand the stylesheet always used. */
 function sec(ms) {
   return `${String(ms / 1000).replace(/^0\./, '.')}s`;
@@ -111,8 +128,11 @@ export function mergeBehavior(base, override) {
  */
 export function compileBehavior(behavior, scope = '', kfName = (n) => n) {
   const out = [];
+  // `amp` rides the same rule as a bounded multiplier: the built-in keyframes read
+  // calc(var(--amp) * var(--amp-k, 1)), so an avatar scales motion without seeing load.
   const motion = (m, tempo, count = 'infinite') =>
-    `animation: ${kfName(m.kf)} ${durText(m.dur, tempo)} ${m.ease ?? 'ease'} ${count};`;
+    `animation: ${kfName(m.kf)} ${durText(m.dur, tempo)} ${m.ease ?? 'ease'} ${count};` +
+    (typeof m.amp === 'number' ? ` --amp-k: ${m.amp};` : '');
 
   const starTarget = behavior.states?.['*']?.loop?.target ?? null;
   for (const [state, entry] of Object.entries(behavior.states ?? {})) {
@@ -156,6 +176,79 @@ export function compileBehavior(behavior, scope = '', kfName = (n) => n) {
   }
 
   return `${out.join('\n')}\n`;
+}
+
+/**
+ * Turn a manifest's optional `animations` section into a behavior override map.
+ *
+ * This is the page's last gate on untrusted input: everything it keeps is a typed
+ * token — enum target, known keyframe name, clamped numbers — and everything else is
+ * dropped with a reason. The TS tooling and the Rust importer validated the same rules
+ * earlier, so a drop here means a hand-edited install, not a normal import.
+ *
+ * @param {object|undefined} anims - the manifest section
+ * @param {Set<string>} [ownKf] - keyframe names the avatar's own CSS defines
+ * @returns {{ override: object, dropped: string[] }}
+ */
+export function behaviorFromManifest(anims, ownKf = new Set()) {
+  const R = MOTION_RULES;
+  const dropped = [];
+  const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
+  const motionSpec = (spec, where, enter) => {
+    if (!spec || typeof spec !== 'object') return null;
+    const kf = spec.keyframes;
+    if (typeof kf !== 'string' || !R.keyframePattern.test(kf)
+        || !(ownKf.has(kf) || R.builtinKeyframes.includes(kf))) {
+      dropped.push(`${where}: unknown keyframes ${JSON.stringify(kf ?? null)}`);
+      return null;
+    }
+    const target = spec.target ?? (enter ? 'root' : 'body');
+    if (!R.targets.includes(target)) {
+      dropped.push(`${where}: unknown target ${JSON.stringify(spec.target)}`);
+      return null;
+    }
+    let ease = 'ease';
+    if (R.easings.includes(spec.ease)) ease = spec.ease;
+    else if (Array.isArray(spec.ease) && spec.ease.length === 4 && spec.ease.every((n) => Number.isFinite(n))) {
+      ease = `cubic-bezier(${spec.ease.map((n) => clamp(n, R.bezierRange)).join(', ')})`;
+    } else if (spec.ease !== undefined) {
+      dropped.push(`${where}: unknown easing`);
+      return null;
+    }
+    const m = { target, kf, ease, dur: spec.dur === 'auto' || spec.dur === undefined ? 'auto' : clamp(Math.trunc(spec.dur) || R.durMs[0], R.durMs) };
+    if (typeof spec.amp === 'number' && Number.isFinite(spec.amp)) m.amp = clamp(spec.amp, R.ampRange);
+    if (enter) m.count = clamp(Math.trunc(spec.count ?? 1) || 1, [1, R.maxCount]);
+    return m;
+  };
+
+  const src = (anims && typeof anims === 'object' && anims.states && typeof anims.states === 'object') ? anims.states : {};
+  const states = {};
+  for (const [state, raw] of Object.entries(src)) {
+    // A fallback entry reuses another state's spec; chains are bounded like the
+    // picture fallbacks are.
+    let spec = raw;
+    let hops = 0;
+    while (spec && typeof spec === 'object' && typeof spec.fallback === 'string' && hops < 8) {
+      spec = src[spec.fallback];
+      hops += 1;
+    }
+    if (!spec || typeof spec !== 'object') {
+      dropped.push(`${state}: empty after fallback`);
+      continue;
+    }
+    const entry = {};
+    if (spec.keyframes === null) entry.loop = null;
+    else if (spec.keyframes !== undefined) {
+      const m = motionSpec(spec, state, false);
+      if (m) entry.loop = m;
+    }
+    if (spec.enter !== undefined) {
+      const m = motionSpec(spec.enter, `${state}.enter`, true);
+      if (m) entry.enter = m;
+    }
+    if (Object.keys(entry).length > 0) states[state] = entry;
+  }
+  return { override: { states }, dropped };
 }
 
 /** The states whose arrival plays an enter one-shot. */
