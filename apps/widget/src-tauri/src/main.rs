@@ -97,7 +97,7 @@ fn chat_model() -> Option<String> {
 #[tauri::command]
 fn chat_ask(app: AppHandle, pet: State<'_, Pet>, text: String) -> Result<(), String> {
     if text.trim().is_empty() {
-        return Err("empty message".into());
+        return Err("empty_message".into());
     }
     pet.chat.ask(app, text, chat_model())
 }
@@ -117,14 +117,17 @@ fn chat_cancel(pet: State<'_, Pet>) -> bool {
 }
 
 #[tauri::command]
-fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value) -> Result<(), String> {
+fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, locale: Option<String>) -> Result<(), String> {
+    let locale = locale.unwrap_or_else(|| "en".into());
     let mut avatars = vec![("classic".to_owned(), "Classic".to_owned())];
     for a in avatars::list(&root()) {
-        if let (Some(id), Some(name)) = (a["id"].as_str(), a["name"].as_str()) {
+        // A manifest may name the avatar per language ("names": {"fr": "…"}).
+        let name = a["names"][&locale].as_str().or(a["name"].as_str());
+        if let (Some(id), Some(name)) = (a["id"].as_str(), name) {
             avatars.push((id.to_owned(), name.to_owned()));
         }
     }
-    let menu = menu::build(&app, &prefs, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
+    let menu = menu::build(&app, &locale, &prefs, pet.chat.busy(), &avatars).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 

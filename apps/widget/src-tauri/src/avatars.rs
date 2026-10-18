@@ -174,7 +174,14 @@ pub fn list(root: &Path) -> Vec<Value> {
             }
             let m = read_manifest(&entry.path().join("manifest.json")).ok()?;
             check_manifest(&m).ok()?;
-            (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "author": m["author"], "kind": m["kind"] }))
+            // Optional per-language names, strings only, kept short.
+            let names: Map<String, Value> = m["names"].as_object().map(|o| {
+                o.iter()
+                    .filter(|(k, v)| k.len() <= 8 && v.as_str().is_some_and(|n| !n.is_empty() && n.chars().count() <= 60))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            }).unwrap_or_default();
+            (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "names": names, "author": m["author"], "kind": m["kind"] }))
         })
         .collect();
     out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));

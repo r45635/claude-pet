@@ -241,7 +241,7 @@
   #close:hover { background: rgba(255, 255, 255, .08); color: #eceff4; }
   #messages { flex: 1; overflow-y: auto; padding: 4px 16px 8px; display: flex;
               flex-direction: column; gap: 10px; }
-  #messages:empty::before { content: "Ask me anything — I'm Claude, with my tools."; color: #8b93a7; }
+  #messages:empty::before { content: attr(data-empty); color: #8b93a7; }
   .you { align-self: flex-end; max-width: 80%; background: var(--skin-base); color: var(--ink);
          padding: 7px 13px; border-radius: 16px 16px 4px 16px; white-space: pre-wrap; }
   .claude { align-self: flex-start; max-width: 100%; overflow-wrap: anywhere; color: #dde2ea; }
@@ -421,7 +421,7 @@
 
 <div id="chat" hidden>
   <div id="bubble">
-    <header><span id="who">Claude</span>
+    <header><span id="who" data-i18n="chat.header">Claude</span>
       <button id="gear" type="button" title="Settings" aria-label="Settings" aria-pressed="false">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -429,7 +429,7 @@
           <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
         </svg>
       </button>
-      <button id="close" type="button" title="Close (Esc)">×</button></header>
+      <button id="close" type="button" title="Close (Esc)" data-i18n-title="chat.close" data-i18n-aria="chat.close">×</button></header>
     <div id="settings" hidden>
       <div class="setting">
         <label for="size">Size <output id="size-out" for="size"></output></label>
@@ -455,17 +455,18 @@
       </div>
       <div id="settings-status" role="status"></div>
     </div>
-    <div id="messages"></div>
-    <div id="status"></div>
+    <div id="messages" data-i18n-empty="chat.empty"></div>
+    <div id="status" aria-live="polite"></div>
     <form id="ask">
-      <textarea id="input" rows="1" placeholder="Ask Claude…"></textarea>
-      <button id="send" type="submit" title="Send (Enter)">↑</button>
+      <textarea id="input" rows="1" placeholder="Ask Claude…" data-i18n-placeholder="chat.placeholder" data-i18n-aria="chat.placeholder"></textarea>
+      <button id="send" type="submit" title="Send (Enter)" data-i18n-title="chat.send" data-i18n-aria="chat.send">↑</button>
     </form>
   </div>
 </div>
 
 <script type="module">
   import { buildImageProto, buildSvgProto, scopeCss, resolveStates, DEFAULT_GEO } from './avatar.js';
+  import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -520,14 +521,12 @@
   let gaugeShown = false;
   function untilReset(iso, nowMs) {
     if (!iso) return '';
-    const min = Math.max(0, Math.round((Date.parse(iso) - nowMs) / 60_000));
-    if (min < 60) return `${min}m`;
-    return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+    return fmt.duration(Math.max(0, Math.round((Date.parse(iso) - nowMs) / 60_000)));
   }
   let gaugeKey = '';
   function renderGauge(win) {
     const left = win ? untilReset(win.resets_at, Date.now()) : '';
-    const key = JSON.stringify([win?.used_pct, left]);
+    const key = JSON.stringify([win?.used_pct, left, currentLocale()]);
     if (key === gaugeKey) return;
     gaugeKey = key;
     gaugeShown = Boolean(win);
@@ -537,8 +536,9 @@
       gauge.classList.toggle('warn', win.used_pct >= 70 && win.used_pct < 90);
       gauge.classList.toggle('full', win.used_pct >= 90);
       gaugeText.textContent = left;
-      const at = win.resets_at ? new Date(win.resets_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      gauge.querySelector('title').textContent = `Session limit: ${win.used_pct}% used${at ? `, resets at ${at}` : ''}`;
+      const used = t('gauge.tooltip', { pct: fmt.percent(win.used_pct) });
+      gauge.querySelector('title').textContent = win.resets_at
+        ? t('gauge.resetsAt', { text: used, time: fmt.time(new Date(win.resets_at)) }) : used;
     } else {
       delete pet.dataset.gauge;
       gaugeText.textContent = '';
@@ -592,9 +592,9 @@
       el.removeAttribute('id');
       if (mini) {
         el.classList.add('mini');
-        const t = document.createElementNS(SVG_NS, 'title');
-        t.textContent = title;
-        el.prepend(t);
+        const titleEl = document.createElementNS(SVG_NS, 'title');
+        titleEl.textContent = title;
+        el.prepend(titleEl);
       }
       critterEls.set(id, el);
     }
@@ -742,7 +742,7 @@
             const id = `a:${g.id}:${a.id}`;
             keepCritters.add(id);
             keepWalkers.add(id);
-            const el = critter(id, true, `Subagent: ${a.type ?? 'unknown type'}`);
+            const el = critter(id, true, t('subagent.tooltip', { type: a.type ?? t('subagent.unknown') }));
             let w = walkers.get(id);
             if (!w) {
               // A newcomer starts at a random spot around its parent.
@@ -810,30 +810,26 @@
 
   // What the bubble says. Only closed values reach here (a tool class, an API error enum,
   // a load channel, counts): unknown codes get a generic line, never their raw text.
-  const TOOL_NAMES = { bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit', search: 'Search',
-                       fetch: 'Web fetch', task: 'Subagent', todo: 'Todo list', notebook: 'Notebook',
-                       mcp: 'An MCP tool' };
-  const API_ERRORS = { rate_limit: 'Rate limited', overloaded: 'API overloaded',
-                       server_error: 'API server error' };
+  const TOOLS = new Set(['bash', 'read', 'write', 'edit', 'search', 'fetch', 'task', 'todo', 'notebook', 'mcp']);
+  const API_ERRORS = new Set(['rate_limit', 'overloaded', 'server_error']);
   // ctx: the counts the storm line can quote for that creature (unknown → generic words).
   function reasonText(r, ctx) {
     if (!r) return '';
-    if (r.kind === 'tool_failed') return `${TOOL_NAMES[r.tool] ?? 'A tool'} failed`;
-    if (r.kind === 'api_error') return API_ERRORS[r.code] ?? 'API error';
+    if (r.kind === 'tool_failed') return t('why.toolFailed', { tool: t(`why.tool.${TOOLS.has(r.tool) ? r.tool : 'other'}`) });
+    if (r.kind === 'api_error') return t(`why.api.${API_ERRORS.has(r.code) ? r.code : 'other'}`);
     if (r.kind !== 'storm') return '';
     switch (r.driver) {
-      case 'tool': return ctx.toolRate > 0 ? `${ctx.toolRate} tool calls/min` : 'Lots of tool calls';
-      case 'agent': return ctx.agents === 1 ? '1 subagent running'
-        : ctx.agents > 1 ? `${ctx.agents} subagents running` : 'Lots of subagents';
-      case 'file': return 'Lots of files at once';
-      case 'generation': return ctx.tokens != null ? `${Math.round(ctx.tokens / 1000)}k tokens/min` : 'Writing a lot';
+      case 'tool': return ctx.toolRate > 0 ? t('why.toolRate', { n: ctx.toolRate }) : t('why.lotsOfToolCalls');
+      case 'agent': return ctx.agents > 0 ? t('why.subagents', { n: ctx.agents }) : t('why.lotsOfSubagents');
+      case 'file': return t('why.lotsOfFiles');
+      case 'generation': return ctx.tokens != null ? t('why.tokensPerMin', { n: fmt.compact(ctx.tokens) }) : t('why.writingALot');
       default: return '';
     }
   }
   const agentName = (type) => {
-    const t = (type ?? 'agent').replace(/[-_]+/g, ' ');
-    const short = t.length > 10 ? `${t.slice(0, 9)}…` : t;
-    return short.charAt(0).toUpperCase() + short.slice(1);
+    const name = (type ?? 'agent').replace(/[-_]+/g, ' ');
+    const short = name.length > 10 ? `${name.slice(0, 9)}…` : name;
+    return short.charAt(0).toLocaleUpperCase(currentLocale()) + short.slice(1);
   };
   // One bubble, always full size: in a crowd, the most urgent message, its tail pointing
   // at the family it is about. Errors (an agent's or a session's) before storms.
@@ -846,7 +842,7 @@
     }
     for (const x of sessions) {
       const a = (x.agents ?? []).find((ag) => ag.state === 'ERROR' && ag.reason);
-      if (a) return { text: `${agentName(a.type)}: ${reasonText(a.reason, {})}`, family: x.id };
+      if (a) return { text: t('why.agentError', { agent: agentName(a.type), reason: reasonText(a.reason, {}) }), family: x.id };
     }
     const ctx = (x) => ({ toolRate: x.tool_calls_per_minute, tokens: null,
                           agents: (x.agents ?? []).filter((a) => a.state !== 'DONE').length });
@@ -857,12 +853,19 @@
     return { text: '', family: '' };
   }
   const whyBubble = document.getElementById('why');
+  // The bubble's text width, measured with the same font (a translation may be longer than
+  // the English it replaced; an estimate per character was wrong for both).
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  function textWidth(text) {
+    measureCtx.font = '700 11px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif';
+    return measureCtx.measureText(text).width;
+  }
   function renderWhy({ text, family }) {
     pet.dataset.why = text;
     if (!text) return;
     const label = whyBubble.querySelector('text');
     label.textContent = text;
-    const natural = Math.round(text.length * 6.6); // display:none can't be measured
+    const natural = Math.round(textWidth(text)); // display:none can't be measured: canvas does
     const w = Math.min(156, natural + 22);
     if (natural > w - 22) label.setAttribute('textLength', String(w - 22));
     else label.removeAttribute('textLength');
@@ -1000,16 +1003,29 @@
     if (payload.ok) {
       avatarId = '';
       loadAvatar(payload.id);
-      flash(`Avatar: ${String(payload.name).slice(0, 24)}`);
+      flash(t('avatar.flash', { name: String(payload.name).slice(0, 24) }));
     } else {
-      flash('Avatar refused (see the log)');
+      flash(t('avatar.refused'));
       diag(`avatar import: ${payload.error}`);
     }
   });
 
+  // A refused save says why in words: an unreadable config.json is the one worth naming.
+  const saveError = (err) => {
+    diag(`settings: ${err}`);
+    return String(err).includes('config_invalid') ? t('settings.configInvalid') : t('settings.notSaved');
+  };
+
+  let appliedLocale = '';
   function applyPrefs(p) {
     if (!p) return;
     prefs = p;
+    const locale = setLocale(p.locale ?? 'auto');
+    if (locale !== appliedLocale) {
+      appliedLocale = locale;
+      translateDom();
+      last = ''; // re-render: why bubble, tooltips, gauge in the new language
+    }
     loadAvatar(p.avatar ?? 'classic');
     renderSettings(p);
     pet.dataset.showSessions = String(p.showSessions);
@@ -1019,7 +1035,7 @@
 
   addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    invoke('show_menu', { prefs }).catch((err) => diag(`menu: ${err}`));
+    invoke('show_menu', { prefs, locale: currentLocale() }).catch((err) => diag(`menu: ${err}`));
   });
 
   // ---- click to talk, drag to move ---------------------------------------------------------
@@ -1115,19 +1131,25 @@
     document.getElementById('bubble').classList.toggle('busy', value);
     sendBtn.classList.toggle('stop', value);
     sendBtn.textContent = value ? '■' : '↑';
-    sendBtn.title = value ? 'Stop' : 'Send (Enter)';
+    sendBtn.title = t(value ? 'chat.stop' : 'chat.send');
+    sendBtn.setAttribute('aria-label', sendBtn.title);
     last = ''; // re-render the creature now: its own Claude is (not) working
     if (lastFrame) render(lastFrame);
   }
 
+  // Rust sends error codes; the words are ours, in the user's language. Anything else is
+  // a raw technical message: a generic line on screen, the detail in the log.
+  const CHAT_ERRORS = new Set(['already_answering', 'claude_not_found', 'cannot_start', 'chat_disabled', 'empty_message', 'stopped']);
+  const chatError = (code) => t(`chat.error.${CHAT_ERRORS.has(code) ? code : 'other'}`);
+
   function onChat(ev) {
     switch (ev.kind) {
       case 'open': toggleChat(true); break;
-      case 'reset': messagesEl.replaceChildren(); statusEl.textContent = 'New conversation'; break;
+      case 'reset': messagesEl.replaceChildren(); statusEl.textContent = t('chat.newConversation'); break;
       case 'start':
         current = addMessage('claude typing', '…');
         current.dataset.text = '';
-        statusEl.textContent = 'Thinking…';
+        statusEl.textContent = t('chat.thinking');
         setBusy(true);
         break;
       case 'delta':
@@ -1136,15 +1158,15 @@
         current.classList.remove('typing');
         current.innerHTML = md(current.dataset.text);
         messagesEl.scrollTop = messagesEl.scrollHeight;
-        statusEl.textContent = 'Writing…';
+        statusEl.textContent = t('chat.writing');
         break;
-      case 'tool': statusEl.textContent = `Using ${ev.name}…`; break;
+      case 'tool': statusEl.textContent = t('chat.using', { tool: ev.name }); break;
       case 'done':
         if (current && !current.dataset.text) { current.classList.remove('typing'); current.innerHTML = md(ev.text); }
         statusEl.textContent = [
-          ev.isError ? 'Error' : '',
-          ev.durationMs != null ? `${(ev.durationMs / 1000).toFixed(1)} s` : '',
-          ev.costUsd != null ? `$${ev.costUsd.toFixed(3)}` : '',
+          ev.isError ? t('chat.failed') : '',
+          ev.durationMs != null ? fmt.seconds(ev.durationMs) : '',
+          ev.costUsd != null ? fmt.usd(ev.costUsd) : '',
         ].filter(Boolean).join(' · ');
         current = null;
         setBusy(false);
@@ -1152,7 +1174,8 @@
       case 'error':
         if (current && !current.dataset.text) current.remove();
         current = null;
-        statusEl.textContent = `⚠ ${ev.message}`;
+        statusEl.textContent = `⚠ ${chatError(ev.code ?? ev.message)}`;
+        if (ev.message) diag(`chat: ${ev.message}`);
         setBusy(false);
         break;
     }
@@ -1166,7 +1189,7 @@
     addMessage('you', escapeHtml(text));
     input.value = '';
     input.style.height = '';
-    invoke('chat_ask', { text }).catch((err) => onChat({ kind: 'error', message: String(err) }));
+    invoke('chat_ask', { text }).catch((err) => onChat({ kind: 'error', code: String(err) }));
   }
   document.getElementById('ask').addEventListener('submit', (e) => { e.preventDefault(); send(); });
   document.getElementById('close').addEventListener('click', () => toggleChat(false));
@@ -1188,7 +1211,7 @@
     bubbleEl.classList.toggle('settings', open);
     settingsEl.hidden = !open;
     gear.setAttribute('aria-pressed', String(open));
-    document.getElementById('who').textContent = open ? 'Settings' : 'Claude';
+    document.getElementById('who').textContent = t(open ? 'chat.settings' : 'chat.header');
     settingsStatus.textContent = '';
   }
   gear.addEventListener('click', () => showSettings(!bubbleEl.classList.contains('settings')));
@@ -1215,13 +1238,13 @@
   async function savePref(s, value) {
     s.pending = value ?? undefined;
     s.pendingUntil = Date.now() + 3000;
-    settingsStatus.textContent = 'Saving…';
+    settingsStatus.textContent = t('settings.saving');
     try {
       applyPrefs(await invoke('update_prefs', { patch: { [s.key]: value } }));
-      settingsStatus.textContent = 'Saved';
+      settingsStatus.textContent = t('settings.saved');
     } catch (err) {
       s.pending = undefined;
-      settingsStatus.textContent = `Not saved: ${err}`;
+      settingsStatus.textContent = saveError(err);
     }
   }
   for (const s of Object.values(SETTINGS)) {
@@ -1241,13 +1264,13 @@
   }
   transcriptsBox.addEventListener('change', async () => {
     transcriptsPending = transcriptsBox.checked;
-    settingsStatus.textContent = 'Saving…';
+    settingsStatus.textContent = t('settings.saving');
     try {
       applyPrefs(await invoke('update_prefs', { patch: { readTranscripts: transcriptsBox.checked } }));
-      settingsStatus.textContent = 'Saved';
+      settingsStatus.textContent = t('settings.saved');
     } catch (err) {
       transcriptsPending = undefined;
-      settingsStatus.textContent = `Not saved: ${err}`;
+      settingsStatus.textContent = saveError(err);
     }
   });
   for (const button of settingsEl.querySelectorAll('.reset')) {
@@ -1300,10 +1323,12 @@
       const agents = Array.from({ length: kids }, (_, i) => ({ id: `k${i}`, type: 'explore', state }));
       render({
         state, visual: state === 'IDLE' ? 'IDLE' : state === 'HIGH_LOAD' || state === 'ERROR' ? state : 'ACTIVE',
-        load: state === 'HIGH_LOAD' ? 90 : state === 'IDLE' ? 0 : 50, reason: null,
+        load: state === 'HIGH_LOAD' ? 90 : state === 'IDLE' ? 0 : 50,
+        reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' }
+          : state === 'ERROR' ? { kind: 'tool_failed', tool: 'bash' } : null,
         sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
         sessions: kids ? [{ id: 'demo', status: 'working', state, load: 50, agents }] : [],
-        prefs: { ...prefs, avatar: id }, estimated_activity_rate: 0, load_confidence: 1, context_load: null,
+        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto' }, estimated_activity_rate: 0, load_confidence: 1, context_load: null,
         active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
       });
       document.title = `ready ${id} ${state}`;
@@ -1311,6 +1336,8 @@
   }
 
   if (params.get('demo') === 'chat') {
+    setLocale(params.get('lang') ?? 'auto');
+    translateDom();
     const [v, h] = (params.get('layout') ?? 'above-right').split('-');
     chatOpen = true;
     document.documentElement.classList.add('chat', 'widget');
@@ -1321,7 +1348,7 @@
     addMessage('claude', md("Bien sûr ! **claude-pet** est une créature de bureau qui visualise l'activité observable de Claude Code.\n\nPour lancer le daemon : `npm run daemon`"));
     addMessage('you', 'et la commande pour les tests ?');
     addMessage('claude typing', '…');
-    statusEl.textContent = 'Using Bash…';
+    statusEl.textContent = t('chat.using', { tool: 'Bash' });
     chatBusy = true;
     sendBtn.classList.add('stop');
     sendBtn.textContent = '■';

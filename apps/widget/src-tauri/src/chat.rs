@@ -157,11 +157,13 @@ impl Chat {
     }
 
     /// Start a run; events go to the page as `chat` events. One run at a time.
+    /// Errors are codes (`already_answering`, `claude_not_found`, `cannot_start`): the page
+    /// words them in the user's language; the technical detail goes to the log.
     pub fn ask(&self, app: AppHandle, text: String, model: Option<String>) -> Result<(), String> {
         if self.busy() {
-            return Err("already answering".into());
+            return Err("already_answering".into());
         }
-        let claude = find_claude().ok_or("claude CLI not found (set CLAUDE_PET_CLAUDE)")?;
+        let claude = find_claude().ok_or("claude_not_found")?;
         let session = self.session();
         let home = std::env::var("HOME").unwrap_or_default();
         let path = format!(
@@ -176,14 +178,17 @@ impl Chat {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("cannot start claude: {e}"))?;
+            .map_err(|e| {
+                eprintln!("chat: cannot start claude: {e}");
+                "cannot_start".to_string()
+            })?;
 
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes()); // dropped => closed
         }
-        let stdout = child.stdout.take().ok_or("no stdout")?;
-        let mut stderr = child.stderr.take().ok_or("no stderr")?;
-        *self.child.lock().map_err(|_| "lock")? = Some(child);
+        let stdout = child.stdout.take().ok_or("cannot_start")?;
+        let mut stderr = child.stderr.take().ok_or("cannot_start")?;
+        *self.child.lock().map_err(|_| "cannot_start")? = Some(child);
         let _ = app.emit("chat", json!({ "kind": "start" }));
 
         let slot = Arc::clone(&self.child);
@@ -213,8 +218,11 @@ impl Chat {
                     let _ = fs::write(dir.join("session.json"), json!({ "id": uuid_v4(), "started": false }).to_string());
                 }
                 let last = err.trim().lines().last().unwrap_or("").to_owned();
+                // Interrupted (the stop button sends SIGINT) is not a failure worth a log line.
+                let stopped = status.as_ref().map_or(true, |s| std::os::unix::process::ExitStatusExt::signal(s).is_some());
+                let code = if stopped { "stopped" } else { "other" };
                 let why = status.map(|s| s.to_string()).unwrap_or_else(|| "stopped".into());
-                let _ = app.emit("chat", json!({ "kind": "error", "message": format!("{why} {last}").trim() }));
+                let _ = app.emit("chat", json!({ "kind": "error", "code": code, "message": format!("{why} {last}").trim() }));
             }
         });
         Ok(())
