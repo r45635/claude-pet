@@ -11,7 +11,7 @@
   "menu.avatar": "Avatar",
   "menu.avatar.classic": "Classic",
   "menu.avatar.library": "Library",
-  "menu.avatar.libraryUnavailable": "Library unavailable (needs Check for updates)",
+  "menu.avatar.libraryUnavailable": "Library unavailable (offline?)",
   "menu.avatar.libraryAllInstalled": "Everything is installed",
   "menu.avatar.update": "Update {name}…",
   "menu.avatar.remove": "Remove current avatar…",
@@ -186,5 +186,7 @@
   "set.chatEnabled.doc": "Click the creature to talk to Claude, a full agent that can edit files and run commands.",
   "set.chatModel.label": "Chat model",
   "set.chatModel.doc": "Model for the creature's own Claude.",
-  "pet.label": "claude-pet: Claude Code's activity"
+  "pet.label": "claude-pet: Claude Code's activity",
+  "menu.avatar.libraryLoading": "Loading the library…",
+  "menu.avatar.libraryOff": "Library off (turn on Check for updates)"
 }

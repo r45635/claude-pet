@@ -41,7 +41,9 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 
 `setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
 hooks into Claude Code and starts the pet at login. `~/.claude-pet/app/claude-pet` also has
-`status`, `restart`, `snapshot` and `uninstall` (which keeps your settings and logs).
+`status`, `restart`, `snapshot`, `uninstall` (which keeps your settings and logs) and
+`avatars` — `avatars list` / `avatars install <id>` add ready-made looks from the
+[library](#make-it-your-own).
 
 **Updates install themselves.** Once a day the daemon asks GitHub which release is the
 latest (a request carrying nothing but the URL — [PRIVACY](docs/PRIVACY.md)). When a newer
@@ -173,9 +175,17 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 ## Make it your own
 
-Right-click → **Avatar** switches the creature's look, installs new ones from the
-[avatar library](https://github.com/r45635/claude-pet-avatars) (**Library ▸**, signed, with
-updates and *Remove current avatar…*), or drag any `.claudepet` file onto it. An avatar is one picture per state (any drawing tool or image AI) or an SVG
+**More avatars, ready-made:** right-click → **Avatar** → **Library ▸**, or in a terminal:
+
+```bash
+~/.claude-pet/app/claude-pet avatars list            # standalone install
+~/.claude-pet/app/claude-pet avatars install ghost
+npm run avatars -- install ghost                     # from a clone
+```
+
+They come from the signed [avatar library](https://github.com/r45635/claude-pet-avatars);
+`update` and `remove` work the same way, and right-click → **Avatar** switches between the
+installed ones. Any other `.claudepet` file: drag it onto the creature. An avatar is one picture per state (any drawing tool or image AI) or an SVG
 following the creature's template — validated, sandboxed, and it never changes what the pet
 does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avatars/`](avatars).
 

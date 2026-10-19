@@ -86,21 +86,35 @@ applyTranscriptPref();
 
 // Release updates: checked daily (update.ts), surfaced in every frame and in /health.
 let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
-// The avatar library's signed catalog (catalog.ts), refreshed with the update check.
+// The avatar library's signed catalog (catalog.ts): fetched at startup, daily with the update
+// check, and again when the menu reads it stale — all under the `updatesCheck` setting.
 let catalog: Catalog | null = null;
-let catalogError: string | null = 'library: not fetched yet (it refreshes with Check for updates)';
+let catalogError: string | null = null;
 let catalogAt: string | null = null;
-async function refreshCatalog(): Promise<void> {
-  const result = await fetchCatalog();
-  catalogAt = new Date().toISOString();
-  if ('error' in result) {
-    catalogError = result.error; // the last good catalog stays usable
-    process.stderr.write(`${result.error}\n`);
-  } else {
-    catalog = result;
-    catalogError = null;
-  }
+let catalogFetching: Promise<void> | null = null;
+const CATALOG_STALE_MS = 3_600_000;
+function refreshCatalog(): Promise<void> {
+  if (!prefs.updatesCheck) return Promise.resolve();
+  catalogFetching ??= (async () => {
+    const result = await fetchCatalog();
+    catalogAt = new Date().toISOString();
+    if ('error' in result) {
+      catalogError = result.error; // the last good catalog stays usable
+      process.stderr.write(`${result.error}\n`);
+    } else {
+      catalog = result;
+      catalogError = null;
+    }
+  })().finally(() => { catalogFetching = null; });
+  return catalogFetching;
 }
+function catalogStatus(): 'ok' | 'loading' | 'off' | 'error' {
+  if (catalog) return 'ok';
+  if (!prefs.updatesCheck) return 'off';
+  return catalogError && !catalogFetching ? 'error' : 'loading';
+}
+// The CLI installs avatars outside the widget: it bumps this, the page reloads the one shown.
+let avatarsRev = 0;
 
 let autoTried: string | null = null; // one automatic attempt per detected version, no retry loop
 async function updateCheckLoop(): Promise<void> {
@@ -189,7 +203,7 @@ async function postUpdate(req: IncomingMessage, res: ServerResponse): Promise<vo
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
 function view(): string {
-  return JSON.stringify({ ...runtime.snapshot(), version: VERSION, update, prefs, config: { invalid: configInvalid, warnings: configWarnings } });
+  return JSON.stringify({ ...runtime.snapshot(), version: VERSION, update, avatarsRev, prefs, config: { invalid: configInvalid, warnings: configWarnings } });
 }
 
 function broadcast(): void {
@@ -382,7 +396,17 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // The avatar library for the native menu: cached, never a blocking fetch.
   if (url.pathname === '/avatars/catalog') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(catalogView(catalog, catalogError, catalogAt, installedAvatars())));
+    const stale = !catalogAt || Date.now() - Date.parse(catalogAt) > CATALOG_STALE_MS || catalogError !== null;
+    if (stale) void refreshCatalog(); // never awaited: the menu must not wait on the network
+    res.end(JSON.stringify(catalogView(catalog, catalogError, catalogAt, installedAvatars(), catalogStatus())));
+    return;
+  }
+
+  if (url.pathname === '/avatars/changed' && req.method === 'POST') {
+    avatarsRev += 1;
+    broadcast();
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -433,6 +457,7 @@ server.listen(PORT, '127.0.0.1', () => {
   sweepDownloads();
   setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
   // Update checks: one soon (off the login path), then daily. Never on the tick path.
+  setTimeout(() => void refreshCatalog(), 3_000); // the library is usable right after install
   setTimeout(() => void updateCheckLoop(), 30_000);
   setInterval(() => void updateCheckLoop(), 24 * 3_600_000);
 });

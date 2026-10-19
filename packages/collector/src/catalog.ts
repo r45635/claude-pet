@@ -40,6 +40,8 @@ export type CatalogEntry = {
 };
 export type Catalog = { generated: string; avatars: CatalogEntry[] };
 export type CatalogView = {
+  /** What the menu says: ok, loading (first fetch in flight), off (updatesCheck off), error. */
+  status: 'ok' | 'loading' | 'off' | 'error';
   fetchedAt: string | null;
   error: string | null;
   avatars: (CatalogEntry & { installed: { version: string | null; updateAvailable: boolean } | null })[];
@@ -120,8 +122,10 @@ export function installedAvatars(root = ROOT_DIR): Map<string, string | null> {
  * The menu's view. A free-form manifest version has no order, so "update available" means
  * "the signed catalog ships a different version" — the catalog is the source of truth.
  */
-export function catalogView(catalog: Catalog | null, error: string | null, fetchedAt: string | null, installed: Map<string, string | null>): CatalogView {
+export function catalogView(catalog: Catalog | null, error: string | null, fetchedAt: string | null, installed: Map<string, string | null>,
+  status: CatalogView['status'] = catalog ? 'ok' : error ? 'error' : 'loading'): CatalogView {
   return {
+    status,
     fetchedAt,
     error,
     avatars: (catalog?.avatars ?? []).map((a) => {

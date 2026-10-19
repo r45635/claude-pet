@@ -67,10 +67,13 @@ out.
 
 - the collector binds `127.0.0.1` only, with a per-run token in the SSE URL;
 - no analytics dependency. The daemon makes exactly one kind of outbound request at
-  runtime, and only while the *Check for updates* setting is on (it is by default): once a
-  day it asks `github.com` which release and avatar catalog are the latest — HEAD/GET
+  runtime, and only while the *Check for updates* setting is on (it is by default): at
+  startup and then daily it asks `github.com` which release and avatar catalog are the
+  latest (the catalog again when you open the menu and it is over an hour old) — HEAD/GET
   requests to this project's repositories that carry **nothing but the URL**: no identifier,
   no usage data, nothing read from your machine. Turning `updatesCheck` off stops them all;
+- `claude-pet avatars …` downloads the library catalog and packages when you run it, even
+  with `updatesCheck` off — you asked; same URLs, same nothing-but-the-URL;
 - at install time, when asked, `packages/collector/src/widget.ts` downloads the prebuilt
   widget from this repository's GitHub Releases, checks its SHA-256 and its release
   signature (docs/RISKS.md #12). It sends nothing but the request for that file;

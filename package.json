@@ -25,6 +25,7 @@
     "build-standalone": "node scripts/build-standalone.ts",
     "replay": "node packages/simulator/src/replay.ts",
     "avatar": "node scripts/avatar.ts",
+    "avatars": "node packages/collector/src/avatars-cli.ts",
     "bench": "node scripts/bench.ts",
     "test:avatar-sanitizer": "node scripts/avatar-sanitize-check.ts",
     "docs:config": "node scripts/config-doc.ts"

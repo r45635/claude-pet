@@ -148,9 +148,9 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
         .unwrap_or_else(|| serde_json::json!({ "error": "daemon unreachable", "avatars": [] }));
     let library = menu::library_items(&catalog, &locale);
     if let Ok(mut m) = app.state::<MenuLibrary>().0.lock() {
-        *m = (catalog, prefs["avatar"].as_str().unwrap_or("classic").to_owned());
+        *m = (catalog.clone(), prefs["avatar"].as_str().unwrap_or("classic").to_owned());
     }
-    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref()).map_err(|e| e.to_string())?;
+    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref(), menu::library_unavailable_key(&catalog)).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
