@@ -1229,6 +1229,7 @@
     const locale = setLocale(p.locale ?? 'auto');
     if (locale !== appliedLocale) {
       appliedLocale = locale;
+      if (T) invoke('set_locale', { locale }).catch((err) => diag(`locale: ${err}`));
       translateDom();
       if (ROWS.size) buildSettings(); // the panel in the new language
       last = ''; // re-render: why bubble, tooltips, gauge in the new language
@@ -1302,6 +1303,7 @@
   async function toggleChat(open = !chatOpen) {
     if (open && !prefs.chatEnabled && !bubbleEl.classList.contains('settings')) open = false;
     chatOpen = open;
+    reportPanel(open); // in the menu bar alone, the window shows for the panel and hides after
     if (!open) showSettings(false); // it opens on the conversation next time
     const sq = petPx() + 30;
     let layout = { above: true, right: true };
@@ -1733,6 +1735,14 @@
       `agents ${s.active_subagents}  conf ${s.load_confidence.toFixed(2)}  ` +
       `hooks:${s.sources.hooks ? 'y' : 'n'} net:${s.sources.net ? 'y' : 'n'} sl:${s.sources.statusline ? 'y' : 'n'}\n` +
       (s.sessions ?? []).map((x) => `${x.id} ${x.status}`).join('  ');
+  }
+
+  // ---- menu bar (setting `display`) --------------------------------------------------------
+  // Rust drives the icon from its own read of the feed (src-tauri/src/tray.rs): hidden, this
+  // page is throttled by WebKit and would lag. It only needs to know when a panel opens or
+  // closes (the window shows for it) and which language the page resolved.
+  function reportPanel(open) {
+    if (T) invoke('set_panel_open', { open }).catch((err) => diag(`panel: ${err}`));
   }
 
   function connect() {

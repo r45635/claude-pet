@@ -30,6 +30,8 @@
       "doc": "Keep the creature above other windows." },
     { "key": "showSessions", "path": "ui.showSessions", "type": "bool", "default": true, "section": "appearance",
       "doc": "One pastille per live Claude Code session under the creature." },
+    { "key": "display", "path": "ui.display", "type": "enum", "values": ["desktop", "menubar", "both"], "default": "desktop", "section": "appearance",
+      "doc": "Where the creature lives: on the desktop, as an icon in the menu bar (its title the creature's state, its menu the right-click menu), or both." },
     { "key": "fatigue", "path": "ui.fatigue", "type": "bool", "default": true, "section": "appearance",
       "doc": "The creature tires as its session's context window fills (the status line's context %): a sweat drop from 70 %, worn out from 88 %. Nothing shown when the % is unknown." },
 

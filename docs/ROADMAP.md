@@ -9,7 +9,7 @@ Each phase has an exit criterion that is a *check someone can run*, not a feelin
 | **2** | state engine + tests | no | `npm test` green; `heavy` → `load > 75` & `HIGH_LOAD` within 5 s; back under 25 within 15 s of silence — asserted in a test |
 | **3** | Tauri widget, 4 visual states | **yes** | creature visibly reacts to a simulator run; `< 1 %` CPU idle, `< 60 MB` RSS, both measured |
 | **4** | real Claude Code integration | no | spool line count grows during a real session; `sources.hooks` and `sources.statusline` both true; closing check passes |
-| **5** 🟡 | refinement | — | done: launch at login, sizes, one creature per session and per subagent, settings panel, usage-limit gauge, opt-in transcript token rates, chat (v0.1), click-through and avatars (v0.2.0). Left: menu bar, fatigue behaviour, OTEL token rates |
+| **5** ✅ | refinement | — | launch at login, sizes, one creature per session and per subagent, settings panel, usage-limit gauge, opt-in transcript token rates, chat (v0.1), click-through and avatars (v0.2.0); menu-bar mode, fatigue, opt-in OpenTelemetry token counts, `doctor`, dead sessions leaving at once (v0.4) |
 
 ## Order rationale
 
@@ -25,5 +25,5 @@ written to back up the file and merge with the two memory-hub hooks already conf
 
 ## Current status
 
-Phase 0 complete. Phases 1 and 2 implemented in this first iteration. Phase 3 scaffolded
-only (`apps/widget` holds the Rust-free dev harness; no Tauri project yet).
+All five phases are done. What remains is tuning against real sessions (`npm run replay`)
+and the open items in `docs/RISKS.md`.

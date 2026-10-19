@@ -83,6 +83,7 @@ export type Prefs = {
   opacity: number;
   alwaysOnTop: boolean;
   showSessions: boolean;
+  display: 'desktop' | 'menubar' | 'both';
   fatigue: boolean;
   temperament: Temperament;
   /** Effective value: the override if any, else the temperament's. */

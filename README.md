@@ -27,7 +27,7 @@ it yourself).
 | 2 | state engine + tests | ✅ |
 | 3 | Tauri widget | ✅ transparent window, clicks only on the creature, ~0.5% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 wired (hooks + network sensor); tuning on real sessions continues (`npm run replay`) |
-| 5 | refinement | 🟡 done: launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars. Left: menu bar, fatigue, OTEL token rates |
+| 5 | refinement | ✅ launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars, menu bar, fatigue, OpenTelemetry token counts |
 
 ## Install
 
@@ -176,6 +176,14 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
   first answer, and not in VS Code's chat panel (see below).
 - **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
   `Bash failed`, `Rate limited`).
+- **Tiredness**: as a session's context window fills, its creature sweats (from 70 %), then
+  wears out (from 88 %: a second drop, a duller skin, an unstable glow). From the status
+  line's context %, so not in VS Code's chat panel; nothing shown when it is unknown.
+- **Or just an icon in the menu bar**: right-click → **Display** → *In the menu bar* (or
+  *Both*). The icon's title is the creature's state (💭 thinking, 📖 reading, ⌨️ coding,
+  🔧 a tool, ⚡ a storm, ✋ waiting for you, ✅ done, ❗ trouble, ⚠︎ no signal), its tooltip
+  says it in words with the sessions and the context fill, and its menu is the creature's.
+  The chat and the settings open in their bubble as usual.
 - **Settings** (gear icon in the chat bubble): the creatures' size (80 to 300 px),
   storm threshold and minimum time per state, applied live, and *Read conversation files* (off by default): each subagent then shows
   its own model working or its tool running, and token counts are real. Only line kinds

@@ -102,6 +102,7 @@ This differs from the brief's suggested tree in two ways, both deliberate:
 | **`sh` + `jq` for hooks** | ~5 ms vs ~80 ms for Node — measured; see `CLAUDE_CODE_TELEMETRY.md` |
 | **Tauri 2** | brief preference; ~5 MB binary and a system WKWebView vs Electron's ~100 MB and its own Chromium. Needed for transparent/borderless/always-on-top/click-through, all first-class in Tauri's window config |
 | **localhost SSE for the UI** | `EventSource` is 3 lines in the webview, auto-reconnects, and is readable with `curl`. A Unix socket would need a Tauri-side bridge to reach the webview — more Rust for no gain |
+| **…and a second reader in Rust for the menu bar** | hidden, the webview is throttled by WebKit (measured: frames ~17 s late, in a burst), so the menu-bar icon reads the same feed itself (`src-tauri/src/tray.rs`, HTTP/1.0, a substring check per frame in desktop mode) and keeps App Nap off while the window is hidden |
 
 ## Local communication — the recommendation
 

@@ -41,6 +41,7 @@ Generated from [`packages/collector/src/settings-schema.json`](../packages/colle
 | Appearance | `ui.opacity` | 0.3–1 (step 0.05) | `1` | panel, file | How opaque the creature is. |
 | Appearance | `ui.alwaysOnTop` | `true` · `false` | `true` | panel, file | Keep the creature above other windows. |
 | Appearance | `ui.showSessions` | `true` · `false` | `true` | panel, file | One pastille per live Claude Code session under the creature. |
+| Appearance | `ui.display` | `desktop` · `menubar` · `both` | `"desktop"` | panel, file | Where the creature lives: on the desktop, as an icon in the menu bar (its title the creature's state, its menu the right-click menu), or both. |
 | Appearance | `ui.fatigue` | `true` · `false` | `true` | panel, file | The creature tires as its session's context window fills (the status line's context %): a sweat drop from 70 %, worn out from 88 %. Nothing shown when the % is unknown. |
 | Behaviour | `temperament` | `zen` · `normal` · `nervous` | `"normal"` | panel, file | Presets for what excites the creature, when it storms and how fast it calms down. |
 | Behaviour | `highLoadThreshold` | 30–100 (step 1) | preset / engine default | panel, file | Load at which the creature storms; it calms down 10 points lower. Empty = the temperament's value. |

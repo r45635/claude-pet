@@ -28,6 +28,14 @@ impl Words {
     pub fn get(&self, key: &str) -> String {
         self.lang[key].as_str().or(self.en[key].as_str()).unwrap_or(key).to_owned()
     }
+
+    /// A count: `{n}` filled in, the `one`/`other` form picked when the string has both (the
+    /// page uses Intl.PluralRules; for the counts the menu bar shows, n ≥ 1, this is the same).
+    pub fn plural(&self, key: &str, n: usize) -> String {
+        let v = if self.lang[key].is_null() { &self.en[key] } else { &self.lang[key] };
+        let form = v.as_str().or(v[if n == 1 { "one" } else { "other" }].as_str()).unwrap_or(key);
+        form.replace("{n}", &n.to_string())
+    }
 }
 
 fn radio<R: Runtime>(
@@ -174,6 +182,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
         .item(&radio(app, &w, prefs, "temperament", "menu.temperament",
             &[("zen", "menu.temperament.zen"), ("normal", "menu.temperament.normal"), ("nervous", "menu.temperament.nervous")])?)
         .item(&size_menu(app, &w, prefs)?)
+        .item(&radio(app, &w, prefs, "display", "menu.display",
+            &[("desktop", "menu.display.desktop"), ("menubar", "menu.display.menubar"), ("both", "menu.display.both")])?)
         .item(&toggle(app, &w, prefs, "showSessions", "menu.sessionPastilles")?)
         .item(&toggle(app, &w, prefs, "paused", "menu.pause")?)
         .separator()
