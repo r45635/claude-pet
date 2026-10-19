@@ -92,6 +92,7 @@ export type Prefs = {
   paused: boolean;
   netSensor: boolean;
   readTranscripts: boolean;
+  otel: boolean;
   chatEnabled: boolean;
   chatModel: 'default' | 'sonnet' | 'haiku';
   position: { x: number; y: number } | null;

@@ -261,8 +261,25 @@ Why it is not the backbone:
 - It is a session-wide env-var change on the user's machine; a bug in our receiver degrades
   every Claude Code session, not just the pet.
 
-**Decision:** `collector.sources.otel = false`, documented as the Phase 5 path to a real
-`tokens_per_minute` without touching internal file formats.
+**Decision:** not the backbone; an **opt-in source of real token counts** since v0.4
+(`claude-pet otel enable`, setting `otel`). Measured on Claude Code 2.1.301 (2026-10-19)
+with a local OTLP receiver:
+
+- only the **logs** signal is needed. `enable` sets `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
+  `OTEL_LOGS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`,
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:<port>/v1/logs`,
+  `OTEL_LOGS_EXPORT_INTERVAL=2000`. The signal-specific variables are honoured, so a user's
+  own metrics exporter is untouched; with no metrics exporter set, nothing else is sent;
+- one `claude_code.api_request` record per API request, **when it ends**, with
+  `session.id` (its first 8 characters = the hooks' `sid`), `output_tokens`, `duration_ms`,
+  `ttft_ms`, cost and model. That is a count of what *was* generated: it feeds
+  `tokens_per_minute` and the generation channel, never the creature's state;
+- every record also carries `user.email`, account and organization ids: the parser keeps
+  three numbers and drops the rest (docs/PRIVACY.md);
+- it works where the status line does not — the VS Code extension's panel, API-key,
+  Bedrock and Vertex sessions — but carries no context %: the gauge stays status-line only;
+- with the conversation files also on, those count the tokens (finer: per message, per
+  subagent) and OpenTelemetry only proves it works; never both, or tokens count twice.
 
 ---
 

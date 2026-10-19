@@ -18,6 +18,7 @@ function facts(over: Partial<Facts> = {}): Facts {
     scriptExists: (p) => p.startsWith(BIN), daemonUrl: 'http://127.0.0.1:8787', health: HEALTH,
     spool: { size: 1_000, lastEventMs: 1_000_000_000 - 5_000 }, claudeRunning: true, widgetRunning: true,
     agents: [{ label: 'x.daemon', installed: true, loaded: true }, { label: 'x.widget', installed: true, loaded: true }],
+    otel: { pref: false, env: { state: 'off' } },
     ...over,
   };
 }
@@ -85,4 +86,14 @@ test('doctor: a reader stuck behind the spool, dropped lines, no widget', () => 
 test('doctor: scriptOf reads back what install writes, quotes and spaces included', () => {
   assert.equal(scriptOf('sh "/Users/me/my \\"pet\\"/hook.sh"'), '/Users/me/my "pet"/hook.sh');
   assert.equal(scriptOf('bash ~/x.sh'), null);
+});
+
+test('doctor: the OpenTelemetry setting and the export settings must agree', () => {
+  assert.equal(byName(facts()).telemetry, undefined, 'both off: nothing to say');
+  assert.equal(byName(facts({ otel: { pref: true, env: { state: 'off' } } })).telemetry!.status, 'warn');
+  assert.equal(byName(facts({ otel: { pref: false, env: { state: 'on' } } })).telemetry!.status, 'warn', 'exported then dropped');
+  assert.equal(byName(facts({ otel: { pref: true, env: { state: 'on' } } })).telemetry!.status, 'info', 'not live yet');
+  const live = facts({ otel: { pref: true, env: { state: 'on' } }, health: { ...HEALTH, sources: { ...HEALTH.sources, otel: true } } });
+  assert.equal(byName(live).telemetry!.status, 'ok');
+  assert.match(byName(facts({ otel: { pref: true, env: { state: 'conflict', keys: ['OTEL_LOGS_EXPORTER'] } } })).telemetry!.detail, /OTEL_LOGS_EXPORTER/);
 });

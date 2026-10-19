@@ -23,6 +23,8 @@ import { isMain, STANDALONE, VERSION } from './entry.ts';
 import { BIN_DIR, HOOK_EVENTS, HOOK_SCRIPT, hookCommand, isOurs, settingsPath, statusCommand, STATUSLINE_SCRIPT, type Settings } from './install.ts';
 import { LABELS } from './login.ts';
 import { APP_DIR, ROOT_DIR, SPOOL_FILE, TOKEN_FILE } from './paths.ts';
+import { daemonPort, otelEnvState, type OtelEnvState } from './otel.ts';
+import { prefsOf, readUserFile } from './prefs.ts';
 
 export type Status = 'ok' | 'info' | 'warn' | 'fail';
 export type Check = { name: string; status: Status; detail: string; fix?: string };
@@ -60,6 +62,8 @@ export type Facts = {
   claudeRunning: boolean;
   widgetRunning: boolean;
   agents: { label: string; installed: boolean; loaded: boolean }[];
+  /** The OpenTelemetry source: the pet's setting, and the export settings in settings.json. */
+  otel: { pref: boolean; env: OtelEnvState | null };
 };
 
 /** Claude Code running this long with no hook event at all is not a quiet session. */
@@ -125,6 +129,29 @@ function statusLineCheck(f: Facts, settings: Settings): Check {
   return { name: 'status line', status: 'fail', detail: `points at a script that does not exist: ${path ?? line.command}`, fix: f.setupCommand };
 }
 
+/** Only when either half of the opt-in OpenTelemetry source is on: they must agree. */
+function otelCheck(f: Facts): Check | null {
+  const env = f.otel.env?.state ?? 'off';
+  if (!f.otel.pref && env === 'off') return null;
+  const name = 'telemetry';
+  if (env === 'conflict') {
+    return { name, status: 'warn', detail: `your own telemetry settings use ${f.otel.env?.state === 'conflict' ? f.otel.env.keys.join(', ') : ''}: no token counts for the pet`,
+             fix: 'see docs/CLAUDE_CODE_TELEMETRY.md (OTEL) to send the logs signal to the pet' };
+  }
+  if (!f.otel.pref) {
+    return { name, status: 'warn', detail: 'Claude Code exports to the pet, but the OpenTelemetry setting is off: every batch is dropped',
+             fix: 'claude-pet otel enable (or claude-pet otel disable)' };
+  }
+  if (env !== 'on') {
+    return { name, status: 'warn', detail: `the setting is on, but ~/.claude/settings.json is ${env === 'partial' ? 'only partly' : 'not'} configured to export`,
+             fix: 'claude-pet otel enable' };
+  }
+  const live = !('error' in f.health) && f.health.sources.otel;
+  return live
+    ? { name, status: 'ok', detail: 'token counts arriving from Claude Code' }
+    : { name, status: 'info', detail: 'configured; nothing received yet — sessions opened before `otel enable` keep their environment: start a new one' };
+}
+
 /** Pure: the facts of one machine → what is right and what to do about the rest. */
 export function diagnose(f: Facts): Check[] {
   const checks: Check[] = [];
@@ -186,6 +213,9 @@ export function diagnose(f: Facts): Check[] {
       checks.push({ name: 'gauges', status: 'info', detail: 'no status line sample yet: expected in the VS Code extension (it has no status line); a terminal session sends one per refresh' });
     }
   }
+
+  const otel = otelCheck(f);
+  if (otel) checks.push(otel);
 
   checks.push(f.widgetRunning
     ? { name: 'widget', status: 'ok', detail: 'running' }
@@ -261,7 +291,12 @@ export async function gather(): Promise<Facts> {
     daemonUrl = JSON.parse(readFileSync(join(ROOT_DIR, 'endpoint.json'), 'utf8')).url ?? daemonUrl;
   } catch { /* the default port */ }
   const uid = process.getuid?.() ?? 0;
+  let otelPref = false;
+  try {
+    otelPref = prefsOf(readUserFile()).otel;
+  } catch { /* unreadable: the config check says so */ }
   return {
+    otel: { pref: otelPref, env: settings && !('error' in settings) ? otelEnvState(settings, daemonPort()) : null },
     nowMs: Date.now(),
     version: VERSION,
     binDir: STANDALONE ? join(APP_DIR, 'hooks') : BIN_DIR,

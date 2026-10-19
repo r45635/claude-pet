@@ -55,7 +55,7 @@ export type PetSnapshot = {
   context_load: number | null;
   /** Events per minute, measured over a rolling window. */
   estimated_activity_rate: number;
-  /** null unless the (opt-in, undocumented) transcript source is enabled. Never faked. */
+  /** null unless an opt-in token source (transcript, OpenTelemetry) is enabled. Never faked. */
   tokens_per_minute: number | null;
   tool_calls_per_minute: number;
   active_subagents: number;
@@ -279,7 +279,10 @@ export class Engine {
   #sawHookEvent = false;
 
   #transcriptEnabled = false;
-  /** Output tokens seen in the conversation files, for tokens_per_minute. */
+  #otelEnabled = false;
+  /** At least one OpenTelemetry record has arrived since the source was turned on. */
+  #otelSeen = false;
+  /** Output tokens seen in the conversation files or OpenTelemetry, for tokens_per_minute. */
   #tokens: { tsMs: number; n: number }[] = [];
 
   constructor(nowMs: number, config: EngineConfig = DEFAULT_CONFIG) {
@@ -380,6 +383,33 @@ export class Engine {
     if (seen) seen.lastMs = Math.max(seen.lastMs, signal.atMs);
     const turn = this.#turns.get(signal.sid);
     if (turn) turn.lastEventMs = Math.max(turn.lastEventMs, signal.atMs);
+  }
+
+  /** Enable the opt-in OpenTelemetry source. Until then its records are ignored. */
+  enableOtelSource(enabled: boolean): void {
+    if (this.#otelEnabled === enabled) return;
+    this.#otelEnabled = enabled;
+    this.#otelSeen = false;
+    if (!enabled && !this.#transcriptEnabled) this.#tokens = [];
+  }
+
+  /**
+   * One API request's output tokens, from Claude Code's OpenTelemetry logs (sent when the
+   * request ends, every few seconds). It feeds tokens_per_minute and the generation channel,
+   * never the state: it says what was generated, not what is being generated now. The
+   * conversation files are finer (per message, per subagent): when they are on, they count
+   * the tokens and this only says the source works — never both, or every token would count twice.
+   */
+  ingestOtel(signal: { sid: string; atMs: number; outTokens: number }): void {
+    if (!this.#otelEnabled) return;
+    this.#otelSeen = true;
+    const lane = this.#lanes.get(signal.sid);
+    if (!lane || this.#transcriptEnabled || signal.outTokens <= 0) return;
+    pourLoad(lane.load, 'generation', signal.outTokens * this.config.transcript.perToken);
+    this.#tokens.push({ tsMs: signal.atMs, n: signal.outTokens });
+    this.#tokens.sort((a, b) => a.tsMs - b.tsMs); // batches may arrive out of order
+    const from = signal.atMs - this.config.rateWindowMs;
+    while (this.#tokens.length > 0 && this.#tokens[0]!.tsMs < from) this.#tokens.shift();
   }
 
   /** null = the conversation files say nothing (fresh) about this thread. */
@@ -753,9 +783,9 @@ export class Engine {
     return next;
   }
 
-  /** Output tokens per minute from the conversation files; null when the source is off. */
+  /** Output tokens per minute from the conversation files or OpenTelemetry; null when both are off. */
   #tokensPerMinuteAt(nowMs: number): number | null {
-    if (!this.#transcriptEnabled) return null;
+    if (!this.#transcriptEnabled && !this.#otelEnabled) return null;
     const from = nowMs - this.config.rateWindowMs;
     while (this.#tokens.length > 0 && this.#tokens[0]!.tsMs < from) this.#tokens.shift();
     const sum = this.#tokens.reduce((acc, t) => acc + t.n, 0);
@@ -874,7 +904,7 @@ export class Engine {
         net: this.#netSeen,
         statusline: this.#lastMeterMs > 0,
         transcript: this.#transcriptEnabled,
-        otel: false,
+        otel: this.#otelEnabled && this.#otelSeen,
       },
       estimated: ['load', 'estimated_activity_rate', 'tool_calls_per_minute',
                   ...(reason?.kind === 'storm' ? ['reason'] : [])],

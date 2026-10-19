@@ -24,6 +24,7 @@ import { APP_DIR, ROOT_DIR } from './paths.ts';
 import { main as snapshot } from './snapshot.ts';
 import { main as avatars } from './avatars-cli.ts';
 import { main as doctor } from './doctor.ts';
+import { main as otel } from './otel.ts';
 
 const EXE = 'claude-pet';
 const WIDGET = 'claude-pet-widget';
@@ -37,6 +38,7 @@ const USAGE = `claude-pet ${VERSION}
   claude-pet uninstall    stop it, unwire it, remove ~/.claude-pet/app (settings and logs stay)
   claude-pet status       whether the daemon and the widget are installed and running
   claude-pet doctor       check the whole chain: hooks, status line, daemon, events, widget
+  claude-pet otel         real token counts from Claude Code's telemetry: status, enable, disable
   claude-pet restart      restart both
   claude-pet snapshot     what the creature currently sees (--watch to follow)
   claude-pet avatars      the avatar library: list, install <id>, update [<id>], remove <id>
@@ -106,6 +108,7 @@ export async function main(argv: string[]): Promise<number> {
     case 'daemon': await import('./daemon.ts'); return 0; // serves until killed
     case 'snapshot': return snapshot(rest);
     case 'doctor': return doctor(rest);
+    case 'otel': return otel(rest);
     case 'avatars': return avatars(rest);
     case 'version':
     case '--version': process.stdout.write(`${VERSION}\n`); return 0;

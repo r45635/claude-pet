@@ -126,4 +126,4 @@ settings only).
 | Electron | **rejected** — brief preference, and ~20× the RSS for a creature that must idle at near-zero cost |
 | Reading the transcript JSONL as the primary source | **rejected as default** — undocumented schema; kept as an opt-in source for real token rates |
 | Process/CPU inspection | **rejected** — measures the machine, not Claude |
-| OTEL as the backbone | **rejected for MVP** — 60 s default export interval; opt-in in Phase 5 |
+| OTEL as the backbone | **rejected** — telemetry arrives after each API request, batched every few seconds: too late to drive an animation. Opt-in since v0.4 for real token counts (`claude-pet otel enable`, otel.ts) |

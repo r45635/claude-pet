@@ -730,3 +730,35 @@ test('sessions: each carries its own context fill, null when its status line sai
   const byId = Object.fromEntries(engine.snapshot(1_000).sessions.map((s) => [s.id, s.context_load]));
   assert.deepEqual(byId, { aaaa1111: 92, bbbb2222: null });
 });
+
+test('otel: api_request token counts give tokens_per_minute, only once enabled', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 1_000, outTokens: 500 });
+  let snap = engine.snapshot(2_000);
+  assert.equal(snap.tokens_per_minute, null, 'off: absence stays absence');
+  assert.equal(snap.sources.otel, false);
+  engine.enableOtelSource(true);
+  assert.equal(engine.snapshot(2_000).tokens_per_minute, 0, 'on, nothing yet: a measured zero');
+  assert.equal(engine.snapshot(2_000).sources.otel, false, 'not live until a record arrives');
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 3_000, outTokens: 500 });
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 2_500, outTokens: 300 }); // a batch out of order
+  engine.ingestOtel({ sid: 'zzzz9999', atMs: 3_000, outTokens: 9_999 }); // unknown session: ignored
+  snap = engine.snapshot(4_000);
+  assert.equal(snap.tokens_per_minute, 800);
+  assert.equal(snap.sources.otel, true);
+  assert.ok(snap.debug.channels.generation! > 0, 'tokens pour into the generation channel');
+  assert.equal(engine.snapshot(4_000 + DEFAULT_CONFIG.rateWindowMs).tokens_per_minute, 0, 'rolls out of the window');
+});
+
+test('otel: with the conversation files on, tokens are not counted twice', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  engine.enableOtelSource(true);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingestTranscript({ sid: 'aaaa1111', aid: null, atMs: 1_000, kind: 'text', outTokens: 400 });
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 1_500, outTokens: 400 });
+  const snap = engine.snapshot(2_000);
+  assert.equal(snap.tokens_per_minute, 400);
+  assert.equal(snap.sources.otel, true, 'still reported live');
+});

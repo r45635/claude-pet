@@ -125,6 +125,8 @@ What is and is not available from Claude Code — and how each claim was verifie
   token totals, cost, durations (status line)
 - ⚠️ **indirect:** the transcript JSONL (internal schema) gives per-thread activity and
   real token counts → opt-in, off by default (settings → *Read conversation files*)
+- 📡 **documented, opt-in:** Claude Code's OpenTelemetry logs give real output-token counts
+  per API request, VS Code included → `claude-pet otel enable` (only the counts are kept)
 - ❌ **unavailable:** per-tool-call token counts in a hook payload, a streaming token-rate
   API, any explicit "thinking" signal
 - 🧮 **derived:** `load_score`, which is a visualization index and says so
@@ -241,7 +243,9 @@ arrive: no usage gauge, no context fill. To get them, switch the extension to te
 mode: VS Code settings → Extensions → Claude Code → **Use Terminal**
 (`claudeCode.useTerminal`). The only other source of plan usage would be Anthropic's
 internal usage API, which means reading your login token from the Keychain and calling
-out to the network: the pet does neither.
+out to the network: the pet does neither. Real token counts, though, do reach the pet from
+the panel through Claude Code's own telemetry: `claude-pet otel enable` (then open a new
+session), [privacy](docs/PRIVACY.md#opentelemetry-opt-in-off-by-default) included.
 
 ## Start at login
 

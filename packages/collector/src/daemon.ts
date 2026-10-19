@@ -22,6 +22,7 @@ import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
 import { Liveness } from './liveness.ts';
+import { parseOtlpLogs } from './otel.ts';
 import { TranscriptSource } from './transcript.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
@@ -84,6 +85,45 @@ function applyTranscriptPref(): void {
   runtime.engine.enableTranscriptSource(on);
 }
 applyTranscriptPref();
+
+// Opt-in too (`claude-pet otel enable`): off, OTLP posts are answered and dropped.
+function applyOtelPref(): void {
+  runtime.engine.enableOtelSource(prefs.otel && !prefs.paused);
+}
+applyOtelPref();
+
+/** OTLP batches are a few dozen KB (measured: 36 KB for a session's first one). */
+const OTLP_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * POST /v1/logs — Claude Code's OpenTelemetry export (OTLP/HTTP JSON). It is the one route
+ * without the token: an exporter could only carry it through settings.json, which other
+ * local accounts can read. What it can do instead is bounded: it only ever adds output-token
+ * counts to sessions the hooks already know (otel.ts keeps nothing else). A web page cannot
+ * reach it: application/json is required, which a cross-origin request can only send after
+ * a preflight, and every preflight is refused. /v1/metrics is acknowledged and dropped, for
+ * an exporter pointed at the generic endpoint.
+ */
+async function postOtlp(req: IncomingMessage, res: ServerResponse, logs: boolean): Promise<void> {
+  const reply = (status: number, body = '{}') => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(body);
+  };
+  if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    return reply(415, '{"error":"OTLP/HTTP JSON only: set OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json"}');
+  }
+  const body = await readBody(req, OTLP_MAX_BYTES);
+  if (body === null) return reply(413);
+  if (!logs || !prefs.otel || prefs.paused) return reply(200);
+  let signals: ReturnType<typeof parseOtlpLogs> = [];
+  try {
+    signals = parseOtlpLogs(JSON.parse(body));
+  } catch {
+    return reply(400, '{"error":"not JSON"}');
+  }
+  for (const signal of signals) runtime.engine.ingestOtel(signal);
+  reply(200);
+}
 
 // Release updates: checked daily (update.ts), surfaced in every frame and in /health.
 let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
@@ -264,6 +304,7 @@ async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<
   writeUserFile(applyPatch(current, patch));
   loadConfig();
   applyTranscriptPref();
+  applyOtelPref();
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify(prefs));
   broadcast();
@@ -327,6 +368,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (req.method === 'OPTIONS') {
     res.writeHead(403);
     res.end();
+    return;
+  }
+
+  if ((url.pathname === '/v1/logs' || url.pathname === '/v1/metrics') && req.method === 'POST') {
+    void postOtlp(req, res, url.pathname === '/v1/logs');
     return;
   }
 
@@ -475,6 +521,7 @@ watch(ROOT_DIR, (_event, name) => {
   reloadTimer = setTimeout(() => {
     loadConfig();
     applyTranscriptPref();
+    applyOtelPref();
     broadcast();
   }, 200);
 });

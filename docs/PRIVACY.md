@@ -63,6 +63,24 @@ How little is read:
 results, thinking, text, tool inputs and `cwd`, and asserts it is in no signal that comes
 out.
 
+## OpenTelemetry: opt-in, off by default
+
+`claude-pet otel enable` asks Claude Code to export its telemetry **logs** to the daemon
+(OTLP/HTTP JSON on `127.0.0.1`; it adds five `env` variables to `~/.claude/settings.json`,
+backed up first, and `otel disable` removes exactly those). Those logs carry far more than
+the pet needs — measured on Claude Code 2.1.301: your e-mail, account and organization ids,
+prompt and response lengths, model, cost, request ids (prompt text only if you set
+`OTEL_LOG_USER_PROMPTS`). What crosses `parseOtlpLogs` (`packages/collector/src/otel.ts`):
+per `api_request` record, the session id cut to 8 chars, the time and the output-token
+count. Everything else is dropped in memory; nothing from it is logged or written to disk.
+`packages/collector/test/otel.test.ts` puts an e-mail, account ids and a prompt in a batch
+and asserts none of it comes out.
+
+The receiving route is the one daemon route without the token (an exporter could only carry
+it through `settings.json`, which other accounts on the Mac can read). It requires
+`application/json` — which a web page cannot send to it without a CORS preflight, all of
+which the daemon refuses — and can only add token counts to sessions the hooks already know.
+
 ## Nothing about you leaves the machine
 
 - the collector binds `127.0.0.1` only, with a per-run token in the SSE URL;

@@ -184,6 +184,8 @@
   "set.netSensor.doc": "Watch bytes arriving at Claude to see the model think. Runs only during a turn.",
   "set.readTranscripts.label": "Read conversation files",
   "set.readTranscripts.doc": "More accurate per-agent activity and real token counts. Only line types and token counts are kept, never the text.",
+  "set.otel.label": "OpenTelemetry",
+  "set.otel.doc": "Real token counts from Claude Code's own telemetry, VS Code included. Only output-token counts are kept. Turn it on once with: claude-pet otel enable",
   "set.chatEnabled.label": "Chat",
   "set.chatEnabled.doc": "Click the creature to talk to Claude, a full agent that can edit files and run commands.",
   "set.chatModel.label": "Chat model",

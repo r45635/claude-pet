@@ -19,6 +19,7 @@
     "daemon": "node packages/collector/src/daemon.ts",
     "snapshot": "node packages/collector/src/snapshot.ts",
     "doctor": "node packages/collector/src/doctor.ts",
+    "otel": "node packages/collector/src/otel.ts",
     "install-hooks": "node packages/collector/src/install.ts install",
     "uninstall-hooks": "node packages/collector/src/install.ts uninstall",
     "autostart": "node packages/collector/src/autostart.ts",

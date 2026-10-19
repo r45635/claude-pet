@@ -46,6 +46,8 @@
       "doc": "Watch the bytes arriving at claude processes, to see the model think (macOS nettop, only during a turn)." },
     { "key": "readTranscripts", "path": "ui.readTranscripts", "type": "bool", "default": false, "section": "sensors",
       "doc": "Read the conversation files for per-agent activity and real token counts. Only line types and token counts are kept." },
+    { "key": "otel", "path": "ui.sensors.otel", "type": "bool", "default": false, "section": "sensors",
+      "doc": "Receive Claude Code's OpenTelemetry logs for real token counts, VS Code included. Only output-token counts are kept. Needs `claude-pet otel enable` once (it adds the export settings to ~/.claude/settings.json)." },
 
     { "key": "chatEnabled", "path": "ui.chat.enabled", "type": "bool", "default": false, "section": "chat", "nativeOnlyTrue": true,
       "doc": "Click the creature to talk to Claude: a full agent that can edit files and run commands. Turning it on is only possible from the native menu." },

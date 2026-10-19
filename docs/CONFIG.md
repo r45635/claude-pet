@@ -48,6 +48,7 @@ Generated from [`packages/collector/src/settings-schema.json`](../packages/colle
 | Behaviour | `ui.paused` | `true` · `false` | `false` | panel, file | The creature sleeps; the sensors stop. |
 | Sensors | `ui.sensors.net` | `true` · `false` | `true` | panel, file | Watch the bytes arriving at claude processes, to see the model think (macOS nettop, only during a turn). |
 | Sensors | `ui.readTranscripts` | `true` · `false` | `false` | panel, file | Read the conversation files for per-agent activity and real token counts. Only line types and token counts are kept. |
+| Sensors | `ui.sensors.otel` | `true` · `false` | `false` | panel, file | Receive Claude Code's OpenTelemetry logs for real token counts, VS Code included. Only output-token counts are kept. Needs `claude-pet otel enable` once (it adds the export settings to ~/.claude/settings.json). |
 | Chat | `ui.chat.enabled` | `true` · `false` | `false` | panel (off only), menu (on, with confirmation), file | Click the creature to talk to Claude: a full agent that can edit files and run commands. Turning it on is only possible from the native menu. |
 | Chat | `ui.chatModel` | `default` · `sonnet` · `haiku` | `"default"` | panel, file | Model for the creature's own Claude. |
 | — | `ui.position` | `{x, y}` | preset / engine default | set by the widget | Where the creature stands on screen; saved when you drag it. |

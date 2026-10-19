@@ -154,6 +154,13 @@ export function main(argv: string[], binDir = BIN_DIR): number {
     return 0;
   }
 
+  writeSettings(file, plan.settings);
+  process.stdout.write(`written. Restart Claude Code sessions for hooks to take effect.\n`);
+  return 0;
+}
+
+/** Back the file up into ~/.claude-pet/backups/, then replace it atomically (tmp + rename). */
+export function writeSettings(file: string, settings: Settings): void {
   if (existsSync(file)) {
     const backups = join(ROOT_DIR, 'backups');
     mkdirSync(backups, { recursive: true, mode: 0o700 });
@@ -162,13 +169,10 @@ export function main(argv: string[], binDir = BIN_DIR): number {
     copyFileSync(file, backup);
     process.stdout.write(`backup: ${backup}\n`);
   }
-
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.claude-pet.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(plan.settings, null, 2)}\n`, { mode: 0o644 });
+  writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o644 });
   renameSync(tmp, file);
-  process.stdout.write(`written. Restart Claude Code sessions for hooks to take effect.\n`);
-  return 0;
 }
 
 if (isMain(import.meta.url)) {
