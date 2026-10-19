@@ -1588,9 +1588,20 @@
     }
   }
 
+  // `claude-pet avatars install|update|remove` changes avatars outside the widget: reload the
+  // one on screen when the daemon says something changed.
+  let avatarsRev = null;
+  function noticeAvatars(s) {
+    if (s.avatarsRev === undefined || s.avatarsRev === avatarsRev) return;
+    const first = avatarsRev === null;
+    avatarsRev = s.avatarsRev;
+    if (!first) { avatarId = ''; loadAvatar(s.prefs?.avatar ?? 'classic'); }
+  }
+
   function render(s) {
     lastFrame = s;
     noticeUpdate(s);
+    noticeAvatars(s);
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,

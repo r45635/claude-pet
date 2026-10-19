@@ -22,6 +22,7 @@ import { VERSION } from './entry.ts';
 import { HOOK_SCRIPT, main as installHooks, STATUSLINE_SCRIPT } from './install.ts';
 import { APP_DIR, ROOT_DIR } from './paths.ts';
 import { main as snapshot } from './snapshot.ts';
+import { main as avatars } from './avatars-cli.ts';
 
 const EXE = 'claude-pet';
 const WIDGET = 'claude-pet-widget';
@@ -36,6 +37,7 @@ const USAGE = `claude-pet ${VERSION}
   claude-pet status       whether the daemon and the widget are installed and running
   claude-pet restart      restart both
   claude-pet snapshot     what the creature currently sees (--watch to follow)
+  claude-pet avatars      the avatar library: list, install <id>, update [<id>], remove <id>
   claude-pet version
 `;
 
@@ -101,6 +103,7 @@ export async function main(argv: string[]): Promise<number> {
     case 'restart': return manage(command as Mode, appLaunch());
     case 'daemon': await import('./daemon.ts'); return 0; // serves until killed
     case 'snapshot': return snapshot(rest);
+    case 'avatars': return avatars(rest);
     case 'version':
     case '--version': process.stdout.write(`${VERSION}\n`); return 0;
     case 'help':

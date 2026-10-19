@@ -11,7 +11,7 @@
   "menu.avatar": "Avatar",
   "menu.avatar.classic": "Classique",
   "menu.avatar.library": "Bibliothèque",
-  "menu.avatar.libraryUnavailable": "Bibliothèque indisponible (activer Vérifier les mises à jour)",
+  "menu.avatar.libraryUnavailable": "Bibliothèque indisponible (hors ligne ?)",
   "menu.avatar.libraryAllInstalled": "Tout est installé",
   "menu.avatar.update": "Mettre à jour {name}…",
   "menu.avatar.remove": "Supprimer l’avatar actuel…",
@@ -186,5 +186,7 @@
   "set.chatEnabled.doc": "Cliquer sur la créature pour parler à Claude, un agent complet qui peut modifier des fichiers et lancer des commandes.",
   "set.chatModel.label": "Modèle du chat",
   "set.chatModel.doc": "Le modèle utilisé par le Claude de la créature.",
-  "pet.label": "claude-pet : l'activité de Claude Code"
+  "pet.label": "claude-pet : l'activité de Claude Code",
+  "menu.avatar.libraryLoading": "Chargement de la bibliothèque…",
+  "menu.avatar.libraryOff": "Bibliothèque désactivée (activer Vérifier les mises à jour)"
 }

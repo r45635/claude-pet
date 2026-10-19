@@ -66,7 +66,7 @@ pub struct LibraryItem {
 /// installed (to install) and installed ones the catalog ships another version of (to
 /// update). `None` = the library is unavailable (not fetched, unsigned, offline…).
 pub fn library_items(catalog: &Value, locale: &str) -> Option<Vec<LibraryItem>> {
-    if catalog["error"].is_string() && catalog["avatars"].as_array().map_or(true, Vec::is_empty) {
+    if catalog["status"] != "ok" && catalog["avatars"].as_array().map_or(true, Vec::is_empty) {
         return None;
     }
     let avatars = catalog["avatars"].as_array()?;
@@ -84,7 +84,16 @@ pub fn library_items(catalog: &Value, locale: &str) -> Option<Vec<LibraryItem>> 
     Some(out)
 }
 
-fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars: &[(String, String)], library: Option<&[LibraryItem]>) -> tauri::Result<tauri::menu::Submenu<R>> {
+/// Why the library has nothing to offer right now, as a menu label key.
+pub fn library_unavailable_key(catalog: &Value) -> &'static str {
+    match catalog["status"].as_str() {
+        Some("loading") => "menu.avatar.libraryLoading",
+        Some("off") => "menu.avatar.libraryOff",
+        _ => "menu.avatar.libraryUnavailable",
+    }
+}
+
+fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars: &[(String, String)], library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<tauri::menu::Submenu<R>> {
     let current = prefs["avatar"].as_str().unwrap_or("classic");
     let mut sub = SubmenuBuilder::new(app, w.get("menu.avatar"));
     for (id, name) in avatars {
@@ -101,7 +110,7 @@ fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars
     let mut lib = SubmenuBuilder::new(app, w.get("menu.avatar.library"));
     match library {
         None => {
-            lib = lib.item(&MenuItemBuilder::with_id("lib:none", w.get("menu.avatar.libraryUnavailable")).enabled(false).build(app)?);
+            lib = lib.item(&MenuItemBuilder::with_id("lib:none", w.get(unavailable)).enabled(false).build(app)?);
         }
         Some(items) if items.iter().all(|i| i.update) => {
             lib = lib.item(&MenuItemBuilder::with_id("lib:none", w.get("menu.avatar.libraryAllInstalled")).enabled(false).build(app)?);
@@ -139,7 +148,7 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
 
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>) -> tauri::Result<Menu<R>> {
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
     let mut menu = MenuBuilder::new(app);
@@ -161,7 +170,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
     }
     menu.separator()
         .item(&item("settings:open", "menu.settings")?)
-        .item(&avatar_menu(app, &w, prefs, avatars, library)?)
+        .item(&avatar_menu(app, &w, prefs, avatars, library, unavailable)?)
         .item(&radio(app, &w, prefs, "temperament", "menu.temperament",
             &[("zen", "menu.temperament.zen"), ("normal", "menu.temperament.normal"), ("nervous", "menu.temperament.nervous")])?)
         .item(&size_menu(app, &w, prefs)?)
@@ -224,7 +233,7 @@ pub fn pref_patch(id: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{library_items, pref_patch, update_action, valid_tag, Words};
+    use super::{library_items, library_unavailable_key, pref_patch, update_action, valid_tag, Words};
     use serde_json::json;
 
     #[test]
@@ -282,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_library_offers_new_avatars_and_updates_only() {
-        let catalog = json!({"error": null, "avatars": [
+        let catalog = json!({"status": "ok", "error": null, "avatars": [
             {"id": "ghost", "name": "Ghost", "names": {"fr": "Fantôme"}, "installed": {"version": "1.0.0", "updateAvailable": true}},
             {"id": "mint", "name": "Mint", "installed": null},
             {"id": "alien", "name": "Alien", "installed": {"version": "1.0.0", "updateAvailable": false}},
@@ -291,6 +300,9 @@ mod tests {
         let items = library_items(&catalog, "fr").unwrap();
         let summary: Vec<(String, String, bool)> = items.into_iter().map(|i| (i.id, i.name, i.update)).collect();
         assert_eq!(summary, vec![("ghost".into(), "Fantôme".into(), true), ("mint".into(), "Mint".into(), false)]);
-        assert!(library_items(&json!({"error": "catalog: offline", "avatars": []}), "en").is_none(), "unavailable, said so");
+        assert!(library_items(&json!({"status": "error", "error": "catalog: offline", "avatars": []}), "en").is_none(), "unavailable, said so");
+        assert_eq!(library_unavailable_key(&json!({"status": "loading"})), "menu.avatar.libraryLoading");
+        assert_eq!(library_unavailable_key(&json!({"status": "off"})), "menu.avatar.libraryOff");
+        assert_eq!(library_unavailable_key(&json!({"status": "error"})), "menu.avatar.libraryUnavailable");
     }
 }
