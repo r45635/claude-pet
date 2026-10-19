@@ -126,6 +126,8 @@ export type SessionSummary = {
   reason: PetReason | null;
   /** This session's tool calls per minute, for its storm line. Derived. */
   tool_calls_per_minute: number;
+  /** This session's context fill, 0-100, from its status line; null when unknown. Measured. */
+  context_load: number | null;
 };
 
 /** A subagent, tracked from SubagentStart to SubagentStop by its agent_id. */
@@ -657,6 +659,7 @@ export class Engine {
           : state === 'HIGH_LOAD' && tick ? { kind: 'storm', driver: loudest(tick.channels) }
           : null,
         tool_calls_per_minute: Math.round(recent.filter((e) => e.isToolCall).length * perMinute),
+        context_load: contextLoadOf(this.#lanes.get(sid)?.meter ?? null),
       });
     }
     return out;
@@ -831,10 +834,7 @@ export class Engine {
     const state = this.#hold(this.#shownHold, delegating(raw, running), nowMs);
 
     const meter = lane?.meter ?? null;
-    const contextLoad =
-      meter && meter.context_used_pct !== null
-        ? Math.round(clamp(meter.context_used_pct, 0, 100))
-        : null;
+    const contextLoad = contextLoadOf(meter);
 
     const tokens =
       meter && (meter.in_tokens !== null || meter.out_tokens !== null)
@@ -889,6 +889,11 @@ export class Engine {
       },
     };
   }
+}
+
+/** The status line's context %, as the gauge and fatigue use it; null = unknown, never 0. */
+function contextLoadOf(meter: MeterSample | null): number | null {
+  return meter && meter.context_used_pct !== null ? Math.round(clamp(meter.context_used_pct, 0, 100)) : null;
 }
 
 type RateSample = { pct: number; resetsMs: number | null; atMs: number };

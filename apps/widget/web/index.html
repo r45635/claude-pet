@@ -75,6 +75,20 @@
   [data-state="WAITING"] .on-WAITING, [data-state="DONE"] .on-DONE,
   [data-state="ERROR"] .on-ERROR { display: inline; }
 
+  /* Fatigue: the session's context window filling up (bands in docs/LOAD_SCORE.md). Marks
+     drawn by fatigueMarks() in the script, on every avatar: a sweat drop when overloaded,
+     a second one and an unstable glow when exhausted. Never a size change (the creature's
+     size must not move by itself), and the glow's flicker is paused with everything else
+     at rest. Before the state rules: a storm's or an error's colour still wins. */
+  .fat-marks, .fat-halo, .fat-marks .fat-2 { display: none; pointer-events: none; }
+  .critter[data-fatigue="overloaded"] > .fat-marks, .critter[data-fatigue="exhausted"] > .fat-marks,
+  .critter[data-fatigue="exhausted"] > .fat-marks .fat-2, .critter[data-fatigue="exhausted"] > .fat-halo { display: inline; }
+  .critter[data-fatigue="exhausted"] { --skin: #9aa9c4; }
+  .fat-drop { fill: #9fd8ff; stroke: rgba(20, 22, 28, .55); stroke-width: 1.5; }
+  .fat-halo { fill: none; stroke: #ff9f68; stroke-width: 4; opacity: .3; animation: flicker 2.8s steps(1, end) infinite; }
+  @keyframes flicker { 0%, 100% { opacity: .3; } 31% { opacity: .12; } 35% { opacity: .42; } 63% { opacity: .2; } }
+  [data-paused="true"] .fat-marks, [data-paused="true"] .fat-halo { display: none !important; }
+
   .critter[data-state="THINKING"]  { --bulb: var(--c-think); }
   .critter[data-state="READING"]   { --bulb: var(--c-read); }
   .critter[data-state="CODING"]    { --bulb: var(--c-act); }
@@ -484,7 +498,7 @@
 </div>
 
 <script type="module">
-  import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO } from './avatar.js';
+  import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
   const pet = document.getElementById('pet');
@@ -621,10 +635,43 @@
         const titleEl = document.createElementNS(SVG_NS, 'title');
         titleEl.textContent = title;
         el.prepend(titleEl);
+      } else {
+        addFatigueMarks(el);
       }
       critterEls.set(id, el);
     }
     return el;
+  }
+
+  // ---- fatigue ---------------------------------------------------------------------------
+  // A session's creature tires as its context window fills (the status line's %, measured).
+  // Unknown stays unknown: no band, no marks — a fresh creature and one we know nothing
+  // about must not look alike (docs/LOAD_SCORE.md). Subagents have their own context and
+  // no status line: they never tire.
+  function fatigueBand(ctx) {
+    if (ctx == null || prefs.fatigue === false) return '';
+    return ctx >= 88 ? 'exhausted' : ctx >= 70 ? 'overloaded' : ctx >= 40 ? 'energetic' : 'fresh';
+  }
+  /** The marks, placed from the avatar's hitbox so they sit on any drawing's upper left. */
+  function addFatigueMarks(el) {
+    const hb = { ...DEFAULT_HITBOX, ...(geo.hitbox ?? {}) };
+    const x = hb.cx - hb.rx * 0.86;
+    const y = hb.cy - hb.ry * 0.5;
+    const drop = (dx, dy, k, cls) => `<path class="fat-drop ${cls}" transform="translate(${(x + dx).toFixed(1)} ${(y + dy).toFixed(1)}) scale(${k})" ` +
+      'd="M0 -9 C4 -3 6 0 6 3 A6 6 0 0 1 -6 3 C-6 0 -4 -3 0 -9 Z" />';
+    const marks = document.createElementNS(SVG_NS, 'g');
+    marks.setAttribute('class', 'fat-marks');
+    marks.innerHTML = drop(0, 0, 1, 'fat-1') + drop(-9, 15, 0.7, 'fat-2');
+    const halo = document.createElementNS(SVG_NS, 'ellipse');
+    halo.setAttribute('class', 'fat-halo');
+    for (const [k, v] of Object.entries({ cx: hb.cx, cy: hb.cy, rx: hb.rx + 7, ry: hb.ry + 7 })) halo.setAttribute(k, String(v));
+    el.prepend(halo);
+    el.append(marks);
+  }
+  function setFatigue(el, band) {
+    if (!el || (el.dataset.fatigue ?? '') === band) return;
+    if (band) el.dataset.fatigue = band;
+    else delete el.dataset.fatigue;
   }
   function slotted(el, cls) {
     const slot = document.createElementNS(SVG_NS, 'g');
@@ -776,8 +823,8 @@
     if (!animatingNow) for (const slot of parentSlots.values()) slot.classList.remove('regrid');
     const groups = multi
       ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
-                               agents: urgentFirst(x.agents ?? []) }))
-      : [{ id: '', state: singleState, load: s.load, agents: [] }];
+                               ctx: x.context_load ?? null, agents: urgentFirst(x.agents ?? []) }))
+      : [{ id: '', state: singleState, load: s.load, ctx: s.context_load ?? null, agents: [] }];
     // The parent's element is the same with or without subagents, so its size can change
     // smoothly instead of the creature being swapped for a smaller one.
     const parentKey = (g) => `s:${multi ? g.id : (sessions[0]?.id ?? '')}`;
@@ -869,6 +916,7 @@
     for (const g of groups) {
       // The parent's key, not `s:${g.id}`: the lone creature (g.id '') is keyed by its session.
       setState(critterEls.get(parentKey(g)), g.state);
+      setFatigue(critterEls.get(parentKey(g)), fatigueBand(g.ctx));
       const states = [g.state];
       for (const a of g.agents.slice(0, MAX_KIDS)) {
         const state = asleep ? 'IDLE' : a.state;
@@ -1093,7 +1141,7 @@
       // Both kinds may ship CSS: it is how pictures get motion too.
       const css = avatar.css ? scopeCss(avatar.css, avatar.id) : '';
       const ownKf = avatar.css ? keyframeNames(avatar.css) : new Set();
-      setAvatar(avatar.id, protoEl, { ...DEFAULT_GEO, ...(avatar.anchors ?? {}) }, css, avatar.animations, ownKf);
+      setAvatar(avatar.id, protoEl, { ...DEFAULT_GEO, ...(avatar.anchors ?? {}), hitbox: avatar.hitbox }, css, avatar.animations, ownKf);
     } catch (err) {
       diag(`avatar ${avatar.id}: ${err.message}`);
       setAvatar('classic', classicProto, DEFAULT_GEO, '');
@@ -1523,7 +1571,7 @@
   // Browser-harness demo, to review the design without a Tauri host:
   //   index.html#demo=chat&layout=above-right  (or below-left, …)
   // Browser-harness demo of an avatar (run Chrome with --allow-file-access-from-files):
-  //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none]
+  //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
   // It reads the avatar folder like the widget's importer would, minus the validation.
   if (params.get('demo') === 'avatar') {
     (async () => {
@@ -1531,6 +1579,7 @@
       const id = params.get('avatar') ?? 'classic';
       const state = params.get('state') ?? 'IDLE';
       const kids = Number(params.get('kids') ?? 0);
+      const ctx = params.has('ctx') ? Number(params.get('ctx')) : null; // fatigue: &ctx=0..100
       document.documentElement.classList.add('widget');
       document.body.style.background = '#3b4252';
       if (id !== 'classic') {
@@ -1562,8 +1611,8 @@
         reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' }
           : state === 'ERROR' ? { kind: 'tool_failed', tool: 'bash' } : null,
         sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
-        sessions: kids ? [{ id: 'demo', status: 'working', state, load: 50, agents }] : [],
-        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto' }, estimated_activity_rate: 0, load_confidence: 1, context_load: null,
+        sessions: kids ? [{ id: 'demo', status: 'working', state, load: 50, agents, context_load: ctx }] : [],
+        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto' }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
         active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
       });
       document.title = `ready ${id} ${state}`;
@@ -1649,7 +1698,7 @@
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
     const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
-                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute,
+                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute, x.context_load,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;

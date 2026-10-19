@@ -170,6 +170,8 @@
   "set.alwaysOnTop.doc": "Garder la créature au-dessus des autres fenêtres.",
   "set.showSessions.label": "Pastilles de sessions",
   "set.showSessions.doc": "Une pastille par session Claude Code active sous la créature.",
+  "set.fatigue.label": "Fatigue",
+  "set.fatigue.doc": "Transpire à mesure que la fenêtre de contexte de la session se remplit, épuisée presque pleine. Seulement si la ligne d'état l'indique.",
   "set.temperament.label": "Tempérament",
   "set.temperament.doc": "Ce qui excite la créature, quand elle passe en tempête, à quelle vitesse elle se calme.",
   "set.stormThreshold.label": "Seuil de tempête",

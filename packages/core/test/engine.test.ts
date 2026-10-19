@@ -721,3 +721,12 @@ test('endSession: a session whose process is gone leaves at once, like a Session
   engine.endSession('nope0000', 1_200); // unknown: nothing happens
   assert.equal(engine.snapshot(1_300).sessions.length, 1);
 });
+
+test('sessions: each carries its own context fill, null when its status line said nothing', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbb2222' }));
+  engine.ingest(event('METER_SAMPLE', 100, { sid: 'aaaa1111', meter: { context_used_pct: 91.6 } }));
+  const byId = Object.fromEntries(engine.snapshot(1_000).sessions.map((s) => [s.id, s.context_load]));
+  assert.deepEqual(byId, { aaaa1111: 92, bbbb2222: null });
+});

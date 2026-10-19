@@ -170,6 +170,8 @@
   "set.alwaysOnTop.doc": "Keep the creature above other windows.",
   "set.showSessions.label": "Session pastilles",
   "set.showSessions.doc": "One dot per live Claude Code session under the creature.",
+  "set.fatigue.label": "Tiredness",
+  "set.fatigue.doc": "Sweats as the session's context window fills, worn out near full. Shown only when the status line reports it.",
   "set.temperament.label": "Temperament",
   "set.temperament.doc": "What excites the creature, when it storms, how fast it calms down.",
   "set.stormThreshold.label": "Storm threshold",
