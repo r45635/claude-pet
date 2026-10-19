@@ -41,7 +41,8 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 
 `setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
 hooks into Claude Code and starts the pet at login. `~/.claude-pet/app/claude-pet` also has
-`status`, `restart`, `snapshot`, `uninstall` (which keeps your settings and logs) and
+`status`, `doctor` (checks the whole chain, see [below](#wiring-into-claude-code)), `restart`,
+`snapshot`, `uninstall` (which keeps your settings and logs) and
 `avatars` — `avatars list` / `avatars install <id>` add ready-made looks from the
 [library](#make-it-your-own).
 
@@ -225,6 +226,12 @@ The installer **merges**: existing hooks are left untouched, a foreign `statusLi
 overwritten (the meter then stays offline and says so), and a re-run is a no-op. Every write
 is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
 without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
+
+**Something looks off?** `claude-pet doctor` (from a clone: `npm run doctor`) checks each
+link against reality, read-only: hooks and status line wired to scripts that exist, the
+daemon reachable and on this version, its reader caught up, the widget running — and the
+failure no status shows, Claude Code running with no hook event for ten minutes. Each
+problem comes with the command that fixes it; the exit code is 1 when something is broken.
 
 ### VS Code
 
