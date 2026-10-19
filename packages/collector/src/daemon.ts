@@ -16,8 +16,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ensureSpool, rotateIfNeeded } from './spool.ts';
-import { ROOT_DIR, SPOOL_FILE } from './paths.ts';
+import { capLog, ensureSpool, rotateIfNeeded } from './spool.ts';
+import { LOG_DIR, ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
@@ -455,7 +455,10 @@ server.listen(PORT, '127.0.0.1', () => {
   process.stderr.write(`  curl -s "http://127.0.0.1:${PORT}/snapshot?token=$(cat ~/.claude-pet/token)" | jq .\n`);
   schedule();
   sweepDownloads();
-  setInterval(() => rotateIfNeeded(SPOOL_FILE), 60_000);
+  setInterval(() => {
+    rotateIfNeeded(SPOOL_FILE);
+    for (const log of ['daemon.log', 'widget.log']) capLog(join(LOG_DIR, log));
+  }, 60_000);
   // Update checks: one soon (off the login path), then daily. Never on the tick path.
   setTimeout(() => void refreshCatalog(), 3_000); // the library is usable right after install
   setTimeout(() => void updateCheckLoop(), 30_000);

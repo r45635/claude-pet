@@ -55,6 +55,12 @@ version stays in `~/.claude-pet/app.old` — to go back:
 Both behaviours are settings (*Check for updates*, *Install updates automatically*). Running
 the three lines above again still works as a manual update.
 
+**It never takes more room than it needs:** an update keeps exactly one previous version
+(`app.old`, for going back) and nothing older; from a clone, `npm run autostart -- install|restart`
+removes every downloaded widget but the one it launches. Logs are capped at 1 MB each (one
+previous kept), the event spool at 4 MB (same), and leftovers of an interrupted download or
+import are swept at the next start. Everything lives in `~/.claude-pet/`.
+
 The archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub Actions
 (`.github/workflows/release.yml`) for every version tag. Download it with `curl`, not a
 browser: the binaries are not notarized by Apple, and a browser download would be

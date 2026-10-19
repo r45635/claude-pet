@@ -154,16 +154,29 @@ export async function downloadAvatar(entry: CatalogEntry, root = ROOT_DIR, fetch
   return { path };
 }
 
-/** Download folders left behind (a crash between download and import), swept at startup. */
-export function sweepDownloads(root = ROOT_DIR, olderThanMs = 3_600_000): void {
-  if (!existsSync(root)) return;
-  for (const name of readdirSync(root)) {
-    if (!name.startsWith(DOWNLOAD_PREFIX)) continue;
-    const p = join(root, name);
-    try {
-      if (Date.now() - statSync(p).mtimeMs > olderThanMs) rmSync(p, { recursive: true, force: true });
-    } catch {
-      /* already gone */
+/**
+ * Temporary folders a crash can leave behind — avatar and update downloads in the root,
+ * interrupted avatar imports (Rust's `.import-*`, the CLI's `.import-cli-*`) — swept at
+ * startup once they are an hour old, so no run can pile them up.
+ */
+export function sweepDownloads(root = ROOT_DIR, olderThanMs = 3_600_000): string[] {
+  const removed: string[] = [];
+  const sweep = (dir: string, prefixes: string[]) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      if (!prefixes.some((p) => name.startsWith(p))) continue;
+      const p = join(dir, name);
+      try {
+        if (Date.now() - statSync(p).mtimeMs > olderThanMs) {
+          rmSync(p, { recursive: true, force: true });
+          removed.push(name);
+        }
+      } catch {
+        /* already gone */
+      }
     }
-  }
+  };
+  sweep(root, [DOWNLOAD_PREFIX, '.update-']);
+  sweep(join(root, 'avatars'), ['.import-']);
+  return removed;
 }
