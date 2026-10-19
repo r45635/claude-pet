@@ -867,7 +867,8 @@
     }
 
     for (const g of groups) {
-      setState(critterEls.get(`s:${g.id}`), g.state);
+      // The parent's key, not `s:${g.id}`: the lone creature (g.id '') is keyed by its session.
+      setState(critterEls.get(parentKey(g)), g.state);
       const states = [g.state];
       for (const a of g.agents.slice(0, MAX_KIDS)) {
         const state = asleep ? 'IDLE' : a.state;
