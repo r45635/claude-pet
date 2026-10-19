@@ -21,10 +21,10 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, rmSync, wri
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isMain } from './entry.ts';
+import { isMain, VERSION } from './entry.ts';
 import { LOG_DIR } from './paths.ts';
 import { LABELS } from './login.ts';
-import { fetchWidget, LOCAL_BUILD, resolveWidget } from './widget.ts';
+import { downloadedPath, fetchWidget, LOCAL_BUILD, pruneWidgets, resolveWidget } from './widget.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DAEMON_TS = join(REPO, 'packages', 'collector', 'src', 'daemon.ts');
@@ -223,9 +223,22 @@ export function manage(mode: Mode, launch: Launch, dryRun = false): number {
 function main(argv: string[]): number {
   const mode = (argv.find((a) => ['install', 'uninstall', 'status', 'restart'].includes(a)) ?? 'status') as Mode;
   const dryRun = argv.includes('--dry-run');
-  if (mode === 'status' || mode === 'uninstall' || dryRun) return manage(mode, cloneLaunch(), dryRun);
+  if (mode === 'status' || dryRun) return manage(mode, cloneLaunch(), dryRun);
+  if (mode === 'uninstall') {
+    const code = manage(mode, cloneLaunch());
+    if (code === 0) pruneWidgets(null);
+    return code;
+  }
   const widget = ensureWidget();
-  return widget ? manage(mode, cloneLaunch(widget)) : 1;
+  if (!widget) return 1;
+  const code = manage(mode, cloneLaunch(widget));
+  // Only once the agents run the new binary: every other downloaded version is obsolete.
+  if (code === 0) {
+    const tag = `v${VERSION}`;
+    const removed = pruneWidgets(widget === downloadedPath(tag) ? tag : null);
+    if (removed.length > 0) process.stdout.write(`removed obsolete widget(s): ${removed.join(', ')}\n`);
+  }
+  return code;
 }
 
 if (isMain(import.meta.url)) {

@@ -19,7 +19,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GITHUB_REPO, isMain, VERSION } from './entry.ts';
@@ -41,6 +41,25 @@ export function resolveWidget(tag = `v${VERSION}`, root = ROOT_DIR): string | nu
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * Downloaded widgets other than `keep` (the tag now launched; null = none, e.g. a local
+ * build runs) are obsolete: removed, so updates never pile up. Only `v<semver>` folders and
+ * leftover `.fetch-*` downloads are touched. Returns what was removed.
+ */
+export function pruneWidgets(keep: string | null, root = ROOT_DIR): string[] {
+  const bin = join(root, 'bin');
+  if (!existsSync(bin)) return [];
+  const removed: string[] = [];
+  for (const name of readdirSync(bin)) {
+    const version = /^v\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(name);
+    if ((version && name !== keep) || name.startsWith('.fetch-')) {
+      rmSync(join(bin, name), { recursive: true, force: true });
+      removed.push(name);
+    }
+  }
+  return removed;
 }
 
 /** `<hex>  <file>` as written by `shasum -a 256`; the hash must match the archive's. */

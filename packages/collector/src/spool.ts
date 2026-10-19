@@ -9,6 +9,7 @@
 import {
   appendFileSync,
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -39,6 +40,23 @@ export function rotateIfNeeded(file = SPOOL_FILE): boolean {
   }
   renameSync(file, `${file}.1`);
   return true;
+}
+
+/**
+ * Keep a launchd log bounded: past `maxBytes` its content moves to `<file>.1` (replacing the
+ * previous one) and the file restarts empty — at most twice `maxBytes` on disk. Truncated in
+ * place, never renamed: launchd keeps the file open in append mode and would write on into
+ * the renamed one.
+ */
+export function capLog(file: string, maxBytes = 1_048_576): boolean {
+  try {
+    if (statSync(file).size <= maxBytes) return false;
+    copyFileSync(file, `${file}.1`);
+    truncateSync(file, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function truncateSpool(file = SPOOL_FILE): void {
