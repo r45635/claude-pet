@@ -706,3 +706,18 @@ test('transcript: token history stays bounded even with no snapshot taken', () =
   // Only the last rateWindowMs counts: 60 lines of 10 tokens.
   assert.equal(engine.snapshot(10 * 60_000).tokens_per_minute, 600);
 });
+
+test('endSession: a session whose process is gone leaves at once, like a SessionEnd', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111', ppid: 4242 }));
+  engine.ingest(event('SUBAGENT_STARTED', 100, { sid: 'aaaa1111', aid: 'agentone0000' }));
+  engine.ingest(event('SESSION_STARTED', 0, { sid: 'bbbb2222', ppid: 5353 }));
+  assert.deepEqual(engine.sessionPids().map((s) => [s.sid, s.ppid]), [['aaaa1111', 4242], ['bbbb2222', 5353]]);
+  engine.endSession('aaaa1111', 1_000);
+  const snap = engine.snapshot(1_100);
+  assert.deepEqual(snap.sessions.map((s) => s.id), ['bbbb2222'], 'gone with its turn and subagents');
+  assert.equal(snap.active_subagents, 0);
+  assert.deepEqual(engine.sessionPids().map((s) => s.sid), ['bbbb2222']);
+  engine.endSession('nope0000', 1_200); // unknown: nothing happens
+  assert.equal(engine.snapshot(1_300).sessions.length, 1);
+});

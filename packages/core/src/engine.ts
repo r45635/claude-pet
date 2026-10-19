@@ -522,6 +522,28 @@ export class Engine {
     }
   }
 
+  /**
+   * The session's `claude` process is gone (the daemon checked): the same as its SessionEnd,
+   * which a closed terminal, a kill or a crash never sends. Without this the creature stayed
+   * on screen for sessionTtlMs (30 min) after its window was closed.
+   */
+  endSession(sid: string, atMs: number): void {
+    if (!this.#sessions.has(sid) && !this.#lanes.has(sid)) return;
+    this.#sessions.delete(sid);
+    this.#turns.delete(sid);
+    this.#pending.delete(sid);
+    this.#agents.delete(sid);
+    this.#lanes.delete(sid);
+    if (this.#turns.size === 0) this.#lastIdleSignalMs = atMs;
+  }
+
+  /** Every session with a known hook parent pid and its last event — the liveness check's input. */
+  sessionPids(): { sid: string; ppid: number; lastMs: number }[] {
+    const out: { sid: string; ppid: number; lastMs: number }[] = [];
+    for (const [sid, seen] of this.#sessions) if (seen.ppid) out.push({ sid, ppid: seen.ppid, lastMs: seen.lastMs });
+    return out;
+  }
+
   /** Sessions with an open turn and a known hook parent pid — what the net sensor samples. */
   sessionsToSample(): { sid: string; ppid: number }[] {
     const out: { sid: string; ppid: number }[] = [];

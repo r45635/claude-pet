@@ -21,6 +21,7 @@ import { LOG_DIR, ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
+import { Liveness } from './liveness.ts';
 import { TranscriptSource } from './transcript.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
@@ -501,6 +502,20 @@ async function netLoop(): Promise<void> {
   }
 }
 void netLoop();
+
+// Sessions whose `claude` process exited without a SessionEnd (terminal closed, killed,
+// crashed) leave now instead of after sessionTtlMs. See liveness.ts for what counts as proof.
+const LIVENESS_EVERY_MS = 15_000;
+const liveness = new Liveness(Date.now());
+setInterval(() => {
+  void liveness.gone(runtime.engine.sessionPids()).then((gone) => {
+    for (const sid of gone) {
+      runtime.engine.endSession(sid, Date.now());
+      process.stderr.write(`session ${sid} ended: its claude process is gone\n`);
+    }
+    if (gone.length > 0) broadcast();
+  });
+}, LIVENESS_EVERY_MS);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
