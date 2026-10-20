@@ -67,6 +67,39 @@ async function connect(port: number) {
   throw new Error('Chrome did not start');
 }
 
+/**
+ * The repository's social preview (GitHub → Settings → Social preview): 1280×640, the
+ * creatures on the right, the pitch on the left. Same harness, one frame, composed in a page.
+ */
+async function socialPreview(cdp: Awaited<ReturnType<typeof connect>>): Promise<void> {
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 560, height: 560, deviceScaleFactor: 2, mobile: false });
+  await cdp.send('Page.navigate', { url: 'about:blank' });
+  await sleep(150);
+  await cdp.send('Page.navigate', { url: `${PAGE}#demo=avatar&lang=en&bg=${encodeURIComponent(BG)}&state=CODING&kids=3&gauge=42&size=470` });
+  await sleep(2_500);
+  const art = (await cdp.send('Page.captureScreenshot', { format: 'png' })).data as string;
+  const html = `<!doctype html><meta charset="utf-8"><style>
+    html, body { margin: 0; width: 1280px; height: 640px; background: ${BG}; overflow: hidden; }
+    body { display: flex; align-items: center; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+    .text { flex: 1; padding: 0 0 0 96px; color: #eceff4; }
+    h1 { font-size: 92px; margin: 0 0 18px; letter-spacing: -2px; }
+    h1 span { color: #8fb8ff; }
+    p { font-size: 34px; line-height: 1.35; margin: 0 0 34px; color: #c9d1d9; max-width: 640px; }
+    .tags { font-size: 24px; color: #9aa3b5; }
+    .tags b { color: #c9a2ff; font-weight: 600; }
+    img { width: 560px; height: 560px; margin-right: 40px; }
+  </style><div class="text"><h1>claude<span>-pet</span></h1>
+  <p>A tiny creature on your Mac that shows what Claude Code is doing — right now.</p>
+  <div class="tags"><b>thinking</b> · <b>coding</b> · <b>storming</b> · <b>waiting for you</b></div></div>
+  <img src="data:image/png;base64,${art}">`;
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 640, deviceScaleFactor: 1, mobile: false });
+  await cdp.send('Page.navigate', { url: `data:text/html;base64,${Buffer.from(html).toString('base64')}` });
+  await sleep(1_000);
+  const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(OUT, 'social-preview.png'), Buffer.from(data, 'base64'));
+  process.stdout.write('social-preview\n');
+}
+
 async function main(): Promise<void> {
   mkdirSync(OUT, { recursive: true });
   const profile = mkdtempSync(join(tmpdir(), 'pet-media-'));
@@ -109,6 +142,7 @@ async function main(): Promise<void> {
       rmSync(frames, { recursive: true, force: true });
       process.stdout.write(`${scene.name}\n`);
     }
+    await socialPreview(cdp);
     cdp.close();
   } finally {
     chrome.kill();
