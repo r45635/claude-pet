@@ -5,7 +5,7 @@ pictures, or one SVG — packed into a `.claudepet` file. **Drag the file onto t
 install it; **right-click → Avatar** to switch. Everything else keeps working whatever it looks
 like: the states, breathing, storms, subagents walking around, the chat, clicks.
 
-Examples ship in [`avatars/`](../avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
+Examples live in the [avatar library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
 commented template), `cowboy` (SVG, with a hat that moves with the mood) and five seasonal ones.
 
 ## Get more avatars — the library
@@ -103,7 +103,7 @@ whose id already exists replaces it and keeps the previous one as `<id>.bak`.
 
 ## The SVG contract
 
-Start from [`avatars/mint/creature.svg`](../avatars/mint/creature.svg). The widget needs:
+Start from [`avatars/mint/creature.svg`](https://github.com/r45635/claude-pet-avatars/blob/main/avatars/mint/creature.svg) in the library. The widget needs:
 
 - one `<g class="critter">` in the 160 × 160 box;
 - inside it `<g class="shaker">` (shakes in a storm) › `<g class="body">` (breathes), and **exactly

@@ -1583,7 +1583,8 @@
   //   index.html#demo=chat&layout=above-right  (or below-left, …)
   // Browser-harness demo of an avatar (run Chrome with --allow-file-access-from-files):
   //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
-  // It reads the avatar folder like the widget's importer would, minus the validation.
+  // It reads the avatar folder like the widget's importer would, minus the validation — from the
+  // library's clone next to this one (r45635/claude-pet-avatars → ../claude-pet-avatars).
   if (params.get('demo') === 'avatar') {
     (async () => {
       await null; // let the rest of the module initialise first (render's state is below)
@@ -1594,7 +1595,7 @@
       document.documentElement.classList.add('widget');
       document.body.style.background = '#3b4252';
       if (id !== 'classic') {
-        const root = new URL(`../../../avatars/${id}/`, location.href);
+        const root = new URL(`../../../../claude-pet-avatars/avatars/${id}/`, location.href);
         const format = await (await fetch(new URL('../../../packages/collector/src/avatar-format.json', location.href))).json();
         const manifest = await (await fetch(new URL('manifest.json', root))).json();
         const text = async (f) => (await fetch(new URL(f, root))).text();

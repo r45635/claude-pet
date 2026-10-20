@@ -204,7 +204,7 @@ They come from the signed [avatar library](https://github.com/r45635/claude-pet-
 `update` and `remove` work the same way, and right-click → **Avatar** switches between the
 installed ones. Any other `.claudepet` file: drag it onto the creature. An avatar is one picture per state (any drawing tool or image AI) or an SVG
 following the creature's template — validated, sandboxed, and it never changes what the pet
-does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avatars/`](avatars).
+does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in the [library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars).
 
 ## Talk to it
 
