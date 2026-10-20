@@ -104,19 +104,22 @@ Turn on the chat (right-click → **Enable chat…**) and click the creature: a 
 you talk to your own Claude, right from the corner of the screen. Off by default — it is a
 full agent, and the pet asks before turning it on.
 
-## Private, light, and local
+## Private and local
 
 - **It never reads your prompts, your code, your file paths or your commands.** Only what
   kind of thing is happening, never what. Two independent filters enforce it, and a test
   with poisoned payloads guards every release. [Privacy →](docs/PRIVACY.md)
 - **Nothing about you leaves your Mac.** The only outbound requests ask GitHub whether a new
   version or a new avatar exists — carrying nothing but the URL (and you can turn them off).
-- **Light:** about 0.2 % of one CPU core when nothing happens — the creature is perfectly
-  still when Claude is.
-- **Updates itself**, only with releases signed by this project.
 
 ## Good to know
 
+- **Low CPU:** about 0.2 % of one core when Claude is idle — the creature is perfectly still
+  — and around 3.5 % while Claude works.
+- **Low memory:** about 85 MB for the creature and 95 MB for its background service.
+  [How it was measured →](docs/DEVELOPMENT.md#what-it-costs)
+- **Updates itself:** once a day it checks for a new version and installs it — only releases
+  signed by this project, keeping the previous one to go back to. You can turn it off.
 - **Requirements:** a Mac with Apple Silicon and [Claude Code](https://claude.com/claude-code).
 - **VS Code:** the creature follows the extension's sessions too; the usage gauge and the
   tiredness need the status line, which only the terminal shows — set the extension to
