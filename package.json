@@ -4,6 +4,10 @@
   "private": true,
   "description": "A local desktop creature that visualizes Claude Code's observable activity.",
   "license": "MIT",
+  "author": "Vincent Cruvellier (https://github.com/r45635)",
+  "contributors": [
+    "Chloé Cruvellier (https://github.com/ChloeCru)"
+  ],
   "repository": "github:r45635/claude-pet",
   "type": "module",
   "engines": {

@@ -143,9 +143,9 @@ scenario at 1 Hz, via `npm run bench`:
 | moderate (simulator, 102 events) | **15.3 % / 24.0 %** | 193 MB / 198 MB | 0.9 % | 102 |
 | heavy, subagents (607 events) | **20.7 % / 27.3 %** | 216 MB / 229 MB | 1.2 % | 607 |
 
-⚠️ **Not comparable to the README table.** These numbers sum the widget process **and its
+⚠️ **Not comparable to the table in `DEVELOPMENT.md` (What it costs).** These numbers sum the widget process **and its
 three WebKit XPC helpers** (WebContent does the actual compositing work), and sum their
-`ps` RSS (shared pages counted more than once). The README's "~3.5 % / ~85 MB" counted
+`ps` RSS (shared pages counted more than once). That table's "~3.5 % / ~85 MB" counted
 the widget process alone on a different machine. This table is the self-consistent
 reference the after-measurements in this series compare against — same tool, same
 machine, same scenarios, same seed.

@@ -1,37 +1,22 @@
+<div align="center">
+
 # claude-pet
 
-A small always-visible creature on macOS that visualizes what Claude Code is **observably
-doing** during a coding session: idle, thinking, reading, coding, running tools, under a
-token storm, waiting on you, done, or in trouble.
+**A tiny creature that lives on your Mac and shows what Claude Code is doing — right now.**
 
-> **The core rule of this project**
->
-> The creature is a visualization of Claude's **observable activity**, not a fake
-> representation of Claude's internal reasoning. Every metric in the API says whether it
-> was measured or derived, and anything unknown is reported as `null` — never as a
-> plausible number.
+<img src="docs/media/hero.gif" width="300" alt="The creature coding, with three subagents walking around it">
 
-Fully local. No cloud, no telemetry, no outbound network call at runtime. The one exception
-is installing from a clone: a one-time download of the prebuilt widget from this
-repository's GitHub Releases, checked against its published SHA-256 (skipped if you build
-it yourself).
+[![Release](https://img.shields.io/github/v/release/r45635/claude-pet?color=8fb8ff)](https://github.com/r45635/claude-pet/releases/latest)
+![macOS · Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-lightgrey)
+[![Avatars](https://img.shields.io/badge/avatars-library-c9a2ff)](https://github.com/r45635/claude-pet-avatars)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8bd17c)](LICENSE)
 
----
+</div>
 
-## Status
-
-| Phase | | |
-|---|---|---|
-| 0 | telemetry investigation | ✅ `docs/CLAUDE_CODE_TELEMETRY.md` |
-| 1 | event simulator | ✅ deterministic, 4 profiles |
-| 2 | state engine + tests | ✅ |
-| 3 | Tauri widget | ✅ transparent window, clicks only on the creature, ~0.5% CPU / ~55 MB idle (measured) |
-| 4 | real Claude Code integration | 🟡 wired (hooks + network sensor); tuning on real sessions continues (`npm run replay`) |
-| 5 | refinement | ✅ launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars, menu bar, fatigue, OpenTelemetry token counts |
-
-## Install
-
-On an Apple Silicon Mac. Nothing to install first — no Node, no Rust, no clone:
+Claude Code works in the background; you work in front. **claude-pet sits in a corner of
+your screen and tells you, at a glance, what Claude is up to**: thinking, reading,
+coding, running tools, storming through a big task — or **waiting for you**. No more
+switching windows to check whether it's done, stuck, or asking you something.
 
 ```bash
 curl -fsSLO https://github.com/r45635/claude-pet/releases/latest/download/claude-pet-aarch64-apple-darwin.tar.gz
@@ -39,270 +24,121 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 ./claude-pet/claude-pet setup
 ```
 
-`setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
-hooks into Claude Code and starts the pet at login. `~/.claude-pet/app/claude-pet` also has
-`status`, `doctor` (checks the whole chain, see [below](#wiring-into-claude-code)), `restart`,
-`snapshot`, `uninstall` (which keeps your settings and logs) and
-`avatars` — `avatars list` / `avatars install <id>` add ready-made looks from the
-[library](#make-it-your-own).
+That's it. Open Claude Code — in a terminal or in VS Code — and the creature wakes up.
 
-**Updates install themselves.** Once a day the daemon asks GitHub which release is the
-latest (a request carrying nothing but the URL — [PRIVACY](docs/PRIVACY.md)). When a newer
-one is out, it downloads it, checks its SHA-256 **and its release signature**, swaps it in
-and restarts the creature; right-click → *Install vX…* does the same on demand. Only signed
-releases install on their own; an unsigned one is offered behind a warning. The previous
-version stays in `~/.claude-pet/app.old` — to go back:
-`mv ~/.claude-pet/app ~/.claude-pet/app.bad && mv ~/.claude-pet/app.old ~/.claude-pet/app && ~/.claude-pet/app/claude-pet restart`.
-Both behaviours are settings (*Check for updates*, *Install updates automatically*). Running
-the three lines above again still works as a manual update.
+---
 
-**It never takes more room than it needs:** an update keeps exactly one previous version
-(`app.old`, for going back) and nothing older; from a clone, `npm run autostart -- install|restart`
-removes every downloaded widget but the one it launches. Logs are capped at 1 MB each (one
-previous kept), the event spool at 4 MB (same), and leftovers of an interrupted download or
-import are swept at the next start. Everything lives in `~/.claude-pet/`.
+## It shows what's really happening
 
-The archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub Actions
-(`.github/workflows/release.yml`) for every version tag. Download it with `curl`, not a
-browser: the binaries are not notarized by Apple, and a browser download would be
-quarantined by Gatekeeper. `gh release download -R r45635/claude-pet -p
-claude-pet-aarch64-apple-darwin.tar.gz` works too.
+Every look comes from what Claude Code actually reports — its hooks, its status line, the
+network of its own process. Never an invented mood.
 
-### From a clone
+| <img src="docs/media/state-idle.png" width="110"> | <img src="docs/media/state-thinking.png" width="110"> | <img src="docs/media/state-reading.png" width="110"> | <img src="docs/media/state-coding.png" width="110"> |
+|:---:|:---:|:---:|:---:|
+| **asleep** | **thinking** | **reading** | **coding** |
+| <img src="docs/media/state-tool_call.png" width="110"> | <img src="docs/media/state-waiting.png" width="110"> | <img src="docs/media/state-done.png" width="110"> | <img src="docs/media/state-error.png" width="110"> |
+| **running a tool** | **waiting for you** | **done** | **in trouble** |
 
-For working on the pet. Needs Node ≥ 23.6, no Rust:
+## Subagents, sessions, storms
 
-```bash
-git clone https://github.com/r45635/claude-pet && cd claude-pet
-npm install
-npm run install-hooks            # wire it into Claude Code
-npm run autostart -- install     # downloads the prebuilt widget, starts daemon + widget at login
-```
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/media/sessions.gif" width="280" alt="Four sessions, one waiting for you"></td>
+<td width="50%" align="center"><img src="docs/media/storm.gif" width="280" alt="A storm: four subagents running"></td>
+</tr>
+<tr>
+<td><b>Every session gets its own creature</b>, every subagent a little one walking around
+its parent. Four windows of Claude Code? Four families — and the one waiting for you raises
+its hand.</td>
+<td><b>When things heat up, it storms</b> — and a bubble says why: <i>42 tool calls/min</i>,
+<i>4 subagents running</i>, <i>Bash failed</i>, <i>Rate limited</i>.</td>
+</tr>
+</table>
 
-`autostart install` fetches the widget of `package.json`'s version into `~/.claude-pet/bin/`
-(`npm run fetch-widget` does only that step), unless you built it yourself.
-`npm run build-standalone` builds the release archive locally (needs the official Node
-build from nodejs.org: Homebrew's cannot make single executables).
+## It gets tired, too
 
-## Try it without Claude Code
+<img align="right" src="docs/media/tired.gif" width="150" alt="A worn-out creature, its context almost full">
 
-```bash
-npm install
-npm test
+As a session's **context window fills up**, its creature starts to sweat, then wears out —
+a quiet hint that it's time to `/compact` or start fresh.
 
-# terminal 1 — the local state API
-npm run daemon          # prints its port and token
+Under the feet, a small gauge shows **how much of your plan's 5-hour window** you have used,
+and when it resets.
 
-# terminal 2 — a fake heavy session, in real time
-npm run sim -- --profile heavy --duration 30
+<br clear="right">
 
-# terminal 3 — watch the engine react
-node packages/collector/src/snapshot.ts --watch
-```
+## Make it yours — the avatar library
 
-Or see the creature: `open "apps/widget/web/index.html#token=<token>&debug"`, or run the Tauri widget (`apps/widget/README.md`).
+<p align="center">
+<img src="docs/media/avatar-ghost.gif" width="120" alt="Ghost">
+<img src="docs/media/avatar-alien.gif" width="120" alt="Alien">
+<img src="docs/media/avatar-mint.gif" width="120" alt="Mint">
+<img src="docs/media/avatar-cowboy.gif" width="120" alt="Cowboy">
+<img src="docs/media/avatar-halloween.gif" width="120" alt="Halloween">
+<img src="docs/media/avatar-noel.gif" width="120" alt="Noël">
+</p>
 
-Profiles: `idle`, `moderate`, `heavy`, `error`. Add `--seed 7 --fast` for a byte-identical
-replay; `--stdout` to print events instead of writing the spool.
-
-## How it works
-
-```text
-Claude Code hooks ──┐
-                    ├──> spool (JSONL)  ──> collector daemon ──> state engine ──> SSE ──> widget
-statusLine command ─┘
-```
-
-**Hooks say what Claude is doing. The status line says how loaded the session is.** Neither
-is sufficient alone, and both are documented, supported mechanisms. The hot path is `sh` +
-`jq` (~5 ms) rather than Node (~80 ms), because `PreToolUse` sits in front of every single
-tool call.
-
-What is and is not available from Claude Code — and how each claim was verified — is in
-[`docs/CLAUDE_CODE_TELEMETRY.md`](docs/CLAUDE_CODE_TELEMETRY.md). The short version:
-
-- ✅ **documented:** tool/subagent/prompt/turn/error events (hooks), context-window %,
-  token totals, cost, durations (status line)
-- ⚠️ **indirect:** the transcript JSONL (internal schema) gives per-thread activity and
-  real token counts → opt-in, off by default (settings → *Read conversation files*)
-- 📡 **documented, opt-in:** Claude Code's OpenTelemetry logs give real output-token counts
-  per API request, VS Code included → `claude-pet otel enable` (only the counts are kept)
-- ❌ **unavailable:** per-tool-call token counts in a hook payload, a streaming token-rate
-  API, any explicit "thinking" signal
-- 🧮 **derived:** `load_score`, which is a visualization index and says so
-
-## Privacy
-
-Prompts, file contents, paths, command lines and tool output are **never read** — not
-stored-then-filtered, never extracted in the first place. Two independent allow-lists
-enforce it (the hook's `jq` construction, then `parsePetEvent`), and
-`packages/collector/test/privacy.test.ts` is a release gate that feeds poisoned payloads
-through the real scripts and asserts the markers appear nowhere.
-
-Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
-
-## Docs
-
-| | |
-|---|---|
-| [`CLAUDE_CODE_TELEMETRY.md`](docs/CLAUDE_CODE_TELEMETRY.md) | Phase 0 — what Claude Code exposes, with the command that proves each claim |
-| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | pipeline, why a spool file is the seam, rejected alternatives |
-| [`EVENT_SCHEMA.md`](docs/EVENT_SCHEMA.md) | the normalized `PetEvent`, and what it structurally cannot contain |
-| [`LOAD_SCORE.md`](docs/LOAD_SCORE.md) | the decaying-reservoir model, and why the blend is a power mean |
-| [`MVP_SCOPE.md`](docs/MVP_SCOPE.md) | in / out, and the definition of done |
-| [`RISKS.md`](docs/RISKS.md) | eleven risks, each with a mitigation and a guard |
-| [`ROADMAP.md`](docs/ROADMAP.md) | the phase order and why it survives this machine |
-| [`PRIVACY.md`](docs/PRIVACY.md) | what is never read, what is reduced, how it is enforced |
-| [`CONFIG.md`](docs/CONFIG.md) | every setting, where to change it, ranges, languages, environment |
-| [`AVATARS.md`](docs/AVATARS.md) | make your own creature: the `.claudepet` format, states, the SVG contract, safety |
-
-## Requirements
-
-- macOS, Apple Silicon
-- from a clone only: Node ≥ 23.6 (runs the TypeScript directly); the standalone release
-  embeds its own
-- `jq` (ships with macOS 26 at `/usr/bin/jq`)
-- Rust — **only** to build the widget yourself; otherwise the prebuilt one is downloaded.
-  See `apps/widget/README.md`
-
-## What you see
-
-- **One creature per Claude Code session**, each with its subagents wandering around it
-  (up to 4 shown; one in trouble or waiting on you is never the hidden one).
-- **A tray under the feet**: one pastille per session, and the plan's usage gauge — how
-  much of the current 5-hour window is used (green, amber from 70 %, red from 90 %) and
-  the time left before it resets. It comes from the status line, so it only shows on a
-  claude.ai Pro or Max plan (not with an API key, Bedrock or Vertex), after the session's
-  first answer, and not in VS Code's chat panel (see below).
-- **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
-  `Bash failed`, `Rate limited`).
-- **Tiredness**: as a session's context window fills, its creature sweats (from 70 %), then
-  wears out (from 88 %: a second drop, a duller skin, an unstable glow). From the status
-  line's context %, so not in VS Code's chat panel; nothing shown when it is unknown.
-- **Or just an icon in the menu bar**: right-click → **Display** → *In the menu bar* (or
-  *Both*). The icon's title is the creature's state (💭 thinking, 📖 reading, ⌨️ coding,
-  🔧 a tool, ⚡ a storm, ✋ waiting for you, ✅ done, ❗ trouble, ⚠︎ no signal), its tooltip
-  says it in words with the sessions and the context fill, and its menu is the creature's.
-  The chat and the settings open in their bubble as usual.
-- **Go to a session**: right-click → **Sessions ▸** lists each live session with its app
-  (VS Code, Terminal…) and what it is doing, and brings that app to the front; when one is
-  waiting for you, *Go to the session waiting for you* is the first item. It finds the app
-  from the session's `claude` process and needs no permission — which also means it brings
-  the app forward, not a given window or tab.
-- **Settings** (gear icon in the chat bubble): the creatures' size (80 to 300 px),
-  storm threshold and minimum time per state, applied live, and *Read conversation files* (off by default): each subagent then shows
-  its own model working or its tool running, and token counts are real. Only line kinds
-  and token counts are kept, never text — see [`PRIVACY.md`](docs/PRIVACY.md). Size
-  presets, temperament and the rest are in the right-click menu.
-
-## Make it your own
-
-**More avatars, ready-made:** right-click → **Avatar** → **Library ▸**, or in a terminal:
+Ghosts, aliens, a cowboy whose hat follows the mood, seasonal looks… Browse the
+**[claude-pet avatar library →](https://github.com/r45635/claude-pet-avatars)** and install
+one from the creature's menu (right-click → **Avatar ▸ Library**) or in one line:
 
 ```bash
-~/.claude-pet/app/claude-pet avatars list            # standalone install
 ~/.claude-pet/app/claude-pet avatars install ghost
-npm run avatars -- install ghost                     # from a clone
 ```
 
-They come from the signed [avatar library](https://github.com/r45635/claude-pet-avatars);
-`update` and `remove` work the same way, and right-click → **Avatar** switches between the
-installed ones. Any other `.claudepet` file: drag it onto the creature. An avatar is one picture per state (any drawing tool or image AI) or an SVG
-following the creature's template — validated, sandboxed, and it never changes what the pet
-does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in the [library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars).
+Every avatar is signed and checked before it installs. **Make your own** from a few
+pictures, an SVG, or even a sprite sheet — then share it: [the avatar guide](docs/AVATARS.md)
+shows how, and the library welcomes pull requests.
+
+## On your desktop, or in the menu bar
+
+Prefer a clean desktop? Right-click → **Display** → *In the menu bar*. The icon's title is
+the state at a glance — 💭 📖 ⌨️ 🔧 ⚡ ✋ ✅ ❗ — and its menu is the creature's. Or keep both.
+
+From the same menu, **Sessions ▸** brings any running session's app (VS Code, Terminal…) to
+the front — and when one is waiting for you, it's the first item.
 
 ## Talk to it
 
-**Off by default.** Right-click → **Enable chat…** (a native confirmation explains the risk),
-then click the creature: a bubble opens; type (or use macOS dictation) and press Enter. The
-widget runs your own `claude` CLI headless in `~/.claude-pet/chat`, one continuous
-conversation, answer streamed into the bubble — and the creature animates from that session
-like any other. It is a **full agent** (`--permission-mode auto`): see `docs/RISKS.md` §10.
-The page can switch it off but never on. Drag to move, right-click for the menu.
+Turn on the chat (right-click → **Enable chat…**) and click the creature: a bubble opens and
+you talk to your own Claude, right from the corner of the screen. Off by default — it is a
+full agent, and the pet asks before turning it on.
 
-## Settings and languages
+## Private, light, and local
 
-Right-click → **Settings…**: language (English, French — follows macOS by default), theme,
-reduce motion, start at login, avatar, size (nominal × zoom within min/max, ⌘+ / ⌘− / ⌘0),
-opacity, always on top, temperament, storm threshold, sensors, chat. Everything is one file,
-`~/.claude-pet/config.json`, editable by hand and applied live — an unreadable file is never
-overwritten, out-of-range values are ignored and reported. Every setting:
-[`docs/CONFIG.md`](docs/CONFIG.md).
+- **It never reads your prompts, your code, your file paths or your commands.** Only what
+  kind of thing is happening, never what. Two independent filters enforce it, and a test
+  with poisoned payloads guards every release. [Privacy →](docs/PRIVACY.md)
+- **Nothing about you leaves your Mac.** The only outbound requests ask GitHub whether a new
+  version or a new avatar exists — carrying nothing but the URL (and you can turn them off).
+- **Light:** about 0.2 % of one CPU core when nothing happens — the creature is perfectly
+  still when Claude is.
+- **Updates itself**, only with releases signed by this project.
 
-## Wiring into Claude Code
+## Good to know
 
-```bash
-npm run install-hooks -- --dry-run   # show what would change
-npm run install-hooks                # back up ~/.claude/settings.json, then merge
-npm run uninstall-hooks              # remove only our entries
-```
+- **Requirements:** a Mac with Apple Silicon and [Claude Code](https://claude.com/claude-code).
+- **VS Code:** the creature follows the extension's sessions too; the usage gauge and the
+  tiredness need the status line, which only the terminal shows — set the extension to
+  *Use Terminal*, or see [the details](docs/DEVELOPMENT.md#the-vs-code-extension).
+- **Something looks off?** `~/.claude-pet/app/claude-pet doctor` checks every link of the
+  chain and tells you how to fix what's broken.
+- **Settings:** right-click → **Settings…** — size, language (English, French), theme,
+  temperament, sensors. [Every setting →](docs/CONFIG.md)
+- **Uninstall:** `~/.claude-pet/app/claude-pet uninstall` (your settings stay in
+  `~/.claude-pet/`).
 
-The installer **merges**: existing hooks are left untouched, a foreign `statusLine` is never
-overwritten (the meter then stays offline and says so), and a re-run is a no-op. Every write
-is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
-without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
+Curious how it works, or want to hack on it? **[The development guide →](docs/DEVELOPMENT.md)**
 
-**Something looks off?** `claude-pet doctor` (from a clone: `npm run doctor`) checks each
-link against reality, read-only: hooks and status line wired to scripts that exist, the
-daemon reachable and on this version, its reader caught up, the widget running — and the
-failure no status shows, Claude Code running with no hook event for ten minutes. Each
-problem comes with the command that fixes it; the exit code is 1 when something is broken.
+## Authors
 
-### VS Code
+Made by **Vincent Cruvellier** ([@r45635](https://github.com/r45635)) and
+**Chloé Cruvellier** ([@ChloeCru](https://github.com/ChloeCru)).
 
-The Claude Code extension's graphical chat panel runs the hooks but not the status line.
-The creature follows those sessions like any other; what the status line carries does not
-arrive: no usage gauge, no context fill. To get them, switch the extension to terminal
-mode: VS Code settings → Extensions → Claude Code → **Use Terminal**
-(`claudeCode.useTerminal`). The only other source of plan usage would be Anthropic's
-internal usage API, which means reading your login token from the Keychain and calling
-out to the network: the pet does neither. Real token counts, though, do reach the pet from
-the panel through Claude Code's own telemetry: `claude-pet otel enable` (then open a new
-session), [privacy](docs/PRIVACY.md#opentelemetry-opt-in-off-by-default) included.
-
-## Start at login
-
-```bash
-npm run autostart -- install     # daemon + widget as per-user LaunchAgents
-npm run autostart -- restart     # after a pull or a rebuild: run the new code
-npm run autostart -- status
-npm run autostart -- uninstall
-```
-
-launchd restarts the daemon whenever it stops, and the widget only after a crash (Quit in
-the menu keeps it closed until the next login). Logs are in `~/.claude-pet/logs/`. After
-`git pull`, `restart`: it downloads the widget of the new version if needed. A local build
-(`apps/widget/src-tauri/target/release`) always wins over the download, so if you build it
-yourself, rebuild after a pull that changed `apps/widget`.
-
-## What it costs
-
-Measured on an Apple Silicon Mac mini (2026-10-05), CPU as a share of one core:
-
-| | widget | daemon |
-|---|---|---|
-| at rest (animations stopped) | ~0.5 % (~0.2 % with nothing happening at all, per `docs/RISKS.md` §6) | < 1 % |
-| while Claude works (60 s simulated `moderate` session) | **~3.5 %** (up to ~4.5 % with several subagents walking around) | < 1 % |
-| memory | ~85 MB | ~90-100 MB |
-
-The widget's cost while active is the animation itself: macOS recomposites the
-transparent window on every frame. It has been there from the first version (4.2 % on the
-same benchmark before the per-agent creatures; 3.4 % now). The daemon spawns `nettop`
-every ~5 s during a turn (~1 % CPU) unless *Read conversation files* is on, which brings
-it to ~0.6 %.
-
-Since v0.4 the page redraws only when what it shows changes visibly (load in steps of 5,
-prefs applied when they change): ~6 % less while Claude works, measured A/B
-([`docs/RISKS.md`](docs/RISKS.md) §6). Going further would mean fewer animation frames
-(stepped motion) or fewer creatures moving at once — a visible change, not taken.
-
-A reproducible measurement now ships as `npm run bench -- <quiet|moderate|heavy>`
-(`scripts/bench.ts`): it samples the widget **plus its WebKit XPC helpers** at 1 Hz while
-driving the simulator, so its numbers run higher than this table, which counted the widget
-process alone. The before/after series for the animation-behavior layer is recorded in
-[docs/MOTION.md](docs/MOTION.md).
+Ideas, avatars and bug reports are welcome — open an issue, or send an avatar to the
+[library](https://github.com/r45635/claude-pet-avatars).
 
 ## License
 
-MIT — © 2026 Vincent Cruvellier, see [LICENSE](LICENSE). The widget binary links
-third-party Rust crates under their own licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+MIT — see [LICENSE](LICENSE). The widget links third-party Rust crates under their own
+licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

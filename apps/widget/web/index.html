@@ -1583,6 +1583,8 @@
   //   index.html#demo=chat&layout=above-right  (or below-left, …)
   // Browser-harness demo of an avatar (run Chrome with --allow-file-access-from-files):
   //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
+  //     [&sessions=CODING,WAITING,READING] one family per state (kids go to the first one)
+  //     [&gauge=63] the usage gauge, % of the 5-hour window   [&bg=%23101418] the backdrop   [&size=220] px
   // It reads the avatar folder like the widget's importer would, minus the validation — from the
   // library's clone next to this one (r45635/claude-pet-avatars → ../claude-pet-avatars).
   if (params.get('demo') === 'avatar') {
@@ -1593,7 +1595,7 @@
       const kids = Number(params.get('kids') ?? 0);
       const ctx = params.has('ctx') ? Number(params.get('ctx')) : null; // fatigue: &ctx=0..100
       document.documentElement.classList.add('widget');
-      document.body.style.background = '#3b4252';
+      document.body.style.background = params.get('bg') ?? '#3b4252';
       if (id !== 'classic') {
         const root = new URL(`../../../../claude-pet-avatars/avatars/${id}/`, location.href);
         const format = await (await fetch(new URL('../../../packages/collector/src/avatar-format.json', location.href))).json();
@@ -1617,14 +1619,22 @@
         applyAvatar(avatar);
       }
       const agents = Array.from({ length: kids }, (_, i) => ({ id: `k${i}`, type: 'explore', state }));
+      const STATUS = { WAITING: 'waiting', DONE: 'done', IDLE: 'idle', THINKING: 'thinking' };
+      const families = (params.get('sessions') ?? '').split(',').filter(Boolean)
+        .map((st, i) => ({ id: `s${i}`, status: STATUS[st] ?? 'working', state: st, load: st === 'HIGH_LOAD' ? 90 : 50,
+                           agents: i === 0 ? agents : [], context_load: ctx,
+                           reason: st === 'ERROR' ? { kind: 'tool_failed', tool: 'bash' } : st === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' } : null }));
+      const gauge = params.has('gauge') ? { used_pct: Number(params.get('gauge')), resets_at: new Date(Date.now() + 2.4 * 3600_000).toISOString() } : null;
       render({
+        rate_limits: { five_hour: gauge, seven_day: null },
         state, visual: state === 'IDLE' ? 'IDLE' : state === 'HIGH_LOAD' || state === 'ERROR' ? state : 'ACTIVE',
         load: state === 'HIGH_LOAD' ? 90 : state === 'IDLE' ? 0 : 50,
         reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' }
           : state === 'ERROR' ? { kind: 'tool_failed', tool: 'bash' } : null,
         sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
-        sessions: kids ? [{ id: 'demo', status: 'working', state, load: 50, agents, context_load: ctx }] : [],
-        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto' }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
+        sessions: families.length ? families : kids ? [{ id: 'demo', status: 'working', state, load: state === 'HIGH_LOAD' ? 90 : 50, agents, context_load: ctx,
+                                                       reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' } : null }] : [],
+        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto', sizePx: Number(params.get('size') ?? 150) }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
         active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
       });
       document.title = `ready ${id} ${state}`;
