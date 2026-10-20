@@ -8,6 +8,7 @@
  *   GET /snapshot          one-shot JSON
  *   GET /events            Server-Sent Events, one `data:` frame per tick
  *   GET /health            liveness + whether events are actually arriving
+ *   GET /sessions          each session's claude pid (native only: the menu's "go to")
  *
  * SSE (not WebSocket) because the feed is one-way and `EventSource` reconnects for free
  * in the Tauri webview. See docs/ARCHITECTURE.md.
@@ -21,6 +22,8 @@ import { LOG_DIR, ROOT_DIR, SPOOL_FILE } from './paths.ts';
 import { Runtime } from './runtime.ts';
 import { readOrCreateToken } from './token.ts';
 import { NetSensor } from './net.ts';
+import { Liveness } from './liveness.ts';
+import { parseOtlpLogs } from './otel.ts';
 import { TranscriptSource } from './transcript.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, watch } from 'node:fs';
@@ -83,6 +86,45 @@ function applyTranscriptPref(): void {
   runtime.engine.enableTranscriptSource(on);
 }
 applyTranscriptPref();
+
+// Opt-in too (`claude-pet otel enable`): off, OTLP posts are answered and dropped.
+function applyOtelPref(): void {
+  runtime.engine.enableOtelSource(prefs.otel && !prefs.paused);
+}
+applyOtelPref();
+
+/** OTLP batches are a few dozen KB (measured: 36 KB for a session's first one). */
+const OTLP_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * POST /v1/logs — Claude Code's OpenTelemetry export (OTLP/HTTP JSON). It is the one route
+ * without the token: an exporter could only carry it through settings.json, which other
+ * local accounts can read. What it can do instead is bounded: it only ever adds output-token
+ * counts to sessions the hooks already know (otel.ts keeps nothing else). A web page cannot
+ * reach it: application/json is required, which a cross-origin request can only send after
+ * a preflight, and every preflight is refused. /v1/metrics is acknowledged and dropped, for
+ * an exporter pointed at the generic endpoint.
+ */
+async function postOtlp(req: IncomingMessage, res: ServerResponse, logs: boolean): Promise<void> {
+  const reply = (status: number, body = '{}') => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(body);
+  };
+  if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    return reply(415, '{"error":"OTLP/HTTP JSON only: set OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json"}');
+  }
+  const body = await readBody(req, OTLP_MAX_BYTES);
+  if (body === null) return reply(413);
+  if (!logs || !prefs.otel || prefs.paused) return reply(200);
+  let signals: ReturnType<typeof parseOtlpLogs> = [];
+  try {
+    signals = parseOtlpLogs(JSON.parse(body));
+  } catch {
+    return reply(400, '{"error":"not JSON"}');
+  }
+  for (const signal of signals) runtime.engine.ingestOtel(signal);
+  reply(200);
+}
 
 // Release updates: checked daily (update.ts), surfaced in every frame and in /health.
 let update = freshUpdateState(STANDALONE ? 'standalone' : 'clone', !STANDALONE && existsSync(LOCAL_BUILD));
@@ -263,6 +305,7 @@ async function updateConfig(req: IncomingMessage, res: ServerResponse): Promise<
   writeUserFile(applyPatch(current, patch));
   loadConfig();
   applyTranscriptPref();
+  applyOtelPref();
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify(prefs));
   broadcast();
@@ -329,6 +372,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  if ((url.pathname === '/v1/logs' || url.pathname === '/v1/metrics') && req.method === 'POST') {
+    void postOtlp(req, res, url.pathname === '/v1/logs');
+    return;
+  }
+
   if (!authorized(url)) {
     res.writeHead(401, { 'content-type': 'application/json' });
     res.end('{"error":"token required"}');
@@ -390,6 +438,23 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 
   if (url.pathname === '/update' && req.method === 'POST') {
     void postUpdate(req, res);
+    return;
+  }
+
+  // The menu's "go to the session": each session's `claude` pid, for Rust to find its app.
+  // Native only: pids are of no use to the page.
+  if (url.pathname === '/sessions') {
+    if (!isNative(req)) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      res.end('{"error":"native_only"}');
+      return;
+    }
+    const status = new Map(runtime.snapshot().sessions.map((x) => [x.id, x.status]));
+    const sessions = runtime.engine.sessionPids()
+      .filter(({ sid }) => status.has(sid))
+      .map(({ sid, ppid }) => ({ id: sid, pid: ppid, status: status.get(sid) }));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ sessions }));
     return;
   }
 
@@ -474,6 +539,7 @@ watch(ROOT_DIR, (_event, name) => {
   reloadTimer = setTimeout(() => {
     loadConfig();
     applyTranscriptPref();
+    applyOtelPref();
     broadcast();
   }, 200);
 });
@@ -501,6 +567,20 @@ async function netLoop(): Promise<void> {
   }
 }
 void netLoop();
+
+// Sessions whose `claude` process exited without a SessionEnd (terminal closed, killed,
+// crashed) leave now instead of after sessionTtlMs. See liveness.ts for what counts as proof.
+const LIVENESS_EVERY_MS = 15_000;
+const liveness = new Liveness(Date.now());
+setInterval(() => {
+  void liveness.gone(runtime.engine.sessionPids()).then((gone) => {
+    for (const sid of gone) {
+      runtime.engine.endSession(sid, Date.now());
+      process.stderr.write(`session ${sid} ended: its claude process is gone\n`);
+    }
+    if (gone.length > 0) broadcast();
+  });
+}, LIVENESS_EVERY_MS);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

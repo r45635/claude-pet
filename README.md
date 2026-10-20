@@ -27,7 +27,7 @@ it yourself).
 | 2 | state engine + tests | ✅ |
 | 3 | Tauri widget | ✅ transparent window, clicks only on the creature, ~0.5% CPU / ~55 MB idle (measured) |
 | 4 | real Claude Code integration | 🟡 wired (hooks + network sensor); tuning on real sessions continues (`npm run replay`) |
-| 5 | refinement | 🟡 done: launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars. Left: menu bar, fatigue, OTEL token rates |
+| 5 | refinement | ✅ launch at login, sizes, one creature per agent, settings, usage gauge, chat, avatars, menu bar, fatigue, OpenTelemetry token counts |
 
 ## Install
 
@@ -41,7 +41,8 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 
 `setup` copies the app to `~/.claude-pet/app` (the download can then be deleted), wires the
 hooks into Claude Code and starts the pet at login. `~/.claude-pet/app/claude-pet` also has
-`status`, `restart`, `snapshot`, `uninstall` (which keeps your settings and logs) and
+`status`, `doctor` (checks the whole chain, see [below](#wiring-into-claude-code)), `restart`,
+`snapshot`, `uninstall` (which keeps your settings and logs) and
 `avatars` — `avatars list` / `avatars install <id>` add ready-made looks from the
 [library](#make-it-your-own).
 
@@ -124,6 +125,8 @@ What is and is not available from Claude Code — and how each claim was verifie
   token totals, cost, durations (status line)
 - ⚠️ **indirect:** the transcript JSONL (internal schema) gives per-thread activity and
   real token counts → opt-in, off by default (settings → *Read conversation files*)
+- 📡 **documented, opt-in:** Claude Code's OpenTelemetry logs give real output-token counts
+  per API request, VS Code included → `claude-pet otel enable` (only the counts are kept)
 - ❌ **unavailable:** per-tool-call token counts in a hook payload, a streaming token-rate
   API, any explicit "thinking" signal
 - 🧮 **derived:** `load_score`, which is a visualization index and says so
@@ -173,6 +176,19 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
   first answer, and not in VS Code's chat panel (see below).
 - **A why bubble** above the head in a storm or an error (`42 tool calls/min`,
   `Bash failed`, `Rate limited`).
+- **Tiredness**: as a session's context window fills, its creature sweats (from 70 %), then
+  wears out (from 88 %: a second drop, a duller skin, an unstable glow). From the status
+  line's context %, so not in VS Code's chat panel; nothing shown when it is unknown.
+- **Or just an icon in the menu bar**: right-click → **Display** → *In the menu bar* (or
+  *Both*). The icon's title is the creature's state (💭 thinking, 📖 reading, ⌨️ coding,
+  🔧 a tool, ⚡ a storm, ✋ waiting for you, ✅ done, ❗ trouble, ⚠︎ no signal), its tooltip
+  says it in words with the sessions and the context fill, and its menu is the creature's.
+  The chat and the settings open in their bubble as usual.
+- **Go to a session**: right-click → **Sessions ▸** lists each live session with its app
+  (VS Code, Terminal…) and what it is doing, and brings that app to the front; when one is
+  waiting for you, *Go to the session waiting for you* is the first item. It finds the app
+  from the session's `claude` process and needs no permission — which also means it brings
+  the app forward, not a given window or tab.
 - **Settings** (gear icon in the chat bubble): the creatures' size (80 to 300 px),
   storm threshold and minimum time per state, applied live, and *Read conversation files* (off by default): each subagent then shows
   its own model working or its tool running, and token counts are real. Only line kinds
@@ -193,7 +209,7 @@ They come from the signed [avatar library](https://github.com/r45635/claude-pet-
 `update` and `remove` work the same way, and right-click → **Avatar** switches between the
 installed ones. Any other `.claudepet` file: drag it onto the creature. An avatar is one picture per state (any drawing tool or image AI) or an SVG
 following the creature's template — validated, sandboxed, and it never changes what the pet
-does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in [`avatars/`](avatars).
+does. How to make one: [`docs/AVATARS.md`](docs/AVATARS.md); examples in the [library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars).
 
 ## Talk to it
 
@@ -226,6 +242,12 @@ overwritten (the meter then stays offline and says so), and a re-run is a no-op.
 is preceded by a backup in `~/.claude-pet/backups/`. Running sessions pick the hooks up
 without a restart. The proof it works is `wc -l ~/.claude-pet/spool/events.jsonl` growing.
 
+**Something looks off?** `claude-pet doctor` (from a clone: `npm run doctor`) checks each
+link against reality, read-only: hooks and status line wired to scripts that exist, the
+daemon reachable and on this version, its reader caught up, the widget running — and the
+failure no status shows, Claude Code running with no hook event for ten minutes. Each
+problem comes with the command that fixes it; the exit code is 1 when something is broken.
+
 ### VS Code
 
 The Claude Code extension's graphical chat panel runs the hooks but not the status line.
@@ -234,7 +256,9 @@ arrive: no usage gauge, no context fill. To get them, switch the extension to te
 mode: VS Code settings → Extensions → Claude Code → **Use Terminal**
 (`claudeCode.useTerminal`). The only other source of plan usage would be Anthropic's
 internal usage API, which means reading your login token from the Keychain and calling
-out to the network: the pet does neither.
+out to the network: the pet does neither. Real token counts, though, do reach the pet from
+the panel through Claude Code's own telemetry: `claude-pet otel enable` (then open a new
+session), [privacy](docs/PRIVACY.md#opentelemetry-opt-in-off-by-default) included.
 
 ## Start at login
 
@@ -267,8 +291,10 @@ same benchmark before the per-agent creatures; 3.4 % now). The daemon spawns `ne
 every ~5 s during a turn (~1 % CPU) unless *Read conversation files* is on, which brings
 it to ~0.6 %.
 
-Lowering the active cost would mean lighter animations (fewer creatures moving at once,
-fewer steps, fewer full-window effects); not done yet.
+Since v0.4 the page redraws only when what it shows changes visibly (load in steps of 5,
+prefs applied when they change): ~6 % less while Claude works, measured A/B
+([`docs/RISKS.md`](docs/RISKS.md) §6). Going further would mean fewer animation frames
+(stepped motion) or fewer creatures moving at once — a visible change, not taken.
 
 A reproducible measurement now ships as `npm run bench -- <quiet|moderate|heavy>`
 (`scripts/bench.ts`): it samples the widget **plus its WebKit XPC helpers** at 1 Hz while

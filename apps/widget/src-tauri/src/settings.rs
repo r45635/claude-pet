@@ -33,6 +33,14 @@ pub fn always_on_top(cfg: &Value) -> bool {
     cfg["ui"]["alwaysOnTop"].as_bool().unwrap_or(true)
 }
 
+/// Where the creature lives: `desktop` (default), `menubar` or `both` (tray.rs).
+pub fn display(cfg: &Value) -> String {
+    match cfg["ui"]["display"].as_str() {
+        Some(d @ ("menubar" | "both")) => d.to_owned(),
+        _ => "desktop".to_owned(),
+    }
+}
+
 pub fn saved_position(cfg: &Value) -> Option<(f64, f64)> {
     let p = &cfg["ui"]["position"];
     Some((p["x"].as_f64()?, p["y"].as_f64()?))
@@ -76,6 +84,9 @@ mod tests {
         assert!(!always_on_top(&json!({ "ui": { "alwaysOnTop": false } })));
         assert_eq!(saved_position(&json!({ "ui": { "position": { "x": 10, "y": 20 } } })), Some((10.0, 20.0)));
         assert_eq!(saved_position(&Value::Null), None);
+        assert_eq!(display(&Value::Null), "desktop");
+        assert_eq!(display(&json!({ "ui": { "display": "menubar" } })), "menubar");
+        assert_eq!(display(&json!({ "ui": { "display": "attic" } })), "desktop", "unknown: on the desktop");
     }
 
     #[test]

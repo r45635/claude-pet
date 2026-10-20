@@ -28,6 +28,14 @@ impl Words {
     pub fn get(&self, key: &str) -> String {
         self.lang[key].as_str().or(self.en[key].as_str()).unwrap_or(key).to_owned()
     }
+
+    /// A count: `{n}` filled in, the `one`/`other` form picked when the string has both (the
+    /// page uses Intl.PluralRules; for the counts the menu bar shows, n ≥ 1, this is the same).
+    pub fn plural(&self, key: &str, n: usize) -> String {
+        let v = if self.lang[key].is_null() { &self.en[key] } else { &self.lang[key] };
+        let form = v.as_str().or(v[if n == 1 { "one" } else { "other" }].as_str()).unwrap_or(key);
+        form.replace("{n}", &n.to_string())
+    }
 }
 
 fn radio<R: Runtime>(
@@ -148,12 +156,18 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
 
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<Menu<R>> {
+#[allow(clippy::too_many_arguments)]
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str, sessions: &[crate::focus::Session]) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
     let mut menu = MenuBuilder::new(app);
     if let Some(u) = update_item(app, &w, update)? {
         menu = menu.item(&u).separator();
+    }
+    // A session waiting for you comes first: that is when going there matters.
+    if let Some(s) = sessions.iter().find(|s| s.status == "waiting") {
+        let label = w.get("menu.session.goWaiting").replace("{app}", &s.app_name);
+        menu = menu.item(&MenuItemBuilder::with_id(format!("session:focus:{}", s.sid), label).build(app)?).separator();
     }
     if chat_on {
         let stop = MenuItemBuilder::with_id("chat:stop", w.get("menu.stopAnswering")).enabled(busy).build(app)?;
@@ -168,12 +182,22 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
     } else {
         menu = menu.item(&item("chat:enable", "menu.enableChat")?);
     }
+    if !sessions.is_empty() {
+        let mut sub = SubmenuBuilder::new(app, w.get("menu.sessions"));
+        for s in sessions {
+            let label = format!("{} — {}", s.app_name, w.get(&format!("menu.session.status.{}", s.status)));
+            sub = sub.item(&MenuItemBuilder::with_id(format!("session:focus:{}", s.sid), label).build(app)?);
+        }
+        menu = menu.separator().item(&sub.build()?);
+    }
     menu.separator()
         .item(&item("settings:open", "menu.settings")?)
         .item(&avatar_menu(app, &w, prefs, avatars, library, unavailable)?)
         .item(&radio(app, &w, prefs, "temperament", "menu.temperament",
             &[("zen", "menu.temperament.zen"), ("normal", "menu.temperament.normal"), ("nervous", "menu.temperament.nervous")])?)
         .item(&size_menu(app, &w, prefs)?)
+        .item(&radio(app, &w, prefs, "display", "menu.display",
+            &[("desktop", "menu.display.desktop"), ("menubar", "menu.display.menubar"), ("both", "menu.display.both")])?)
         .item(&toggle(app, &w, prefs, "showSessions", "menu.sessionPastilles")?)
         .item(&toggle(app, &w, prefs, "paused", "menu.pause")?)
         .separator()

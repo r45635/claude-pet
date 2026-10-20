@@ -113,10 +113,16 @@ test('profiles: floaty and mechanical compile clean and move differently', () =>
   assert.ok(!compileBehavior(PROFILES.floaty).includes('step-l'));
 });
 
-test('the shipped ghost: floaty profile plus its own flicker, end to end', () => {
-  const dir = join(import.meta.dirname, '..', '..', '..', 'avatars', 'ghost');
-  const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
-  const own: Set<string> = keyframeNames(readFileSync(join(dir, 'skin.css'), 'utf8'));
+/** The library's ghost (r45635/claude-pet-avatars), as its manifest and skin.css declare it. */
+const GHOST_ANIMATIONS = {
+  profile: 'floaty',
+  states: { ERROR: { enter: { keyframes: 'flicker', dur: 450 } }, HIGH_LOAD: { keyframes: 'bob', dur: 700, amp: 2 } },
+};
+const GHOST_CSS = '@keyframes flicker { 0%, 100% { opacity: 1; } 25% { opacity: .25; } 45% { opacity: .9; } 65% { opacity: .35; } }';
+
+test('a ghost-like avatar: floaty profile plus its own flicker, end to end', () => {
+  const manifest = { animations: GHOST_ANIMATIONS };
+  const own: Set<string> = keyframeNames(GHOST_CSS);
   const { override, dropped } = behaviorFromManifest(manifest.animations, own);
   assert.deepEqual(dropped, []);
   const merged = mergeBehavior(PROFILES[manifest.animations.profile], override);

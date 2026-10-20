@@ -126,15 +126,21 @@ first API call, and again after `/compact`). The widget must render "unknown" as
 look from "0%" — a fresh creature and a creature we know nothing about are not the same
 animal.
 
-Bands, for Phase 5 fatigue behaviour:
+Fatigue bands (rendered since v0.4, setting `fatigue`, on by default). Each session's
+creature uses **its own** session's `context_load` (`sessions[].context_load`); subagents
+have no status line and never tire.
 
 | `context_load` | Creature |
 |---|---|
 | `null` | neutral — no fatigue styling at all |
-| 0–40 | small, fresh |
-| 40–70 | energetic |
-| 70–88 | visibly overloaded |
-| ≥ 88 | exhausted / unstable glow |
+| 0–40 | fresh — the normal look |
+| 40–70 | energetic — the normal look |
+| 70–88 | overloaded — a sweat drop |
+| ≥ 88 | exhausted — a second drop, a duller skin (classic), an unstable glow |
+
+The first design said "small" for fresh: dropped. The creature's size must never move by
+itself (the v0.3.1 lesson: a creature that shrank when a subagent started read as a bug).
+The marks are static; only the glow flickers, and like every animation it is paused at rest.
 
 ## `tokens_per_minute` — honest about absence
 

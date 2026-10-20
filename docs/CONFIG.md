@@ -41,12 +41,15 @@ Generated from [`packages/collector/src/settings-schema.json`](../packages/colle
 | Appearance | `ui.opacity` | 0.3–1 (step 0.05) | `1` | panel, file | How opaque the creature is. |
 | Appearance | `ui.alwaysOnTop` | `true` · `false` | `true` | panel, file | Keep the creature above other windows. |
 | Appearance | `ui.showSessions` | `true` · `false` | `true` | panel, file | One pastille per live Claude Code session under the creature. |
+| Appearance | `ui.display` | `desktop` · `menubar` · `both` | `"desktop"` | panel, file | Where the creature lives: on the desktop, as an icon in the menu bar (its title the creature's state, its menu the right-click menu), or both. |
+| Appearance | `ui.fatigue` | `true` · `false` | `true` | panel, file | The creature tires as its session's context window fills (the status line's context %): a sweat drop from 70 %, worn out from 88 %. Nothing shown when the % is unknown. |
 | Behaviour | `temperament` | `zen` · `normal` · `nervous` | `"normal"` | panel, file | Presets for what excites the creature, when it storms and how fast it calms down. |
 | Behaviour | `highLoadThreshold` | 30–100 (step 1) | preset / engine default | panel, file | Load at which the creature storms; it calms down 10 points lower. Empty = the temperament's value. |
 | Behaviour | `minStateMs` | 0–30 (step 0.5) | preset / engine default | panel, file | Shortest time a look stays on screen, in seconds. Empty = default. |
 | Behaviour | `ui.paused` | `true` · `false` | `false` | panel, file | The creature sleeps; the sensors stop. |
 | Sensors | `ui.sensors.net` | `true` · `false` | `true` | panel, file | Watch the bytes arriving at claude processes, to see the model think (macOS nettop, only during a turn). |
 | Sensors | `ui.readTranscripts` | `true` · `false` | `false` | panel, file | Read the conversation files for per-agent activity and real token counts. Only line types and token counts are kept. |
+| Sensors | `ui.sensors.otel` | `true` · `false` | `false` | panel, file | Receive Claude Code's OpenTelemetry logs for real token counts, VS Code included. Only output-token counts are kept. Needs `claude-pet otel enable` once (it adds the export settings to ~/.claude/settings.json). |
 | Chat | `ui.chat.enabled` | `true` · `false` | `false` | panel (off only), menu (on, with confirmation), file | Click the creature to talk to Claude: a full agent that can edit files and run commands. Turning it on is only possible from the native menu. |
 | Chat | `ui.chatModel` | `default` · `sonnet` · `haiku` | `"default"` | panel, file | Model for the creature's own Claude. |
 | — | `ui.position` | `{x, y}` | preset / engine default | set by the widget | Where the creature stands on screen; saved when you drag it. |

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { isMain } from './entry.ts';
 import { ROOT_DIR } from './paths.ts';
 
-const BIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin');
+export const BIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin');
 export const HOOK_SCRIPT = 'claude-pet-hook.sh';
 export const STATUSLINE_SCRIPT = 'claude-pet-statusline.sh';
 
@@ -56,15 +56,18 @@ export type Settings = {
 export type Plan = { settings: Settings; changes: string[]; warnings: string[] };
 
 const quote = (p: string): string => `"${p.replace(/(["\\$`])/g, '\\$1')}"`;
-const isOurs = (cmd: unknown, script: string): boolean =>
+export const isOurs = (cmd: unknown, script: string): boolean =>
   typeof cmd === 'string' && cmd.includes(script);
+/** Exactly what `install` writes for a hook / the status line run from `binDir`. */
+export const hookCommand = (binDir: string): string => `sh ${quote(join(binDir, HOOK_SCRIPT))}`;
+export const statusCommand = (binDir: string): string => `sh ${quote(join(binDir, STATUSLINE_SCRIPT))}`;
 
 export function planInstall(input: Settings, binDir = BIN_DIR): Plan {
   const settings: Settings = structuredClone(input);
   const changes: string[] = [];
   const warnings: string[] = [];
-  const hookCmd = `sh ${quote(join(binDir, HOOK_SCRIPT))}`;
-  const statusCmd = `sh ${quote(join(binDir, STATUSLINE_SCRIPT))}`;
+  const hookCmd = hookCommand(binDir);
+  const statusCmd = statusCommand(binDir);
 
   settings.hooks ??= {};
   for (const event of HOOK_EVENTS) {
@@ -124,7 +127,7 @@ export function planUninstall(input: Settings): Plan {
   return { settings, changes, warnings: [] };
 }
 
-function settingsPath(argv: string[]): string {
+export function settingsPath(argv: string[] = []): string {
   const i = argv.indexOf('--settings');
   if (i >= 0 && argv[i + 1]) return resolve(argv[i + 1]);
   const dir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
@@ -151,6 +154,13 @@ export function main(argv: string[], binDir = BIN_DIR): number {
     return 0;
   }
 
+  writeSettings(file, plan.settings);
+  process.stdout.write(`written. Restart Claude Code sessions for hooks to take effect.\n`);
+  return 0;
+}
+
+/** Back the file up into ~/.claude-pet/backups/, then replace it atomically (tmp + rename). */
+export function writeSettings(file: string, settings: Settings): void {
   if (existsSync(file)) {
     const backups = join(ROOT_DIR, 'backups');
     mkdirSync(backups, { recursive: true, mode: 0o700 });
@@ -159,13 +169,10 @@ export function main(argv: string[], binDir = BIN_DIR): number {
     copyFileSync(file, backup);
     process.stdout.write(`backup: ${backup}\n`);
   }
-
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.claude-pet.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(plan.settings, null, 2)}\n`, { mode: 0o644 });
+  writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o644 });
   renameSync(tmp, file);
-  process.stdout.write(`written. Restart Claude Code sessions for hooks to take effect.\n`);
-  return 0;
 }
 
 if (isMain(import.meta.url)) {

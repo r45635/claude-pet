@@ -6,17 +6,20 @@
 
 mod chat;
 mod daemon;
+mod focus;
 mod avatars;
 mod hit;
 mod menu;
 mod settings;
+mod tray;
 
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::menu::Menu;
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder, Window, Wry};
 
 const DEFAULT_URL: &str = "http://127.0.0.1:8787";
 
@@ -124,11 +127,17 @@ fn chat_cancel(pet: State<'_, Pet>) -> bool {
 
 #[tauri::command]
 fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, locale: Option<String>, update: Option<Value>) -> Result<(), String> {
-    let locale = locale.unwrap_or_else(|| "en".into());
+    let menu = main_menu(&app, &pet, &prefs, &locale.unwrap_or_else(|| "en".into()), update.unwrap_or(Value::Null))?;
+    window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
+/// The creature's menu, for the right-click and the menu-bar icon alike. Also records what
+/// the native dialogs it opens will need (language, update state, library).
+fn main_menu(app: &AppHandle, pet: &Pet, prefs: &Value, locale: &str, update: Value) -> Result<Menu<Wry>, String> {
+    let locale = locale.to_owned();
     if let Ok(mut l) = app.state::<MenuLocale>().0.lock() {
         *l = locale.clone(); // for the native dialogs the menu opens
     }
-    let update = update.unwrap_or(Value::Null);
     if let Ok(mut u) = app.state::<MenuUpdate>().0.lock() {
         *u = update.clone(); // the dialogs word themselves from it; the daemon decides
     }
@@ -150,10 +159,33 @@ fn show_menu(app: AppHandle, window: Window, pet: State<'_, Pet>, prefs: Value, 
     if let Ok(mut m) = app.state::<MenuLibrary>().0.lock() {
         *m = (catalog.clone(), prefs["avatar"].as_str().unwrap_or("classic").to_owned());
     }
-    let menu = menu::build(&app, &locale, &prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref(), menu::library_unavailable_key(&catalog)).map_err(|e| e.to_string())?;
-    window.popup_menu(&menu).map_err(|e| e.to_string())
+    // Each session's app, for "go to the session" (a few `ps` the first time, cached per pid).
+    let sessions = pet.daemon.as_ref()
+        .and_then(|d| d.get("/sessions").ok())
+        .map(|body| focus::sessions(&body, &app.state::<focus::Hosts>()))
+        .unwrap_or_default();
+    if let Ok(mut m) = app.state::<MenuSessions>().0.lock() {
+        *m = sessions.clone();
+    }
+    menu::build(app, &locale, prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref(), menu::library_unavailable_key(&catalog), &sessions).map_err(|e| e.to_string())
 }
 
+/// The page's chat or settings panel opened or closed: in menu-bar mode the window shows for it.
+#[tauri::command]
+fn set_panel_open(app: AppHandle, open: bool) {
+    tray::set_panel_open(&app, open);
+}
+
+/// The page's language (it resolves `auto` from macOS), for the menu bar's words.
+#[tauri::command]
+fn set_locale(app: AppHandle, locale: String) {
+    if let Ok(mut l) = app.state::<MenuLocale>().0.lock() {
+        *l = locale;
+    }
+}
+
+/// The sessions the menu last listed, for "go to the session".
+struct MenuSessions(std::sync::Mutex<Vec<focus::Session>>);
 /// The language the menu was last opened in, for the native dialogs it opens.
 struct MenuLocale(std::sync::Mutex<String>);
 /// The daemon's update state as the menu last showed it.
@@ -480,6 +512,15 @@ fn on_menu(app: &AppHandle, id: &str) {
         "update:install-unsigned" => confirm_update(app, true),
         "update:how" => explain_update(app),
         "avatar:remove" => confirm_remove_avatar(app),
+        go if go.starts_with("session:focus:") => {
+            let sid = &go["session:focus:".len()..];
+            let target = app.state::<MenuSessions>().0.lock().ok().and_then(|m| m.iter().find(|s| s.sid == sid).cloned());
+            if let Some(s) = target {
+                if !focus::activate(s.app_pid) {
+                    eprintln!("go to session {sid}: {} did not come forward", s.app_name);
+                }
+            }
+        }
         lib if lib.starts_with("lib:install:") || lib.starts_with("lib:update:") => {
             if let Some(id) = lib.rsplit(':').next().filter(|id| avatars::valid_id(id)) {
                 confirm_library_install(app, id);
@@ -490,12 +531,14 @@ fn on_menu(app: &AppHandle, id: &str) {
             post("/config", r#"{"chatEnabled":false}"#);
         }
         "settings:open" => {
+            tray::set_panel_open(app, true); // shown first: a hidden page gets events late
             let _ = app.emit("panel", serde_json::json!({ "mode": "settings" }));
         }
         "zoom:in" | "zoom:out" | "zoom:reset" => {
             let _ = app.emit("zoom", serde_json::json!({ "dir": &id[5..] }));
         }
         "chat:open" => {
+            tray::set_panel_open(app, true);
             let _ = app.emit("chat", serde_json::json!({ "kind": "open" }));
         }
         "chat:stop" => {
@@ -592,6 +635,7 @@ fn main() {
 
             let (url, token) = endpoint();
             let script = endpoint_script(&url, &token);
+            let feed = token.clone().map(|t| (url.clone(), t));
             app.manage(Pet {
                 chat: chat::Chat::new(&root()),
                 daemon: token.map(|t| daemon::Daemon::new(&url, t)),
@@ -601,6 +645,14 @@ fn main() {
             app.manage(MenuLocale(std::sync::Mutex::new("en".into())));
             app.manage(MenuUpdate(std::sync::Mutex::new(Value::Null)));
             app.manage(MenuLibrary(std::sync::Mutex::new((Value::Null, "classic".into()))));
+            app.manage(MenuSessions(std::sync::Mutex::new(vec![])));
+            app.manage(focus::Hosts::default());
+            // Menu-bar mode: the icon at once and no desktop window, rather than a flash of the
+            // creature until the first frame. From then on the feed drives it (tray.rs).
+            let start_visible = tray::init(app.handle(), &settings::display(&settings::user_config(&root())));
+            if let Some((url, token)) = feed {
+                tray::spawn_feed(app.handle().clone(), url, token); // after every state it reads is managed
+            }
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
 
             WebviewWindowBuilder::new(app, "pet", WebviewUrl::App("index.html".into()))
@@ -613,6 +665,7 @@ fn main() {
                 .resizable(false)
                 .skip_taskbar(true)
                 .visible_on_all_workspaces(true)
+                .visible(start_visible)
                 .initialization_script(&script)
                 .build()?;
             if let Some(window) = app.get_webview_window("pet") {
@@ -633,7 +686,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![chat_ask, chat_cancel, update_prefs, show_menu, resize, layout_panel,
-            set_hit_regions, get_avatar, settings_schema, list_avatars, set_always_on_top, open_advanced])
+            set_hit_regions, get_avatar, settings_schema, list_avatars, set_always_on_top, open_advanced, set_panel_open, set_locale])
         .run(tauri::generate_context!())
         .expect("claude-pet widget failed to start");
 }

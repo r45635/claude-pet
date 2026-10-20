@@ -102,6 +102,7 @@ This differs from the brief's suggested tree in two ways, both deliberate:
 | **`sh` + `jq` for hooks** | ~5 ms vs ~80 ms for Node — measured; see `CLAUDE_CODE_TELEMETRY.md` |
 | **Tauri 2** | brief preference; ~5 MB binary and a system WKWebView vs Electron's ~100 MB and its own Chromium. Needed for transparent/borderless/always-on-top/click-through, all first-class in Tauri's window config |
 | **localhost SSE for the UI** | `EventSource` is 3 lines in the webview, auto-reconnects, and is readable with `curl`. A Unix socket would need a Tauri-side bridge to reach the webview — more Rust for no gain |
+| **…and a second reader in Rust for the menu bar** | hidden, the webview is throttled by WebKit (measured: frames ~17 s late, in a burst), so the menu-bar icon reads the same feed itself (`src-tauri/src/tray.rs`, HTTP/1.0, a substring check per frame in desktop mode) and keeps App Nap off while the window is hidden |
 
 ## Local communication — the recommendation
 
@@ -126,4 +127,4 @@ settings only).
 | Electron | **rejected** — brief preference, and ~20× the RSS for a creature that must idle at near-zero cost |
 | Reading the transcript JSONL as the primary source | **rejected as default** — undocumented schema; kept as an opt-in source for real token rates |
 | Process/CPU inspection | **rejected** — measures the machine, not Claude |
-| OTEL as the backbone | **rejected for MVP** — 60 s default export interval; opt-in in Phase 5 |
+| OTEL as the backbone | **rejected** — telemetry arrives after each API request, batched every few seconds: too late to drive an animation. Opt-in since v0.4 for real token counts (`claude-pet otel enable`, otel.ts) |

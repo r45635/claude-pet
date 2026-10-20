@@ -5,7 +5,7 @@ pictures, or one SVG — packed into a `.claudepet` file. **Drag the file onto t
 install it; **right-click → Avatar** to switch. Everything else keeps working whatever it looks
 like: the states, breathing, storms, subagents walking around, the chat, clicks.
 
-Examples ship in [`avatars/`](../avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
+Examples live in the [avatar library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
 commented template), `cowboy` (SVG, with a hat that moves with the mood) and five seasonal ones.
 
 ## Get more avatars — the library
@@ -103,7 +103,7 @@ whose id already exists replaces it and keeps the previous one as `<id>.bak`.
 
 ## The SVG contract
 
-Start from [`avatars/mint/creature.svg`](../avatars/mint/creature.svg). The widget needs:
+Start from [`avatars/mint/creature.svg`](https://github.com/r45635/claude-pet-avatars/blob/main/avatars/mint/creature.svg) in the library. The widget needs:
 
 - one `<g class="critter">` in the 160 × 160 box;
 - inside it `<g class="shaker">` (shakes in a storm) › `<g class="body">` (breathes), and **exactly
@@ -183,7 +183,22 @@ npm run avatar -- pack avatars/my-avatar         # → my-avatar.claudepet
 npm run test:avatar-sanitizer                    # poisoned SVGs through the sanitizer (headless Chrome)
 ```
 
-Preview without installing, in the browser harness (any state, with subagents, unplugged):
+**From a sprite sheet** (a grid of frames, one row per state): `from-sheet` cuts it, writes
+each row as an animated PNG and the manifest — hitbox and anchors measured from the IDLE
+frame — then validates the folder:
+
+```bash
+npm run avatar -- from-sheet robot.png avatars/robot --cell 192x208 --id robot --name Robot \
+  --map IDLE=0,THINKING=1:6,CODING=2,WAITING=3,DONE=4:5,ERROR=5:4 --fps 8 --license MIT
+```
+
+`STATE=row` takes the row up to its first empty cell, `STATE=row:n` its first n frames; a
+one-frame row is a still picture, and states you leave out fall back as usual. It reads
+8-bit RGB/RGBA PNG; convert anything else first (`sips -s format png sheet.webp --out
+sheet.png`). Publish only a sheet you may redistribute, and name its license.
+
+Preview without installing, in the browser harness (any state, with subagents, unplugged). It
+reads the avatar from the library's clone next to this one (`../claude-pet-avatars/avatars/`):
 
 ```bash
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --allow-file-access-from-files \

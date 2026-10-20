@@ -706,3 +706,59 @@ test('transcript: token history stays bounded even with no snapshot taken', () =
   // Only the last rateWindowMs counts: 60 lines of 10 tokens.
   assert.equal(engine.snapshot(10 * 60_000).tokens_per_minute, 600);
 });
+
+test('endSession: a session whose process is gone leaves at once, like a SessionEnd', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111', ppid: 4242 }));
+  engine.ingest(event('SUBAGENT_STARTED', 100, { sid: 'aaaa1111', aid: 'agentone0000' }));
+  engine.ingest(event('SESSION_STARTED', 0, { sid: 'bbbb2222', ppid: 5353 }));
+  assert.deepEqual(engine.sessionPids().map((s) => [s.sid, s.ppid]), [['aaaa1111', 4242], ['bbbb2222', 5353]]);
+  engine.endSession('aaaa1111', 1_000);
+  const snap = engine.snapshot(1_100);
+  assert.deepEqual(snap.sessions.map((s) => s.id), ['bbbb2222'], 'gone with its turn and subagents');
+  assert.equal(snap.active_subagents, 0);
+  assert.deepEqual(engine.sessionPids().map((s) => s.sid), ['bbbb2222']);
+  engine.endSession('nope0000', 1_200); // unknown: nothing happens
+  assert.equal(engine.snapshot(1_300).sessions.length, 1);
+});
+
+test('sessions: each carries its own context fill, null when its status line said nothing', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'bbbb2222' }));
+  engine.ingest(event('METER_SAMPLE', 100, { sid: 'aaaa1111', meter: { context_used_pct: 91.6 } }));
+  const byId = Object.fromEntries(engine.snapshot(1_000).sessions.map((s) => [s.id, s.context_load]));
+  assert.deepEqual(byId, { aaaa1111: 92, bbbb2222: null });
+});
+
+test('otel: api_request token counts give tokens_per_minute, only once enabled', () => {
+  const engine = new Engine(0);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 1_000, outTokens: 500 });
+  let snap = engine.snapshot(2_000);
+  assert.equal(snap.tokens_per_minute, null, 'off: absence stays absence');
+  assert.equal(snap.sources.otel, false);
+  engine.enableOtelSource(true);
+  assert.equal(engine.snapshot(2_000).tokens_per_minute, 0, 'on, nothing yet: a measured zero');
+  assert.equal(engine.snapshot(2_000).sources.otel, false, 'not live until a record arrives');
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 3_000, outTokens: 500 });
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 2_500, outTokens: 300 }); // a batch out of order
+  engine.ingestOtel({ sid: 'zzzz9999', atMs: 3_000, outTokens: 9_999 }); // unknown session: ignored
+  snap = engine.snapshot(4_000);
+  assert.equal(snap.tokens_per_minute, 800);
+  assert.equal(snap.sources.otel, true);
+  assert.ok(snap.debug.channels.generation! > 0, 'tokens pour into the generation channel');
+  assert.equal(engine.snapshot(4_000 + DEFAULT_CONFIG.rateWindowMs).tokens_per_minute, 0, 'rolls out of the window');
+});
+
+test('otel: with the conversation files on, tokens are not counted twice', () => {
+  const engine = new Engine(0);
+  engine.enableTranscriptSource(true);
+  engine.enableOtelSource(true);
+  engine.ingest(event('PROMPT_SUBMITTED', 0, { sid: 'aaaa1111' }));
+  engine.ingestTranscript({ sid: 'aaaa1111', aid: null, atMs: 1_000, kind: 'text', outTokens: 400 });
+  engine.ingestOtel({ sid: 'aaaa1111', atMs: 1_500, outTokens: 400 });
+  const snap = engine.snapshot(2_000);
+  assert.equal(snap.tokens_per_minute, 400);
+  assert.equal(snap.sources.otel, true, 'still reported live');
+});

@@ -1,8 +1,0 @@
-/* The ghost's own keyframes; the manifest's `animations` section binds them.
-   A flicker on errors: a ghost does not crash, it phases out for a moment. */
-@keyframes flicker {
-  0%, 100% { opacity: 1; }
-  25% { opacity: .25; }
-  45% { opacity: .9; }
-  65% { opacity: .35; }
-}

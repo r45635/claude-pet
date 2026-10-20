@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FORMAT, checkManifest, isAnimated, sniff, validateDir } from '../src/avatar-format.ts';
@@ -23,10 +23,12 @@ test('format: a minimal image avatar (IDLE only) is valid', () => {
   assert.deepEqual(r.files, ['idle.png']);
 });
 
-test('format: the shipped examples are valid', () => {
-  const root = join(import.meta.dirname, '..', '..', '..', 'avatars');
-  for (const id of readdirSync(root)) {
-    const r = validateDir(join(root, id));
+// The ready-made avatars live in r45635/claude-pet-avatars, whose CI validates every one with
+// this repo's tooling (sibling checkout). With that clone next to this one, check them here too.
+const LIBRARY = join(import.meta.dirname, '..', '..', '..', '..', 'claude-pet-avatars', 'avatars');
+test('format: the library\'s avatars are valid (when its clone is next to this one)', { skip: !existsSync(LIBRARY) }, () => {
+  for (const id of readdirSync(LIBRARY)) {
+    const r = validateDir(join(LIBRARY, id));
     assert.deepEqual(r.errors, [], id);
   }
 });

@@ -42,12 +42,12 @@
 |---|---|
 | real artwork, sprite sheets | 5 |
 | multiple creatures | 5 — ✅ done: one per subagent, grouped by session |
-| click-through (✅ v0.2.0, automatic outside the creature), menu-bar item | 5 |
+| click-through (✅ v0.2.0, automatic outside the creature), menu-bar item (✅ v0.4) | 5 |
 | launch at login, configurable size | 5 — ✅ done: `npm run autostart`, right-click → Size |
-| context/fatigue visual behaviour (designed now, rendered later) | 5 |
+| context/fatigue visual behaviour | 5 — ✅ v0.4 |
 | themes (✅ v0.2.0: avatars, `docs/AVATARS.md`) | 5 |
 | transcript JSONL source → real `tokens_per_minute` | 5, opt-in |
-| OTEL receiver | 5, opt-in |
+| OTEL receiver | 5, opt-in — ✅ v0.4 (`claude-pet otel enable`) |
 | multi-session view (several Claude Code windows at once) | 5 — ✅ done: one family per session |
 | Windows / Linux, Intel Macs | not planned |
 | anything that leaves the machine | never |
