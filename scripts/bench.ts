@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * CPU/memory bench for the running widget: the honest companion to the tables in
- * README.md ("What it costs") and docs/RISKS.md #6.
+ * docs/DEVELOPMENT.md ("What it costs") and docs/RISKS.md #6.
  *
  *   node scripts/bench.ts quiet                 # nothing driven; waits for the engine to go idle
  *   node scripts/bench.ts moderate --seconds 60 # drives the simulator while sampling

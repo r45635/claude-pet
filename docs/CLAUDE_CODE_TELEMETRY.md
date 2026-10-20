@@ -220,7 +220,7 @@ turn-duration ramp.
 | Session-level token totals from hooks | **unavailable** — except two cases | only `SessionStart` on *resume* (`context_tokens`, `estimated_cache_write_usd`) and `PostCompact` (`tokens_before`, `tokens_after`, both optional) |
 | A streaming token-rate push API | **unavailable** | no documented mechanism; the status line is pull/sampled, OTEL is batched |
 | "Claude is thinking" as an explicit event | **unavailable** | inferred only: a turn is active (after `UserPromptSubmit`, before `Stop`) with no tool in flight |
-| Model's internal reasoning / plan | **unavailable, and out of scope** | see the design principle in `README.md` |
+| Model's internal reasoning / plan | **unavailable, and out of scope** | see the core rule in `docs/DEVELOPMENT.md` (How it works) |
 | Context window % without a status line | **unavailable** | `used_percentage` ships only in the status-line payload |
 
 ---
