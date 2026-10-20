@@ -184,6 +184,11 @@ Details: [`docs/PRIVACY.md`](docs/PRIVACY.md).
   🔧 a tool, ⚡ a storm, ✋ waiting for you, ✅ done, ❗ trouble, ⚠︎ no signal), its tooltip
   says it in words with the sessions and the context fill, and its menu is the creature's.
   The chat and the settings open in their bubble as usual.
+- **Go to a session**: right-click → **Sessions ▸** lists each live session with its app
+  (VS Code, Terminal…) and what it is doing, and brings that app to the front; when one is
+  waiting for you, *Go to the session waiting for you* is the first item. It finds the app
+  from the session's `claude` process and needs no permission — which also means it brings
+  the app forward, not a given window or tab.
 - **Settings** (gear icon in the chat bubble): the creatures' size (80 to 300 px),
   storm threshold and minimum time per state, applied live, and *Read conversation files* (off by default): each subagent then shows
   its own model working or its tool running, and token counts are real. Only line kinds

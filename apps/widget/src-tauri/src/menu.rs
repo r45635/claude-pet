@@ -156,12 +156,18 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
 
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<Menu<R>> {
+#[allow(clippy::too_many_arguments)]
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str, sessions: &[crate::focus::Session]) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
     let mut menu = MenuBuilder::new(app);
     if let Some(u) = update_item(app, &w, update)? {
         menu = menu.item(&u).separator();
+    }
+    // A session waiting for you comes first: that is when going there matters.
+    if let Some(s) = sessions.iter().find(|s| s.status == "waiting") {
+        let label = w.get("menu.session.goWaiting").replace("{app}", &s.app_name);
+        menu = menu.item(&MenuItemBuilder::with_id(format!("session:focus:{}", s.sid), label).build(app)?).separator();
     }
     if chat_on {
         let stop = MenuItemBuilder::with_id("chat:stop", w.get("menu.stopAnswering")).enabled(busy).build(app)?;
@@ -175,6 +181,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
             .item(&item("chat:disable", "menu.disableChat")?);
     } else {
         menu = menu.item(&item("chat:enable", "menu.enableChat")?);
+    }
+    if !sessions.is_empty() {
+        let mut sub = SubmenuBuilder::new(app, w.get("menu.sessions"));
+        for s in sessions {
+            let label = format!("{} — {}", s.app_name, w.get(&format!("menu.session.status.{}", s.status)));
+            sub = sub.item(&MenuItemBuilder::with_id(format!("session:focus:{}", s.sid), label).build(app)?);
+        }
+        menu = menu.separator().item(&sub.build()?);
     }
     menu.separator()
         .item(&item("settings:open", "menu.settings")?)

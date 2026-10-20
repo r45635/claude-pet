@@ -6,6 +6,7 @@
 
 mod chat;
 mod daemon;
+mod focus;
 mod avatars;
 mod hit;
 mod menu;
@@ -158,7 +159,15 @@ fn main_menu(app: &AppHandle, pet: &Pet, prefs: &Value, locale: &str, update: Va
     if let Ok(mut m) = app.state::<MenuLibrary>().0.lock() {
         *m = (catalog.clone(), prefs["avatar"].as_str().unwrap_or("classic").to_owned());
     }
-    menu::build(app, &locale, prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref(), menu::library_unavailable_key(&catalog)).map_err(|e| e.to_string())
+    // Each session's app, for "go to the session" (a few `ps` the first time, cached per pid).
+    let sessions = pet.daemon.as_ref()
+        .and_then(|d| d.get("/sessions").ok())
+        .map(|body| focus::sessions(&body, &app.state::<focus::Hosts>()))
+        .unwrap_or_default();
+    if let Ok(mut m) = app.state::<MenuSessions>().0.lock() {
+        *m = sessions.clone();
+    }
+    menu::build(app, &locale, prefs, chat_on, pet.chat.busy(), &avatars, &update, library.as_deref(), menu::library_unavailable_key(&catalog), &sessions).map_err(|e| e.to_string())
 }
 
 /// The page's chat or settings panel opened or closed: in menu-bar mode the window shows for it.
@@ -175,6 +184,8 @@ fn set_locale(app: AppHandle, locale: String) {
     }
 }
 
+/// The sessions the menu last listed, for "go to the session".
+struct MenuSessions(std::sync::Mutex<Vec<focus::Session>>);
 /// The language the menu was last opened in, for the native dialogs it opens.
 struct MenuLocale(std::sync::Mutex<String>);
 /// The daemon's update state as the menu last showed it.
@@ -501,6 +512,15 @@ fn on_menu(app: &AppHandle, id: &str) {
         "update:install-unsigned" => confirm_update(app, true),
         "update:how" => explain_update(app),
         "avatar:remove" => confirm_remove_avatar(app),
+        go if go.starts_with("session:focus:") => {
+            let sid = &go["session:focus:".len()..];
+            let target = app.state::<MenuSessions>().0.lock().ok().and_then(|m| m.iter().find(|s| s.sid == sid).cloned());
+            if let Some(s) = target {
+                if !focus::activate(s.app_pid) {
+                    eprintln!("go to session {sid}: {} did not come forward", s.app_name);
+                }
+            }
+        }
         lib if lib.starts_with("lib:install:") || lib.starts_with("lib:update:") => {
             if let Some(id) = lib.rsplit(':').next().filter(|id| avatars::valid_id(id)) {
                 confirm_library_install(app, id);
@@ -625,6 +645,8 @@ fn main() {
             app.manage(MenuLocale(std::sync::Mutex::new("en".into())));
             app.manage(MenuUpdate(std::sync::Mutex::new(Value::Null)));
             app.manage(MenuLibrary(std::sync::Mutex::new((Value::Null, "classic".into()))));
+            app.manage(MenuSessions(std::sync::Mutex::new(vec![])));
+            app.manage(focus::Hosts::default());
             // Menu-bar mode: the icon at once and no desktop window, rather than a flash of the
             // creature until the first frame. From then on the feed drives it (tray.rs).
             let start_visible = tray::init(app.handle(), &settings::display(&settings::user_config(&root())));

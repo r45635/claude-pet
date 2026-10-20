@@ -8,6 +8,7 @@
  *   GET /snapshot          one-shot JSON
  *   GET /events            Server-Sent Events, one `data:` frame per tick
  *   GET /health            liveness + whether events are actually arriving
+ *   GET /sessions          each session's claude pid (native only: the menu's "go to")
  *
  * SSE (not WebSocket) because the feed is one-way and `EventSource` reconnects for free
  * in the Tauri webview. See docs/ARCHITECTURE.md.
@@ -437,6 +438,23 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 
   if (url.pathname === '/update' && req.method === 'POST') {
     void postUpdate(req, res);
+    return;
+  }
+
+  // The menu's "go to the session": each session's `claude` pid, for Rust to find its app.
+  // Native only: pids are of no use to the page.
+  if (url.pathname === '/sessions') {
+    if (!isNative(req)) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      res.end('{"error":"native_only"}');
+      return;
+    }
+    const status = new Map(runtime.snapshot().sessions.map((x) => [x.id, x.status]));
+    const sessions = runtime.engine.sessionPids()
+      .filter(({ sid }) => status.has(sid))
+      .map(({ sid, ppid }) => ({ id: sid, pid: ppid, status: status.get(sid) }));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ sessions }));
     return;
   }
 

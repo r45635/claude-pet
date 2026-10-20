@@ -237,7 +237,7 @@ fn apply_frame(app: &AppHandle, frame: Option<Value>, look: Look, locale: String
     }
     let Some(frame) = frame else { return };
     let pet = app.state::<crate::Pet>();
-    let key = serde_json::to_string(&(&frame["prefs"], &locale, &frame["update"], pet.chat.busy())).unwrap_or_default();
+    let key = serde_json::to_string(&(&frame["prefs"], &locale, &frame["update"], pet.chat.busy(), session_statuses(&frame))).unwrap_or_default();
     if st.menu_key != key {
         match crate::main_menu(app, &pet, &frame["prefs"], &locale, frame["update"].clone()) {
             Ok(menu) => {
@@ -247,6 +247,13 @@ fn apply_frame(app: &AppHandle, frame: Option<Value>, look: Look, locale: String
             Err(e) => eprintln!("menu bar: menu: {e}"),
         }
     }
+}
+
+/// The sessions and their status: the menu lists them ("go to the session").
+fn session_statuses(frame: &Value) -> Vec<(String, String)> {
+    frame["sessions"].as_array().map(Vec::as_slice).unwrap_or(&[]).iter()
+        .map(|s| (s["id"].as_str().unwrap_or("").to_owned(), s["status"].as_str().unwrap_or("").to_owned()))
+        .collect()
 }
 
 // ---- the feed ---------------------------------------------------------------------------------
@@ -270,7 +277,7 @@ pub fn spawn_feed(app: AppHandle, url: String, token: String) {
                 let busy = app.state::<crate::Pet>().chat.busy();
                 let l = look(Some(&v), &locale, busy);
                 // Everything the main thread would act on: skip the frame when none of it moved.
-                let digest = serde_json::to_string(&(&v["prefs"], &v["update"], busy)).unwrap_or_default();
+                let digest = serde_json::to_string(&(&v["prefs"], &v["update"], busy, session_statuses(&v))).unwrap_or_default();
                 let now = (l.clone(), digest, locale.clone());
                 if last.as_ref() == Some(&now) {
                     return;
