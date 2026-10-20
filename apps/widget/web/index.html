@@ -822,9 +822,9 @@
     animatingNow = !asleep && !motionReduced && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
     if (!animatingNow) for (const slot of parentSlots.values()) slot.classList.remove('regrid');
     const groups = multi
-      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: x.load ?? 0,
+      ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: loadStep(x.load ?? 0),
                                ctx: x.context_load ?? null, agents: urgentFirst(x.agents ?? []) }))
-      : [{ id: '', state: singleState, load: s.load, ctx: s.context_load ?? null, agents: [] }];
+      : [{ id: '', state: singleState, load: loadStep(s.load), ctx: s.context_load ?? null, agents: [] }];
     // The parent's element is the same with or without subagents, so its size can change
     // smoothly instead of the creature being swapped for a smaller one.
     const parentKey = (g) => `s:${multi ? g.id : (sessions[0]?.id ?? '')}`;
@@ -1220,8 +1220,17 @@
   darkMq.addEventListener('change', applyComfort);
   motionMq.addEventListener('change', () => { applyComfort(); last = ''; });
 
+  let appliedPrefs = '';
   function applyPrefs(p) {
     if (!p) return;
+    // Every frame (up to 10 a second) carries the prefs; they change a few times a day.
+    // The settings rows still look at each frame: a value on its way waits for one to agree.
+    const json = JSON.stringify(p);
+    if (json === appliedPrefs) {
+      if (ROWS.size) renderSettings(p);
+      return;
+    }
+    appliedPrefs = json;
     const chatWas = prefs.chatEnabled;
     prefs = p;
     applyComfort();
@@ -1693,14 +1702,23 @@
     if (!first) { avatarId = ''; loadAvatar(s.prefs?.avatar ?? 'classic'); }
   }
 
+  /**
+   * Load as the page draws it: in steps of LOAD_STEP. The engine moves it every 100 ms tick
+   * while busy; each move re-rendered the page and rewrote --amp, which every running
+   * animation reads — a style recalculation of the whole creature ten times a second for a
+   * difference no one can see. Measured: see docs/RISKS.md #6.
+   */
+  const LOAD_STEP = 5;
+  const loadStep = (load) => Math.round(load / LOAD_STEP) * LOAD_STEP;
+
   function render(s) {
     lastFrame = s;
     noticeUpdate(s);
     noticeAvatars(s);
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
-    const key = JSON.stringify([chatBusy, s.visual, s.load, s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
-                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, x.load, x.reason, x.tool_calls_per_minute, x.context_load,
+    const key = JSON.stringify([chatBusy, s.visual, loadStep(s.load), s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
+                                (s.sessions ?? []).map((x) => [x.id, x.status, x.state, loadStep(x.load ?? 0), x.reason, x.tool_calls_per_minute, x.context_load,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
     if (key === last) return;
@@ -1720,7 +1738,7 @@
     // keyframes is seamless. Speed does NOT: every change of animation-duration re-maps
     // the current phase and the creature visibly jumps — at one change per 100 ms tick
     // that read as "choppy". So speed moves through three tiers, with hysteresis.
-    const t = s.load / 100;
+    const t = loadStep(s.load) / 100;
     pet.style.setProperty('--amp', (0.03 + 0.17 * t).toFixed(3));
     const tier = speedTier(s.load);
     if (tier !== currentTier) {

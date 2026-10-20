@@ -286,8 +286,10 @@ same benchmark before the per-agent creatures; 3.4 % now). The daemon spawns `ne
 every ~5 s during a turn (~1 % CPU) unless *Read conversation files* is on, which brings
 it to ~0.6 %.
 
-Lowering the active cost would mean lighter animations (fewer creatures moving at once,
-fewer steps, fewer full-window effects); not done yet.
+Since v0.4 the page redraws only when what it shows changes visibly (load in steps of 5,
+prefs applied when they change): ~6 % less while Claude works, measured A/B
+([`docs/RISKS.md`](docs/RISKS.md) §6). Going further would mean fewer animation frames
+(stepped motion) or fewer creatures moving at once — a visible change, not taken.
 
 A reproducible measurement now ships as `npm run bench -- <quiet|moderate|heavy>`
 (`scripts/bench.ts`): it samples the widget **plus its WebKit XPC helpers** at 1 Hz while

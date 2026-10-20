@@ -74,6 +74,17 @@ A creature on screen all day that burns 3% CPU is a worse tool than no creature.
   the whole transparent window every frame. With every animation paused in `IDLE` and
   "no signal", and the DOM touched only when the snapshot changes: **~0.2% CPU / ~55 MB**.
   ⇒ Any always-visible transparent window must be fully still when nothing happens.
+- **Active cost, 2026-10-20 (MacBook Air M1, on battery, widget + 3 XPC, cumulative CPU
+  time over a 45 s simulated `moderate` session):** ~15.7 % of one core with the screen in
+  use. Half of it is the animation (all of them off: ~7 %); the rest was the page itself —
+  the engine moves `load` every 100 ms tick, and each move re-rendered the page and rewrote
+  `--amp`, read by every running animation. The page now draws load in steps of 5 and
+  applies the prefs only when they change: **~14.7 % (A/B, two pairs)**. The remainder is
+  macOS compositing the window at every animation frame; lowering it means fewer frames
+  (stepped easing) — a visible change, not taken.
+  🪤 **Measure with the screen in use.** Locked or asleep, nothing is composited: the same
+  page measured 9.6 % then 2.0 %, and every comparison across a lock was noise. Pair A/B
+  runs back to back and check the lock state.
 
 ## 7. Privacy regression by accident — 🟠 medium, high consequence
 
