@@ -11,12 +11,12 @@
  * scene is the harness's synthetic data.
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { launch, sleep, type Cdp } from './cdp.ts';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'docs', 'media');
 const PAGE = `file://${join(ROOT, 'apps', 'widget', 'web', 'index.html')}`;
@@ -35,43 +35,11 @@ const SCENES: Scene[] = [
     ({ name: `avatar-${id}`, hash: `avatar=${id}&state=CODING&size=150`, w: 170, h: 170, seconds: 2.5 })),
 ];
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** A minimal DevTools client: send a command, await its reply. */
-async function connect(port: number) {
-  for (let i = 0; i < 50; i++) {
-    try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type: string; webSocketDebuggerUrl: string }[];
-      const page = targets.find((t) => t.type === 'page');
-      if (page) {
-        const ws = new WebSocket(page.webSocketDebuggerUrl);
-        await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; });
-        let id = 0;
-        const pending = new Map<number, (v: any) => void>();
-        ws.onmessage = (e) => {
-          const msg = JSON.parse(String(e.data));
-          if (msg.id && pending.has(msg.id)) { pending.get(msg.id)!(msg.result ?? msg.error); pending.delete(msg.id); }
-        };
-        return {
-          send: (method: string, params: object = {}) => new Promise<any>((ok) => {
-            const n = ++id;
-            pending.set(n, ok);
-            ws.send(JSON.stringify({ id: n, method, params }));
-          }),
-          close: () => ws.close(),
-        };
-      }
-    } catch { /* not up yet */ }
-    await sleep(200);
-  }
-  throw new Error('Chrome did not start');
-}
-
 /**
  * The repository's social preview (GitHub → Settings → Social preview): 1280×640, the
  * creatures on the right, the pitch on the left. Same harness, one frame, composed in a page.
  */
-async function socialPreview(cdp: Awaited<ReturnType<typeof connect>>): Promise<void> {
+async function socialPreview(cdp: Cdp): Promise<void> {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 560, height: 560, deviceScaleFactor: 2, mobile: false });
   await cdp.send('Page.navigate', { url: 'about:blank' });
   await sleep(150);
@@ -102,12 +70,8 @@ async function socialPreview(cdp: Awaited<ReturnType<typeof connect>>): Promise<
 
 async function main(): Promise<void> {
   mkdirSync(OUT, { recursive: true });
-  const profile = mkdtempSync(join(tmpdir(), 'pet-media-'));
-  const port = 9300 + Math.floor(Math.random() * 500);
-  const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--allow-file-access-from-files',
-    `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+  const { cdp, stop } = await launch();
   try {
-    const cdp = await connect(port);
     await cdp.send('Page.enable');
     for (const scene of SCENES) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: scene.w, height: scene.h, deviceScaleFactor: 2, mobile: false });
@@ -143,11 +107,8 @@ async function main(): Promise<void> {
       process.stdout.write(`${scene.name}\n`);
     }
     await socialPreview(cdp);
-    cdp.close();
   } finally {
-    chrome.kill();
-    await sleep(300);
-    rmSync(profile, { recursive: true, force: true });
+    await stop();
   }
 }
 
