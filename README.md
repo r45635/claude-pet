@@ -19,10 +19,11 @@ coding, running tools, storming through a big task — or **waiting for you**. N
 switching windows to check whether it's done, stuck, or asking you something.
 
 ```bash
-curl -fsSLO https://github.com/r45635/claude-pet/releases/latest/download/claude-pet-aarch64-apple-darwin.tar.gz
-tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
-./claude-pet/claude-pet setup
+brew install r45635/tap/claude-pet
+claude-pet setup
 ```
+
+<sub>No Homebrew? `curl -fsSLO https://github.com/r45635/claude-pet/releases/latest/download/claude-pet-aarch64-apple-darwin.tar.gz && tar -xzf claude-pet-aarch64-apple-darwin.tar.gz && ./claude-pet/claude-pet setup`</sub>
 
 That's it. Open Claude Code — in a terminal or in VS Code — and the creature wakes up.
 

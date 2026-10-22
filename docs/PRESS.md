@@ -31,7 +31,7 @@ anyone can contribute to — a few pictures are enough to make an avatar.
 | | |
 |---|---|
 | Platform | macOS, Apple Silicon; works with Claude Code in a terminal and in VS Code |
-| Install | three commands ([README](../README.md)) |
+| Install | `brew install r45635/tap/claude-pet`, then `claude-pet setup` |
 | License | MIT, free and open source |
 | Built with | Tauri (Rust) and TypeScript; built with Claude Code |
 | Authors | Vincent Cruvellier and Chloé Cruvellier |
