@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🎨 An avatar idea, or one you designed
+    url: https://github.com/r45635/claude-pet-avatars/issues/new/choose
+    about: Avatars live in the avatar library.
+  - name: 🔒 A security problem
+    url: https://github.com/r45635/claude-pet/security/advisories/new
+    about: Please report privately.

@@ -1,0 +1,11 @@
+name: Idea
+description: Suggest something the creature could show or do.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and why?
+      description: The creature only shows what Claude Code observably does — tell us which signal you have in mind.
+    validations:
+      required: true

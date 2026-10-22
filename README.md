@@ -26,6 +26,8 @@ tar -xzf claude-pet-aarch64-apple-darwin.tar.gz
 
 That's it. Open Claude Code — in a terminal or in VS Code — and the creature wakes up.
 
+▶ **[Watch the 30-second demo](docs/media/demo-wide.mp4)**
+
 ---
 
 ## It shows what's really happening
@@ -86,9 +88,12 @@ one from the creature's menu (right-click → **Avatar ▸ Library**) or in one 
 ~/.claude-pet/app/claude-pet avatars install ghost
 ```
 
-Every avatar is signed and checked before it installs. **Make your own** from a few
-pictures, an SVG, or even a sprite sheet — then share it: [the avatar guide](docs/AVATARS.md)
-shows how, and the library welcomes pull requests.
+Every avatar is signed and checked before it installs.
+
+> **🎨 Designers wanted.** A robot, a cat, a dragon, pixel art, your team's mascot? One picture
+> is already an avatar — every Claude Code user can then pick yours from the menu.
+> [How to make one](https://github.com/r45635/claude-pet-avatars/blob/main/CONTRIBUTING.md) ·
+> [ideas waiting for a designer](https://github.com/r45635/claude-pet-avatars/issues?q=is%3Aopen+label%3A%22good+first+avatar%22)
 
 ## On your desktop, or in the menu bar
 
@@ -136,10 +141,17 @@ Curious how it works, or want to hack on it? **[The development guide →](docs/
 ## Authors
 
 Made by **Vincent Cruvellier** ([@r45635](https://github.com/r45635)) and
-**Chloé Cruvellier** ([@ChloeCru](https://github.com/ChloeCru)).
+**Chloé Cruvellier** ([@ChloeCru](https://github.com/ChloeCru)) — built with
+[Claude Code](https://claude.com/claude-code), with the creature watching over every session.
 
 Ideas, avatars and bug reports are welcome — open an issue, or send an avatar to the
 [library](https://github.com/r45635/claude-pet-avatars).
+
+**Like it?** A ⭐ helps others find it — or share it on
+[X](https://twitter.com/intent/tweet?text=claude-pet%3A%20a%20tiny%20creature%20on%20your%20Mac%20that%20shows%20what%20Claude%20Code%20is%20doing%20%E2%80%94%20thinking%2C%20coding%2C%20or%20waiting%20for%20you.&url=https%3A//github.com/r45635/claude-pet),
+[Bluesky](https://bsky.app/intent/compose?text=claude-pet%3A%20a%20tiny%20creature%20on%20your%20Mac%20that%20shows%20what%20Claude%20Code%20is%20doing%20%E2%80%94%20thinking%2C%20coding%2C%20or%20waiting%20for%20you.%20https%3A//github.com/r45635/claude-pet) or
+[LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A//github.com/r45635/claude-pet).
+Writing about it? Pictures and descriptions are in the [press kit](docs/PRESS.md).
 
 ## License
 
