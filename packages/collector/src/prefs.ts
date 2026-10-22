@@ -85,6 +85,7 @@ export type Prefs = {
   showSessions: boolean;
   display: 'desktop' | 'menubar' | 'both';
   spacing: 'tight' | 'normal' | 'roomy';
+  wander: boolean;
   fatigue: boolean;
   temperament: Temperament;
   /** Effective value: the override if any, else the temperament's. */

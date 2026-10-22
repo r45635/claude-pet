@@ -158,6 +158,8 @@
      family's tempo (from its session's load). A family where everyone sleeps is fully
      still: no timer, no animation (the idle CPU budget, docs/RISKS.md #6). */
   .kid-slot { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
+  /* The parent's stroll around its anchor (strollFor in the script): a glide, no loop. */
+  .wander { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
   /* Enter one-shots and the kid lifecycle animate the critter root, so every critter
      transforms around its feet, not the viewBox origin. */
   .critter { transform-box: fill-box; transform-origin: 50% 100%; }
@@ -766,6 +768,59 @@
     }, dur * 1000);
   }
   const familyLoads = new Map();
+
+  // ---- the parent's stroll (setting `wander`) --------------------------------------------------
+  // While its session works, a parent takes a small step now and then around its anchor — the
+  // centre of its cell — each target pulled back toward it like a spring, at its session's pace.
+  // Never asleep, never while it waits for you (it must stay where you look for it), and it
+  // glides home as soon as it stops. Same machinery as the kids' walk: a CSS transition per
+  // step and a timer between steps, nothing per frame.
+  const drifts = new Map(); // family id → { el, dx, dy, r, on, timer }
+  function driftTo(d, x, y, seconds) {
+    d.dx = x;
+    d.dy = y;
+    d.el.style.transitionDuration = `${seconds.toFixed(2)}s`;
+    d.el.style.transform = x || y ? `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)` : '';
+  }
+  function driftHome(d) {
+    clearTimeout(d.timer);
+    d.timer = 0;
+    if (d.dx || d.dy) driftTo(d, 0, 0, motionReduced ? 0 : 0.8);
+  }
+  function stroll(id) {
+    const d = drifts.get(id);
+    if (!d) return;
+    d.timer = 0;
+    if (!d.on || !animating() || !d.el.isConnected) { driftHome(d); return; }
+    const a = Math.random() * 2 * Math.PI;
+    const k = Math.sqrt(Math.random());
+    // Mostly sideways, a little up and down: it walks on the floor, it does not fly.
+    const tx = d.dx * 0.35 + Math.cos(a) * k * d.r * 0.65;
+    const ty = d.dy * 0.35 + Math.sin(a) * k * d.r * 0.25;
+    const pace = familyPace(id);
+    const seconds = Math.max(0.8, Math.hypot(tx - d.dx, ty - d.dy) / (5 * pace));
+    driftTo(d, tx, ty, seconds);
+    d.timer = setTimeout(() => stroll(id), seconds * 1000 + (2500 + Math.random() * 3500) / pace);
+  }
+  /** Wrap a family's parent, and start or stop its stroll for the state it shows. */
+  function strollWrap(id, slot, r) {
+    const el = document.createElementNS(SVG_NS, 'g');
+    el.setAttribute('class', 'wander');
+    el.appendChild(slot);
+    const d = drifts.get(id) ?? { dx: 0, dy: 0, timer: 0, on: false };
+    d.el = el;
+    d.r = r;
+    drifts.set(id, d);
+    driftTo(d, d.dx, d.dy, 0); // a re-layout keeps where it stood
+    return el;
+  }
+  function strollFor(id, state) {
+    const d = drifts.get(id);
+    if (!d) return;
+    d.on = prefs.wander !== false && !motionReduced && WANDERS.has(state);
+    if (!d.on) driftHome(d);
+    else if (!d.timer && animatingNow) d.timer = setTimeout(() => stroll(id), 800 + Math.random() * 1500);
+  }
   let animatingNow = false;
   const animating = () => animatingNow;
 
@@ -833,7 +888,8 @@
         family.setAttribute('class', 'family');
         familyEls.set('', family);
         const key = parentKey(groups[0]);
-        family.appendChild(parentSlot(key, 'none'));
+        // Alone, it has the window's margin to stroll in: about ten units either side.
+        family.appendChild(strollWrap('', parentSlot(key, 'none'), 10));
         crittersLayer.appendChild(family);
         keepCritters.add(key);
         familyAnchors.set('', { x: geo.why[0], y: geo.why[1] });
@@ -856,7 +912,7 @@
           const P = G.parent;
           const parent = parentSlot(parentKey(g),
             `translate(${(cell.x + P.x * f).toFixed(2)}px, ${(cell.y + P.y * f).toFixed(2)}px) scale(${(P.size * f / 160).toFixed(4)})`);
-          family.append(back, parent, front);
+          family.append(back, strollWrap(g.id, parent, P.size * f * 0.14), front);
           familyEls.set(g.id, family);
           // Above the parent's head: the avatar's why anchor, in the parent's scaled box
           // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
@@ -899,6 +955,7 @@
       }
       for (const id of [...critterEls.keys()]) if (!keepCritters.has(id)) critterEls.delete(id);
       for (const id of [...parentSlots.keys()]) if (!keepCritters.has(id)) parentSlots.delete(id);
+      for (const [id, d] of [...drifts]) if (!familyEls.has(id)) { clearTimeout(d.timer); drifts.delete(id); }
       for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); despawn(w); }
     }
 
@@ -906,6 +963,7 @@
       // The parent's key, not `s:${g.id}`: the lone creature (g.id '') is keyed by its session.
       setState(critterEls.get(parentKey(g)), g.state);
       setFatigue(critterEls.get(parentKey(g)), fatigueBand(g.ctx));
+      strollFor(g.id, g.state);
       const states = [g.state];
       for (const a of g.agents.slice(0, MAX_KIDS)) {
         const state = asleep ? 'IDLE' : a.state;

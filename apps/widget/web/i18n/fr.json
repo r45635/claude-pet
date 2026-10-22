@@ -197,6 +197,8 @@
   "set.spacing.tight": "Serré",
   "set.spacing.normal": "Normal",
   "set.spacing.roomy": "Aéré",
+  "set.wander.label": "Balades",
+  "set.wander.doc": "Pendant que Claude travaille, la créature fait un petit pas de temps en temps. Immobile au repos et quand elle vous attend.",
   "set.temperament.label": "Tempérament",
   "set.temperament.doc": "Ce qui excite la créature, quand elle passe en tempête, à quelle vitesse elle se calme.",
   "set.stormThreshold.label": "Seuil de tempête",

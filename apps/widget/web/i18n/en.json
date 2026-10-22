@@ -197,6 +197,8 @@
   "set.spacing.tight": "Tight",
   "set.spacing.normal": "Normal",
   "set.spacing.roomy": "Roomy",
+  "set.wander.label": "Strolls",
+  "set.wander.doc": "While Claude works, the creature takes a small step now and then. Still at rest and while it waits for you.",
   "set.temperament.label": "Temperament",
   "set.temperament.doc": "What excites the creature, when it storms, how fast it calms down.",
   "set.stormThreshold.label": "Storm threshold",
