@@ -101,6 +101,11 @@ launches. Logs are capped at 1 MB each (one previous kept), the event spool at 4
 and leftovers of an interrupted download or import are swept at the next start. Everything
 lives in `~/.claude-pet/`.
 
+Homebrew: [`r45635/homebrew-tap`](https://github.com/r45635/homebrew-tap) installs the same
+archive; its `claude-pet` command runs `~/.claude-pet/app/claude-pet` once `setup` has installed
+it (that copy updates itself), and brew's own copy otherwise. **Each release bumps the formula**
+(`url` + `sha256` in `Formula/claude-pet.rb`, then `brew audit --strict`).
+
 The release archive (~45 MB: `claude-pet` embeds the Node runtime) is built by GitHub
 Actions (`.github/workflows/release.yml`) for every version tag. The binaries are not
 notarized by Apple, so download with `curl` or `gh release download`, not a browser
