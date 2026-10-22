@@ -89,7 +89,7 @@ export function gravityLayout(fams, G, H, spacing = 1) {
   const base = gridLayout(n, G, H, spacing).f * (n > 1 ? 1.08 : 1);
   const cx = 80;
   const cy = H / 2;
-  const pull = { front: 0.09, middle: 0.05, back: 0.025 };
+  const pull = { front: 0.05, middle: 0.025, back: 0.012 };
   const nodes = fams.map((fam, i) => {
     const f = base * PLANE_SCALE[fam.plane];
     const r = (G.step.x * f * spacing) / 2;
@@ -98,7 +98,7 @@ export function gravityLayout(fams, G, H, spacing = 1) {
     return { id: fam.id, plane: fam.plane, f, r, hw: (G.w * f) / 2, hh: (G.h * f) / 2,
              x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d };
   });
-  for (let it = 0; it < 240; it++) {
+  for (let it = 0; it < 400; it++) {
     for (const a of nodes) {
       a.x += (cx - a.x) * pull[a.plane];
       a.y += (cy - a.y) * pull[a.plane];
@@ -108,7 +108,7 @@ export function gravityLayout(fams, G, H, spacing = 1) {
         const a = nodes[i];
         const b = nodes[j];
         const same = a.plane === b.plane;
-        const want = (a.r + b.r) * (same ? 1 : 0.55);
+        const want = (a.r + b.r) * (same ? 1.05 : 0.8);
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let d = Math.hypot(dx, dy);

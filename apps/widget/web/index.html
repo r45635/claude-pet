@@ -201,6 +201,12 @@
   /* The parent gliding to its new box when the layout changes (parentSlot in the script). */
   .parent-slot.regrid { animation: regrid .5s cubic-bezier(.45, 0, .35, 1) 1; }
   @keyframes regrid { from { transform: var(--from); } }
+  /* Gravity layout: farther planes slightly faded; two parents of the same plane that meet
+     bump — one squash each, removed on animationend (seekBump in the script). */
+  .family[data-plane="back"] { opacity: .8; transition: opacity .5s ease; }
+  .critter.bump { animation: bump .36s ease-out 1; }
+  @keyframes bump { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.14, .84); }
+                    65% { transform: scale(.94, 1.07); } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
@@ -503,7 +509,7 @@
   import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
-  import { SPACING, gridLayout } from './layout.js';
+  import { PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, planes } from './layout.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -792,6 +798,8 @@
     if (!d) return;
     d.timer = 0;
     if (!d.on || !animating() || !d.el.isConnected) { driftHome(d); return; }
+    // Gravity layout: now and then, curiosity — a walk toward a neighbour of the same plane.
+    if (prefs.layout === 'gravity' && Math.random() < 0.1 && seekBump(id, d)) return;
     const a = Math.random() * 2 * Math.PI;
     const k = Math.sqrt(Math.random());
     // Mostly sideways, a little up and down: it walks on the floor, it does not fly.
@@ -802,6 +810,48 @@
     driftTo(d, tx, ty, seconds);
     d.timer = setTimeout(() => stroll(id), seconds * 1000 + (2500 + Math.random() * 3500) / pace);
   }
+  // ---- the bump (gravity layout) --------------------------------------------------------------
+  // Two parents of the same plane meet: both squash, the walker steps back, the other is nudged.
+  // Exceptional by design — gravity keeps same-plane families apart, so it only happens when a
+  // stroll heads for a neighbour on purpose, and at most once per family every 20 s.
+  const lastBump = new Map(); // family id → ms
+  let centres = new Map();    // family id → { id, plane, cx, cy, r } (r: the parent's body)
+  function seekBump(id, d) {
+    const me = centres.get(id);
+    if (!me?.plane) return false;
+    const now = Date.now();
+    const at = (c) => ({ ...c, cx: c.cx + (drifts.get(c.id)?.dx ?? 0), cy: c.cy + (drifts.get(c.id)?.dy ?? 0) });
+    const mine = at(me);
+    let target = null;
+    for (const c of centres.values()) {
+      const other = at(c);
+      const contact = mine.r + other.r;
+      // Reachable: no farther than one and a half body widths beyond contact.
+      if (!bumpCheck(mine, other, now, lastBump, 20_000, 1 + (1.5 * mine.r) / contact)) continue;
+      const dist = Math.hypot(other.cx - mine.cx, other.cy - mine.cy);
+      if (!target || dist < target.dist) target = { other, dist, contact };
+    }
+    if (!target || target.dist <= target.contact) return false;
+    const ux = (target.other.cx - mine.cx) / target.dist;
+    const uy = (target.other.cy - mine.cy) / target.dist;
+    const travel = target.dist - target.contact;
+    const seconds = Math.max(0.6, travel / (7 * familyPace(id)));
+    lastBump.set(id, now);
+    lastBump.set(target.other.id, now);
+    driftTo(d, d.dx + ux * travel, d.dy + uy * travel, seconds);
+    d.timer = setTimeout(() => bump(id, target.other.id, ux, uy, mine.r), seconds * 1000);
+    return true;
+  }
+  function bump(a, b, ux, uy, r) {
+    const da = drifts.get(a);
+    if (!da?.el.isConnected || !animating()) return;
+    for (const id of [a, b]) critterEls.get(`s:${id}`)?.classList.add('bump');
+    driftTo(da, da.dx - ux * r * 0.7, da.dy - uy * r * 0.7, 0.35);
+    const db = drifts.get(b);
+    if (db?.on) driftTo(db, db.dx + ux * r * 0.4, db.dy + uy * r * 0.4, 0.35);
+    da.timer = setTimeout(() => stroll(a), 1_200 + Math.random() * 1_500);
+  }
+
   /** Wrap a family's parent, and start or stop its stroll for the state it shows. */
   function strollWrap(id, slot, r) {
     const el = document.createElementNS(SVG_NS, 'g');
@@ -841,6 +891,7 @@
     else if (e.animationName === 'spawn-in') e.target.closest('.critter')?.classList.remove('spawn');
     else if (e.animationName === 'despawn-out') e.target.closest('.kid-slot')?.remove();
     else if (e.animationName === 'regrid') e.target.classList.remove('regrid');
+    else if (e.animationName === 'bump') e.target.closest('.critter')?.classList.remove('bump');
   }
   pet.addEventListener('animationend', onMotionEnd);
   pet.addEventListener('animationcancel', onMotionEnd);
@@ -874,7 +925,7 @@
     const parentKey = (g) => `s:${multi ? g.id : (sessions[0]?.id ?? '')}`;
     for (const g of groups) familyLoads.set(g.id, g.load);
 
-    const key = JSON.stringify([multi, gaugeShown, prefs.spacing, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    const key = JSON.stringify([multi, gaugeShown, prefs.spacing, prefs.layout, planesKey(), groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
     if (key !== crittersKey) {
       crittersKey = key;
       crittersLayer.replaceChildren();
@@ -899,12 +950,30 @@
         const H = gaugeShown ? 146 : 160;
         // The grid (layout.js): the column count where families come out biggest, the
         // distance between them set by the Spacing preference.
-        const { f, cells: grid } = gridLayout(groups.length, G, H, SPACING[prefs.spacing] ?? 1);
-        groups.forEach((g, i) => {
-          const cell = { x: grid[i].x, y: grid[i].y, f, G };
+        // Or gravity: pulled to the centre by urgency, on three depth planes.
+        const spacing = SPACING[prefs.spacing] ?? 1;
+        const gravity = prefs.layout === 'gravity' && groups.length > 1;
+        let placed;
+        if (gravity) {
+          placed = gravityLayout(groups.map((g) => ({ id: g.id, plane: planeMap.get(g.id)?.plane ?? 'middle' })), G, H, spacing);
+        } else {
+          const { f, cells: grid } = gridLayout(groups.length, G, H, spacing);
+          placed = grid.map((c, i) => ({ id: groups[i].id, x: c.x, y: c.y, f, plane: null }));
+        }
+        const at = new Map(placed.map((p) => [p.id, p]));
+        centres = new Map();
+        // The back plane first, so nearer families are drawn over farther ones.
+        const order = gravity
+          ? [...groups].sort((a, b) => PLANES.indexOf(at.get(a.id).plane) - PLANES.indexOf(at.get(b.id).plane))
+          : groups;
+        order.forEach((g) => {
+          const p = at.get(g.id);
+          const f = p.f;
+          const cell = { x: p.x, y: p.y, f, G };
           cells.set(g.id, cell);
           const family = document.createElementNS(SVG_NS, 'g');
           family.setAttribute('class', 'family');
+          if (p.plane) family.dataset.plane = p.plane;
           const back = document.createElementNS(SVG_NS, 'g');
           back.setAttribute('class', 'back');
           const front = document.createElementNS(SVG_NS, 'g');
@@ -913,6 +982,8 @@
           const parent = parentSlot(parentKey(g),
             `translate(${(cell.x + P.x * f).toFixed(2)}px, ${(cell.y + P.y * f).toFixed(2)}px) scale(${(P.size * f / 160).toFixed(4)})`);
           family.append(back, strollWrap(g.id, parent, P.size * f * 0.14), front);
+          centres.set(g.id, { id: g.id, plane: p.plane, cx: cell.x + (P.x + P.size / 2) * f,
+                              cy: cell.y + (P.y + P.size * 0.58) * f, r: P.size * f * 0.3 });
           familyEls.set(g.id, family);
           // Above the parent's head: the avatar's why anchor, in the parent's scaled box
           // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
@@ -1771,13 +1842,26 @@
   const LOAD_STEP = 5;
   const loadStep = (load) => Math.round(load / LOAD_STEP) * LOAD_STEP;
 
+  // Depth planes for the gravity layout (layout.js): evaluated on every frame, so a session
+  // that has held a new state long enough changes plane even when nothing else moved.
+  let planeMap = new Map();
+  const planesKey = () => [...planeMap].map(([id, p]) => `${id}${p.plane[0]}`).join(',');
+  function updatePlanes(s) {
+    const sessions = s.sessions ?? [];
+    planeMap = prefs.layout === 'gravity' && sessions.length > 1
+      ? planes(sessions.map((x) => ({ id: x.id, state: prefs.paused ? 'IDLE' : x.state, status: x.status, load: x.load ?? 0 })),
+               planeMap, Date.now())
+      : new Map();
+  }
+
   function render(s) {
     lastFrame = s;
     noticeUpdate(s);
     noticeAvatars(s);
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
-    const key = JSON.stringify([chatBusy, s.visual, loadStep(s.load), s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
+    updatePlanes(s);
+    const key = JSON.stringify([planesKey(), chatBusy, s.visual, loadStep(s.load), s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => [x.id, x.status, x.state, loadStep(x.load ?? 0), x.reason, x.tool_calls_per_minute, x.context_load,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
