@@ -147,7 +147,16 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
             .build(app)?;
         sub = sub.item(&item);
     }
+    let mut spacing = SubmenuBuilder::new(app, w.get("menu.spacing"));
+    for value in ["tight", "normal", "roomy"] {
+        let item = CheckMenuItemBuilder::with_id(format!("pref:spacing:{value}"), w.get(&format!("menu.spacing.{value}")))
+            .checked(prefs["spacing"] == value)
+            .build(app)?;
+        spacing = spacing.item(&item);
+    }
     sub.separator()
+        .item(&spacing.build()?)
+        .separator()
         .item(&MenuItemBuilder::with_id("zoom:in", w.get("menu.zoomIn")).accelerator("CmdOrCtrl+=").build(app)?)
         .item(&MenuItemBuilder::with_id("zoom:out", w.get("menu.zoomOut")).accelerator("CmdOrCtrl+-").build(app)?)
         .item(&MenuItemBuilder::with_id("zoom:reset", w.get("menu.zoomReset")).accelerator("CmdOrCtrl+0").build(app)?)

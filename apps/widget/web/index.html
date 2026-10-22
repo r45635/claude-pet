@@ -501,6 +501,7 @@
   import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
+  import { SPACING, gridLayout } from './layout.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -609,7 +610,6 @@
   // the band at its feet, in front of it or beside it.
   const SOLO = { w: 160, h: 160, parent: { x: 22, y: 0, size: 116 }, kid: 44,
                  area: { x0: 14, x1: 146, y0: 104, y1: 140 }, parentFeet: 106, step: { x: 160, y: 160 } };
-  const span = (n, size, step) => size + step * (n - 1);
   const WANDERS = new Set(['READING', 'CODING', 'TOOL_CALL', 'THINKING', 'HIGH_LOAD']);
   let crittersKey = '';
   const critterEls = new Map();
@@ -803,17 +803,6 @@
     gone.appendChild(w.slot);
   }
 
-  // Try every number of columns; keep the one where families come out biggest.
-  function layoutCells(n, G, H) {
-    let best = { f: 0, cols: 1, rows: 1 };
-    for (let cols = 1; cols <= n; cols += 1) {
-      const rows = Math.ceil(n / cols);
-      const f = Math.min(160 / span(cols, G.w, G.step.x), H / span(rows, G.h, G.step.y));
-      if (f > best.f) best = { f, cols, rows };
-    }
-    return best;
-  }
-
   function renderCritters(s, singleState) {
     const sessions = s.sessions ?? [];
     const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
@@ -830,7 +819,7 @@
     const parentKey = (g) => `s:${multi ? g.id : (sessions[0]?.id ?? '')}`;
     for (const g of groups) familyLoads.set(g.id, g.load);
 
-    const key = JSON.stringify([multi, gaugeShown, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    const key = JSON.stringify([multi, gaugeShown, prefs.spacing, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
     if (key !== crittersKey) {
       crittersKey = key;
       crittersLayer.replaceChildren();
@@ -852,11 +841,11 @@
         const G = groups.length === 1 ? SOLO : groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
         // With the usage gauge on, the families keep clear of the tray's strip at the bottom.
         const H = gaugeShown ? 146 : 160;
-        const { f, cols, rows } = layoutCells(groups.length, G, H);
-        const x0 = (160 - f * span(cols, G.w, G.step.x)) / 2;
-        const y0 = (H - f * span(rows, G.h, G.step.y)) / 2;
+        // The grid (layout.js): the column count where families come out biggest, the
+        // distance between them set by the Spacing preference.
+        const { f, cells: grid } = gridLayout(groups.length, G, H, SPACING[prefs.spacing] ?? 1);
         groups.forEach((g, i) => {
-          const cell = { x: x0 + (i % cols) * G.step.x * f, y: y0 + Math.floor(i / cols) * G.step.y * f, f, G };
+          const cell = { x: grid[i].x, y: grid[i].y, f, G };
           cells.set(g.id, cell);
           const family = document.createElementNS(SVG_NS, 'g');
           family.setAttribute('class', 'family');
@@ -1585,6 +1574,7 @@
   //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
   //     [&sessions=CODING,WAITING,READING] one family per state (kids go to the first one)
   //     [&gauge=63] the usage gauge, % of the 5-hour window   [&bg=%23101418] the backdrop   [&size=220] px
+  //     [&spacing=tight|normal|roomy] [&layout=grid|gravity] [&wander=off]
   // It reads the avatar folder like the widget's importer would, minus the validation — from the
   // library's clone next to this one (r45635/claude-pet-avatars → ../claude-pet-avatars).
   if (params.get('demo') === 'avatar') {
@@ -1634,7 +1624,8 @@
         sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
         sessions: families.length ? families : kids ? [{ id: 'demo', status: 'working', state, load: state === 'HIGH_LOAD' ? 90 : 50, agents, context_load: ctx,
                                                        reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' } : null }] : [],
-        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto', sizePx: Number(params.get('size') ?? 150) }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
+        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto', sizePx: Number(params.get('size') ?? 150),
+                 spacing: params.get('spacing') ?? 'normal', wander: params.get('wander') !== 'off', layout: params.get('layout') ?? 'grid' }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
         active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
       });
       document.title = `ready ${id} ${state}`;
