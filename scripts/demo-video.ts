@@ -24,7 +24,9 @@ const BG = '#1e2230';
 const FPS = 30;
 
 /** A title card, or the harness with a caption. `hash` is the harness's demo parameters. */
-type Scene = { seconds: number; title?: string; caption?: string; sub?: string; hash?: string };
+type Scene = { seconds: number; title?: string; caption?: string; sub?: string; hash?: string;
+                /** Captured in real time: compositor animations (the galaxy's rotation) ignore virtual time. */
+                realtime?: boolean };
 
 const SCENES: Scene[] = [
   { seconds: 2.5, title: 'claude<span>-pet</span>', sub: 'Live Claude Code status, right on your Mac.' },
@@ -34,6 +36,8 @@ const SCENES: Scene[] = [
   { seconds: 4, caption: 'One creature per session. The one that needs you raises its hand.',
     hash: 'sessions=CODING,WAITING,THINKING,READING&kids=2&state=TOOL_CALL&gauge=63' },
   { seconds: 3, caption: 'Storms come with a reason.', hash: 'state=HIGH_LOAD&kids=4' },
+  { seconds: 5, caption: 'Or a galaxy around what needs you. (4× speed)', realtime: true,
+    hash: 'layout=gravity&orbitSpeed=4&state=CODING&sessions=CODING,THINKING,IDLE,DONE,READING' },
   { seconds: 3, caption: 'It gets tired as the context fills up.', hash: 'state=CODING&ctx=93' },
   ...['ghost', 'alien', 'cowboy', 'halloween'].map((id) =>
     ({ seconds: 1, caption: 'Make it yours — a whole library of avatars.', hash: `avatar=${id}&state=CODING` })),
@@ -74,8 +78,21 @@ async function renderScene(cdp: Cdp, scene: Scene, layout: Layout, dir: string, 
   await cdp.send('Emulation.setVirtualTimePolicy', { policy: 'advance' }); // real time while loading
   await cdp.send('Page.navigate', { url: `file://${page}?${first}` });
   await sleep(scene.hash?.includes('avatar=') ? 2_200 : 1_500); // the harness loads (and fetches an avatar)
-  await cdp.send('Emulation.setVirtualTimePolicy', { policy: 'pause' });
   const frames = Math.round(scene.seconds * FPS);
+  if (scene.realtime) {
+    // Real time: capture as fast as it goes, and repeat each frame until the next one so the
+    // video keeps FPS frames per second of wall time.
+    const t0 = performance.now();
+    let written = 0;
+    while (written < frames) {
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      const upTo = Math.min(frames, Math.max(written + 1, Math.round(((performance.now() - t0) / 1000) * FPS)));
+      const png = Buffer.from(data, 'base64');
+      for (; written < upTo; written++) writeFileSync(join(dir, `f${String(first + written).padStart(5, '0')}.png`), png);
+    }
+    return first + frames;
+  }
+  await cdp.send('Emulation.setVirtualTimePolicy', { policy: 'pause' });
   for (let i = 0; i < frames; i++) {
     const done = cdp.once('Emulation.virtualTimeBudgetExpired');
     await cdp.send('Emulation.setVirtualTimePolicy', { policy: 'advance', budget: 1000 / FPS });

@@ -42,6 +42,9 @@ Generated from [`packages/collector/src/settings-schema.json`](../packages/colle
 | Appearance | `ui.alwaysOnTop` | `true` · `false` | `true` | panel, file | Keep the creature above other windows. |
 | Appearance | `ui.showSessions` | `true` · `false` | `true` | panel, file | One pastille per live Claude Code session under the creature. |
 | Appearance | `ui.display` | `desktop` · `menubar` · `both` | `"desktop"` | panel, file | Where the creature lives: on the desktop, as an icon in the menu bar (its title the creature's state, its menu the right-click menu), or both. |
+| Appearance | `ui.layout` | `grid` · `gravity` | `"grid"` | panel, file | With several sessions: a tidy grid, or gravity — the session waiting for you and the busiest one in front and in the middle, sleeping ones smaller at the back. |
+| Appearance | `ui.spacing` | `tight` · `normal` · `roomy` | `"normal"` | panel, file | With several sessions on screen: how close the families stand. Tight makes them bigger, roomy leaves subagents more room to walk. |
+| Appearance | `ui.wander` | `true` · `false` | `true` | panel, file | While its session works, the creature takes a small step now and then around its spot. Never at rest, never while it waits for you. |
 | Appearance | `ui.fatigue` | `true` · `false` | `true` | panel, file | The creature tires as its session's context window fills (the status line's context %): a sweat drop from 70 %, worn out from 88 %. Nothing shown when the % is unknown. |
 | Behaviour | `temperament` | `zen` · `normal` · `nervous` | `"normal"` | panel, file | Presets for what excites the creature, when it storms and how fast it calms down. |
 | Behaviour | `highLoadThreshold` | 30–100 (step 1) | preset / engine default | panel, file | Load at which the creature storms; it calms down 10 points lower. Empty = the temperament's value. |

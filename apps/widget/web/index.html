@@ -158,6 +158,8 @@
      family's tempo (from its session's load). A family where everyone sleeps is fully
      still: no timer, no animation (the idle CPU budget, docs/RISKS.md #6). */
   .kid-slot { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
+  /* The parent's stroll around its anchor (strollFor in the script): a glide, no loop. */
+  .wander { transition-property: transform; transition-timing-function: cubic-bezier(.45, 0, .35, 1); }
   /* Enter one-shots and the kid lifecycle animate the critter root, so every critter
      transforms around its feet, not the viewBox origin. */
   .critter { transform-box: fill-box; transform-origin: 50% 100%; }
@@ -199,6 +201,22 @@
   /* The parent gliding to its new box when the layout changes (parentSlot in the script). */
   .parent-slot.regrid { animation: regrid .5s cubic-bezier(.45, 0, .35, 1) 1; }
   @keyframes regrid { from { transform: var(--from); } }
+  /* Gravity layout: farther planes slightly faded; two parents of the same plane that meet
+     bump — one squash each, removed on animationend (seekBump in the script). */
+  .family[data-plane="back"] { opacity: .8; transition: opacity .5s ease; }
+  .critter.bump { animation: bump .36s ease-out 1; }
+  /* The galaxy: the middle and back planes turn slowly around the centre (an .orbit group per
+     plane), each family counter-turning around its own centre so its creatures stay upright.
+     Paused at rest with everything else, and while the why bubble points at a turning family. */
+  .orbit, .family.orbiting { transform-box: view-box; animation-timing-function: linear;
+                             animation-iteration-count: infinite; }
+  .orbit { animation-name: orbit; }
+  .family.orbiting { animation-name: orbit-counter; }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+  @keyframes orbit-counter { to { transform: rotate(-360deg); } }
+  #pet[data-orbit-hold="true"] .orbit, #pet[data-orbit-hold="true"] .family.orbiting { animation-play-state: paused; }
+  @keyframes bump { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.14, .84); }
+                    65% { transform: scale(.94, 1.07); } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
   #critters .more { fill: #9aa3b5; font: 700 22px -apple-system, BlinkMacSystemFont, sans-serif; }
 
@@ -501,6 +519,7 @@
   import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
+  import { ORBIT_PERIOD, PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, planes } from './layout.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -609,7 +628,6 @@
   // the band at its feet, in front of it or beside it.
   const SOLO = { w: 160, h: 160, parent: { x: 22, y: 0, size: 116 }, kid: 44,
                  area: { x0: 14, x1: 146, y0: 104, y1: 140 }, parentFeet: 106, step: { x: 160, y: 160 } };
-  const span = (n, size, step) => size + step * (n - 1);
   const WANDERS = new Set(['READING', 'CODING', 'TOOL_CALL', 'THINKING', 'HIGH_LOAD']);
   let crittersKey = '';
   const critterEls = new Map();
@@ -766,6 +784,129 @@
     }, dur * 1000);
   }
   const familyLoads = new Map();
+
+  // ---- the parent's stroll (setting `wander`) --------------------------------------------------
+  // While its session works, a parent takes a small step now and then around its anchor — the
+  // centre of its cell — each target pulled back toward it like a spring, at its session's pace.
+  // Never asleep, never while it waits for you (it must stay where you look for it), and it
+  // glides home as soon as it stops. Same machinery as the kids' walk: a CSS transition per
+  // step and a timer between steps, nothing per frame.
+  const drifts = new Map(); // family id → { el, dx, dy, r, on, timer }
+  function driftTo(d, x, y, seconds) {
+    d.dx = x;
+    d.dy = y;
+    d.el.style.transitionDuration = `${seconds.toFixed(2)}s`;
+    d.el.style.transform = x || y ? `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)` : '';
+  }
+  function driftHome(d) {
+    clearTimeout(d.timer);
+    d.timer = 0;
+    if (d.dx || d.dy) driftTo(d, 0, 0, motionReduced ? 0 : 0.8);
+  }
+  function stroll(id) {
+    const d = drifts.get(id);
+    if (!d) return;
+    d.timer = 0;
+    if (!d.on || !animating() || !d.el.isConnected) { driftHome(d); return; }
+    // Gravity layout: now and then, curiosity — a walk toward a neighbour of the same plane.
+    if (prefs.layout === 'gravity' && Math.random() < 0.1 && seekBump(id, d)) return;
+    const a = Math.random() * 2 * Math.PI;
+    const k = Math.sqrt(Math.random());
+    // Mostly sideways, a little up and down: it walks on the floor, it does not fly.
+    const tx = d.dx * 0.35 + Math.cos(a) * k * d.r * 0.65;
+    const ty = d.dy * 0.35 + Math.sin(a) * k * d.r * 0.25;
+    const pace = familyPace(id);
+    const seconds = Math.max(0.8, Math.hypot(tx - d.dx, ty - d.dy) / (5 * pace));
+    driftTo(d, tx, ty, seconds);
+    d.timer = setTimeout(() => stroll(id), seconds * 1000 + (2500 + Math.random() * 3500) / pace);
+  }
+  // ---- the bump (gravity layout) --------------------------------------------------------------
+  // Two parents of the same plane meet: both squash, the walker steps back, the other is nudged.
+  // Exceptional by design — gravity keeps same-plane families apart, so it only happens when a
+  // stroll heads for a neighbour on purpose, and at most once per family every 20 s.
+  // The galaxy's clock: seconds of turning so far. It only advances while things move (the CSS
+  // orbits are paused otherwise), so a re-layout restarts each orbit exactly where it stood.
+  let orbitMs = 0;
+  let orbitSince = null;
+  let orbitHeld = false;
+  let orbitCentre = { x: 80, y: 80 };
+  function orbitClock(moving) {
+    const now = performance.now();
+    if (orbitSince !== null) { orbitMs += now - orbitSince; orbitSince = null; }
+    if (moving) orbitSince = now;
+  }
+  const orbitPhase = () => (orbitMs + (orbitSince !== null ? performance.now() - orbitSince : 0)) / 1000;
+  /** How far a plane has turned, radians (0 for the still heart, or outside the gravity layout). */
+  function orbitAngle(plane) {
+    const period = prefs.layout === 'gravity' && ORBIT_PERIOD[plane] ? orbitPeriod(plane) : 0;
+    return period ? (2 * Math.PI * (orbitPhase() % period)) / period : 0;
+  }
+  /** Seconds per turn; the harness may speed it up for a short demo (&orbitSpeed=4). */
+  const orbitPeriod = (plane) => ORBIT_PERIOD[plane] / Math.max(0.1, Number(params.get('orbitSpeed') ?? 1));
+  const rotateAround = (p, c, a) => ({ x: c.x + (p.x - c.x) * Math.cos(a) - (p.y - c.y) * Math.sin(a),
+                                       y: c.y + (p.x - c.x) * Math.sin(a) + (p.y - c.y) * Math.cos(a) });
+
+  const lastBump = new Map(); // family id → ms
+  let centres = new Map();    // family id → { id, plane, cx, cy, r } (r: the parent's body)
+  function seekBump(id, d) {
+    const me = centres.get(id);
+    if (!me?.plane) return false;
+    const now = Date.now();
+    const at = (c) => ({ ...c, cx: c.cx + (drifts.get(c.id)?.dx ?? 0), cy: c.cy + (drifts.get(c.id)?.dy ?? 0) });
+    const mine = at(me);
+    let target = null;
+    for (const c of centres.values()) {
+      const other = at(c);
+      const contact = mine.r + other.r;
+      // Reachable: no farther than one and a half body widths beyond contact.
+      if (!bumpCheck(mine, other, now, lastBump, 20_000, 1 + (1.5 * mine.r) / contact)) continue;
+      const dist = Math.hypot(other.cx - mine.cx, other.cy - mine.cy);
+      if (!target || dist < target.dist) target = { other, dist, contact };
+    }
+    if (!target || target.dist <= target.contact) return false;
+    // Same plane, so both have turned by the same angle: the way to the other, on screen.
+    const turn = orbitAngle(me.plane);
+    const bx = (target.other.cx - mine.cx) / target.dist;
+    const by = (target.other.cy - mine.cy) / target.dist;
+    const ux = bx * Math.cos(turn) - by * Math.sin(turn);
+    const uy = bx * Math.sin(turn) + by * Math.cos(turn);
+    const travel = target.dist - target.contact;
+    const seconds = Math.max(0.6, travel / (7 * familyPace(id)));
+    lastBump.set(id, now);
+    lastBump.set(target.other.id, now);
+    driftTo(d, d.dx + ux * travel, d.dy + uy * travel, seconds);
+    d.timer = setTimeout(() => bump(id, target.other.id, ux, uy, mine.r), seconds * 1000);
+    return true;
+  }
+  function bump(a, b, ux, uy, r) {
+    const da = drifts.get(a);
+    if (!da?.el.isConnected || !animating()) return;
+    for (const id of [a, b]) critterEls.get(`s:${id}`)?.classList.add('bump');
+    driftTo(da, da.dx - ux * r * 0.7, da.dy - uy * r * 0.7, 0.35);
+    const db = drifts.get(b);
+    if (db?.on) driftTo(db, db.dx + ux * r * 0.4, db.dy + uy * r * 0.4, 0.35);
+    da.timer = setTimeout(() => stroll(a), 1_200 + Math.random() * 1_500);
+  }
+
+  /** Wrap a family's parent, and start or stop its stroll for the state it shows. */
+  function strollWrap(id, slot, r) {
+    const el = document.createElementNS(SVG_NS, 'g');
+    el.setAttribute('class', 'wander');
+    el.appendChild(slot);
+    const d = drifts.get(id) ?? { dx: 0, dy: 0, timer: 0, on: false };
+    d.el = el;
+    d.r = r;
+    drifts.set(id, d);
+    driftTo(d, d.dx, d.dy, 0); // a re-layout keeps where it stood
+    return el;
+  }
+  function strollFor(id, state) {
+    const d = drifts.get(id);
+    if (!d) return;
+    d.on = prefs.wander !== false && !motionReduced && WANDERS.has(state);
+    if (!d.on) driftHome(d);
+    else if (!d.timer && animatingNow) d.timer = setTimeout(() => stroll(id), 800 + Math.random() * 1500);
+  }
   let animatingNow = false;
   const animating = () => animatingNow;
 
@@ -786,6 +927,7 @@
     else if (e.animationName === 'spawn-in') e.target.closest('.critter')?.classList.remove('spawn');
     else if (e.animationName === 'despawn-out') e.target.closest('.kid-slot')?.remove();
     else if (e.animationName === 'regrid') e.target.classList.remove('regrid');
+    else if (e.animationName === 'bump') e.target.closest('.critter')?.classList.remove('bump');
   }
   pet.addEventListener('animationend', onMotionEnd);
   pet.addEventListener('animationcancel', onMotionEnd);
@@ -803,17 +945,6 @@
     gone.appendChild(w.slot);
   }
 
-  // Try every number of columns; keep the one where families come out biggest.
-  function layoutCells(n, G, H) {
-    let best = { f: 0, cols: 1, rows: 1 };
-    for (let cols = 1; cols <= n; cols += 1) {
-      const rows = Math.ceil(n / cols);
-      const f = Math.min(160 / span(cols, G.w, G.step.x), H / span(rows, G.h, G.step.y));
-      if (f > best.f) best = { f, cols, rows };
-    }
-    return best;
-  }
-
   function renderCritters(s, singleState) {
     const sessions = s.sessions ?? [];
     const multi = sessions.length > 1 || (sessions[0]?.agents ?? []).length > 0;
@@ -821,6 +952,7 @@
     const asleep = prefs.paused;
     animatingNow = !asleep && !motionReduced && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
     if (!animatingNow) for (const slot of parentSlots.values()) slot.classList.remove('regrid');
+    orbitClock(animatingNow && !orbitHeld);
     const groups = multi
       ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: loadStep(x.load ?? 0),
                                ctx: x.context_load ?? null, agents: urgentFirst(x.agents ?? []) }))
@@ -830,7 +962,7 @@
     const parentKey = (g) => `s:${multi ? g.id : (sessions[0]?.id ?? '')}`;
     for (const g of groups) familyLoads.set(g.id, g.load);
 
-    const key = JSON.stringify([multi, gaugeShown, groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
+    const key = JSON.stringify([multi, gaugeShown, prefs.spacing, prefs.layout, planesKey(), groups.map((g) => [g.id, g.agents.slice(0, MAX_KIDS).map((a) => a.id), g.agents.length > MAX_KIDS])]);
     if (key !== crittersKey) {
       crittersKey = key;
       crittersLayer.replaceChildren();
@@ -844,7 +976,8 @@
         family.setAttribute('class', 'family');
         familyEls.set('', family);
         const key = parentKey(groups[0]);
-        family.appendChild(parentSlot(key, 'none'));
+        // Alone, it has the window's margin to stroll in: about ten units either side.
+        family.appendChild(strollWrap('', parentSlot(key, 'none'), 10));
         crittersLayer.appendChild(family);
         keepCritters.add(key);
         familyAnchors.set('', { x: geo.why[0], y: geo.why[1] });
@@ -852,14 +985,45 @@
         const G = groups.length === 1 ? SOLO : groups.some((g) => g.agents.length > 0) ? CELL : COMPACT;
         // With the usage gauge on, the families keep clear of the tray's strip at the bottom.
         const H = gaugeShown ? 146 : 160;
-        const { f, cols, rows } = layoutCells(groups.length, G, H);
-        const x0 = (160 - f * span(cols, G.w, G.step.x)) / 2;
-        const y0 = (H - f * span(rows, G.h, G.step.y)) / 2;
-        groups.forEach((g, i) => {
-          const cell = { x: x0 + (i % cols) * G.step.x * f, y: y0 + Math.floor(i / cols) * G.step.y * f, f, G };
+        // The grid (layout.js): the column count where families come out biggest, the
+        // distance between them set by the Spacing preference.
+        // Or gravity: pulled to the centre by urgency, on three depth planes.
+        const spacing = SPACING[prefs.spacing] ?? 1;
+        const gravity = prefs.layout === 'gravity' && groups.length > 1;
+        let placed;
+        if (gravity) {
+          placed = gravityLayout(groups.map((g) => ({ id: g.id, plane: planeMap.get(g.id)?.plane ?? 'middle' })), G, H, spacing, { orbit: true });
+        } else {
+          const { f, cells: grid } = gridLayout(groups.length, G, H, spacing);
+          placed = grid.map((c, i) => ({ id: groups[i].id, x: c.x, y: c.y, f, plane: null }));
+        }
+        const at = new Map(placed.map((p) => [p.id, p]));
+        centres = new Map();
+        // The galaxy: one turning group per orbiting plane, the back one drawn first.
+        orbitCentre = { x: 80, y: H / 2 };
+        const orbits = new Map();
+        for (const plane of gravity ? ['back', 'middle'] : []) {
+          if (!placed.some((p) => p.plane === plane)) continue;
+          const group = document.createElementNS(SVG_NS, 'g');
+          group.setAttribute('class', 'orbit');
+          const period = orbitPeriod(plane);
+          Object.assign(group.style, { transformOrigin: `80px ${H / 2}px`, animationDuration: `${period}s`,
+                                       animationDelay: `${(-(orbitPhase() % period)).toFixed(2)}s` });
+          crittersLayer.appendChild(group);
+          orbits.set(plane, group);
+        }
+        // The back plane first, so nearer families are drawn over farther ones.
+        const order = gravity
+          ? [...groups].sort((a, b) => PLANES.indexOf(at.get(a.id).plane) - PLANES.indexOf(at.get(b.id).plane))
+          : groups;
+        order.forEach((g) => {
+          const p = at.get(g.id);
+          const f = p.f;
+          const cell = { x: p.x, y: p.y, f, G };
           cells.set(g.id, cell);
           const family = document.createElementNS(SVG_NS, 'g');
           family.setAttribute('class', 'family');
+          if (p.plane) family.dataset.plane = p.plane;
           const back = document.createElementNS(SVG_NS, 'g');
           back.setAttribute('class', 'back');
           const front = document.createElementNS(SVG_NS, 'g');
@@ -867,13 +1031,21 @@
           const P = G.parent;
           const parent = parentSlot(parentKey(g),
             `translate(${(cell.x + P.x * f).toFixed(2)}px, ${(cell.y + P.y * f).toFixed(2)}px) scale(${(P.size * f / 160).toFixed(4)})`);
-          family.append(back, parent, front);
+          family.append(back, strollWrap(g.id, parent, P.size * f * 0.14), front);
+          centres.set(g.id, { id: g.id, plane: p.plane, cx: cell.x + (P.x + P.size / 2) * f,
+                              cy: cell.y + (P.y + P.size * 0.58) * f, r: P.size * f * 0.3 });
           familyEls.set(g.id, family);
           // Above the parent's head: the avatar's why anchor, in the parent's scaled box
           // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
           familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * (geo.why[0] + 6) / 160) * f,
                                     y: cell.y + (P.y + 6 + (geo.why[1] - 26) * P.size / 160) * f });
-          crittersLayer.appendChild(family);
+          const orbit = orbits.get(p.plane);
+          if (orbit) {
+            family.classList.add('orbiting');
+            Object.assign(family.style, { transformOrigin: `${p.cx.toFixed(2)}px ${p.cy.toFixed(2)}px`,
+                                          animationDuration: orbit.style.animationDuration, animationDelay: orbit.style.animationDelay });
+          }
+          (orbit ?? crittersLayer).appendChild(family);
           keepCritters.add(parentKey(g));
 
           g.agents.slice(0, MAX_KIDS).forEach((a, k) => {
@@ -910,6 +1082,7 @@
       }
       for (const id of [...critterEls.keys()]) if (!keepCritters.has(id)) critterEls.delete(id);
       for (const id of [...parentSlots.keys()]) if (!keepCritters.has(id)) parentSlots.delete(id);
+      for (const [id, d] of [...drifts]) if (!familyEls.has(id)) { clearTimeout(d.timer); drifts.delete(id); }
       for (const [id, w] of [...walkers]) if (!keepWalkers.has(id)) { stopWalker(w); walkers.delete(id); despawn(w); }
     }
 
@@ -917,6 +1090,7 @@
       // The parent's key, not `s:${g.id}`: the lone creature (g.id '') is keyed by its session.
       setState(critterEls.get(parentKey(g)), g.state);
       setFatigue(critterEls.get(parentKey(g)), fatigueBand(g.ctx));
+      strollFor(g.id, g.state);
       const states = [g.state];
       for (const a of g.agents.slice(0, MAX_KIDS)) {
         const state = asleep ? 'IDLE' : a.state;
@@ -1017,7 +1191,9 @@
     rect.setAttribute('x', String(80 - w / 2));
     // The bubble floats just above the head it is about (a lower row's family gets it over
     // the row above), its tail's two dots leading down to that head.
-    const anchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
+    const placedAnchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
+    // A turning family's anchor has turned with it (its orbit is held while the bubble shows).
+    const anchor = rotateAround(placedAnchor, orbitCentre, orbitAngle(planeMap.get(family)?.plane));
     const dy = Math.min(Math.max(0, anchor.y - 26), 120);
     whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
     const [near, far] = whyBubble.querySelectorAll('circle');
@@ -1585,6 +1761,7 @@
   //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
   //     [&sessions=CODING,WAITING,READING] one family per state (kids go to the first one)
   //     [&gauge=63] the usage gauge, % of the 5-hour window   [&bg=%23101418] the backdrop   [&size=220] px
+  //     [&spacing=tight|normal|roomy] [&layout=grid|gravity] [&wander=off] [&orbitSpeed=4] (demo only)
   // It reads the avatar folder like the widget's importer would, minus the validation — from the
   // library's clone next to this one (r45635/claude-pet-avatars → ../claude-pet-avatars).
   if (params.get('demo') === 'avatar') {
@@ -1634,7 +1811,8 @@
         sources: { hooks: params.get('signal') !== 'none', statusline: false, net: false },
         sessions: families.length ? families : kids ? [{ id: 'demo', status: 'working', state, load: state === 'HIGH_LOAD' ? 90 : 50, agents, context_load: ctx,
                                                        reason: state === 'HIGH_LOAD' ? { kind: 'storm', driver: 'agent' } : null }] : [],
-        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto', sizePx: Number(params.get('size') ?? 150) }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
+        prefs: { ...prefs, avatar: id, locale: params.get('lang') ?? 'auto', sizePx: Number(params.get('size') ?? 150),
+                 spacing: params.get('spacing') ?? 'normal', wander: params.get('wander') !== 'off', layout: params.get('layout') ?? 'grid' }, estimated_activity_rate: 0, load_confidence: 1, context_load: ctx,
         active_subagents: kids, tool_calls_per_minute: 0, tokens_per_minute: null,
       });
       document.title = `ready ${id} ${state}`;
@@ -1722,13 +1900,26 @@
   const LOAD_STEP = 5;
   const loadStep = (load) => Math.round(load / LOAD_STEP) * LOAD_STEP;
 
+  // Depth planes for the gravity layout (layout.js): evaluated on every frame, so a session
+  // that has held a new state long enough changes plane even when nothing else moved.
+  let planeMap = new Map();
+  const planesKey = () => [...planeMap].map(([id, p]) => `${id}${p.plane[0]}`).join(',');
+  function updatePlanes(s) {
+    const sessions = s.sessions ?? [];
+    planeMap = prefs.layout === 'gravity' && sessions.length > 1
+      ? planes(sessions.map((x) => ({ id: x.id, state: prefs.paused ? 'IDLE' : x.state, status: x.status, load: x.load ?? 0 })),
+               planeMap, Date.now())
+      : new Map();
+  }
+
   function render(s) {
     lastFrame = s;
     noticeUpdate(s);
     noticeAvatars(s);
     applyPrefs(s.prefs);
     renderGauge(s.rate_limits?.five_hour ?? null);
-    const key = JSON.stringify([chatBusy, s.visual, loadStep(s.load), s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
+    updatePlanes(s);
+    const key = JSON.stringify([planesKey(), chatBusy, s.visual, loadStep(s.load), s.state, s.reason, s.tool_calls_per_minute, s.tokens_per_minute, s.context_load, s.sources, s.prefs,
                                 (s.sessions ?? []).map((x) => [x.id, x.status, x.state, loadStep(x.load ?? 0), x.reason, x.tool_calls_per_minute, x.context_load,
                                                              (x.agents ?? []).map((a) => [a.id, a.state, a.reason])]), s.focus,
                                 s.active_subagents, debug && s.estimated_activity_rate]);
@@ -1739,9 +1930,13 @@
     // Its own Claude answering is observable from right here (the run is ours), so it
     // shows as thinking even though that session bypasses the hooks.
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
+    // The why bubble points at one family: if that family is turning, its orbit holds still.
+    const why = prefs.paused ? { text: '', family: '' } : whyMessage(s);
+    orbitHeld = Boolean(why.text) && ORBIT_PERIOD[planeMap.get(why.family)?.plane] > 0;
+    pet.dataset.orbitHold = String(orbitHeld);
     renderCritters(s, prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state);
     renderSessions(s.sessions ?? [], s.focus);
-    renderWhy(prefs.paused ? { text: '', family: '' } : whyMessage(s));
+    renderWhy(why);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 

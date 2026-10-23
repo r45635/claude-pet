@@ -14,7 +14,8 @@ claude-pet is a small, free, open-source creature that sits in a corner of your 
 (or in the menu bar) and shows, live, what Claude Code is doing: thinking, reading files,
 writing code, running tools, storming through a big task — or waiting for your answer. Every
 session gets its own creature and every subagent a little one; it tires as the context window
-fills up, and it can wear any look from a community avatar library.
+fills up, several sessions can orbit the one that needs you like a small galaxy, and it can
+wear any look from a community avatar library.
 
 ## The longer story
 
@@ -41,12 +42,13 @@ anyone can contribute to — a few pictures are enough to make an avatar.
 
 | | |
 |---|---|
-| Demo video, 30 s, square (1080×1080) | [demo-square.mp4](media/demo-square.mp4) |
-| Demo video, 30 s, wide (1920×1080) | [demo-wide.mp4](media/demo-wide.mp4) |
+| Demo video, 34 s, square (1080×1080) | [demo-square.mp4](media/demo-square.mp4) |
+| Demo video, 34 s, wide (1920×1080) | [demo-wide.mp4](media/demo-wide.mp4) |
 | Social card (1280×640) | [social-preview.png](media/social-preview.png) |
 | The creature at work, with subagents | [hero.gif](media/hero.gif) |
 | Several sessions, one waiting for you | [sessions.gif](media/sessions.gif) |
 | A storm, and why | [storm.gif](media/storm.gif) |
+| The galaxy layout (sped up 4×) | [galaxy.gif](media/galaxy.gif) |
 | Tired: the context is almost full | [tired.gif](media/tired.gif) |
 | The eight moods | [state-*.png](media) |
 | Avatars from the library | [avatar-*.gif](media) |

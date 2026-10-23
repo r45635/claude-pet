@@ -27,7 +27,7 @@ claude-pet setup
 
 That's it. Open Claude Code — in a terminal or in VS Code — and the creature wakes up.
 
-▶ **[Watch the 30-second demo](docs/media/demo-wide.mp4)**
+▶ **[Watch the 35-second demo](docs/media/demo-wide.mp4)**
 
 ---
 
@@ -57,6 +57,23 @@ its hand.</td>
 <i>4 subagents running</i>, <i>Bash failed</i>, <i>Rate limited</i>.</td>
 </tr>
 </table>
+
+## A galaxy of sessions
+
+<img align="right" src="docs/media/galaxy.gif" width="230" alt="Five sessions orbiting the busiest one (sped up)">
+
+Prefer something more alive than a tidy grid? Right-click → **Layout** → **Gravity**: the
+session that needs you — waiting for an answer, or working hardest — sits still at the
+heart, the busy ones **orbit slowly around it**, the sleeping ones drift further out,
+smaller, behind. Now and then two creatures of the same orbit bump into each other.
+
+Whatever the layout, a working creature takes **a small stroll** now and then, and
+**Spacing** (*Tight / Normal / Roomy*) sets how close the sessions stand — tight makes them
+bigger.
+
+<sub>The animation is sped up 4×: in the app a turn takes a minute and a half.</sub>
+
+<br clear="right">
 
 ## It gets tired, too
 
@@ -132,7 +149,7 @@ full agent, and the pet asks before turning it on.
   *Use Terminal*, or see [the details](docs/DEVELOPMENT.md#the-vs-code-extension).
 - **Something looks off?** `~/.claude-pet/app/claude-pet doctor` checks every link of the
   chain and tells you how to fix what's broken.
-- **Settings:** right-click → **Settings…** — size, language (English, French), theme,
+- **Settings:** right-click → **Settings…** — size, layout and spacing, language (English, French), theme,
   temperament, sensors. [Every setting →](docs/CONFIG.md)
 - **Uninstall:** `~/.claude-pet/app/claude-pet uninstall` (your settings stay in
   `~/.claude-pet/`).

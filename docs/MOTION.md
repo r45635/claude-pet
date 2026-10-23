@@ -119,6 +119,37 @@ gate. An avatar without an `animations` section behaves exactly as before.
   a diffing rewrite of `renderCritters` (regression risk for a cosmetic gain), a format
   version bump (`animations` is additive under `format: 1`).
 
+## Several sessions: layout, strolls, gravity (v0.5)
+
+Where families stand is pure geometry in `apps/widget/web/layout.js` (tested in
+`packages/collector/test/layout.test.ts`), computed once per change and reached by a CSS
+transition — never per frame.
+
+- **Grid** (default): every column count is tried, the biggest families win. The **Spacing**
+  setting multiplies the distance between families (tight ×0.75, normal ×1, roomy ×1.2); the
+  window is fixed, so tighter means bigger creatures.
+- **Strolls** (`wander`, on): while its session works, a parent takes a small step now and
+  then around its anchor, each target pulled back toward it (a spring), at the session's pace.
+  Never at rest, never in `WAITING` (it must stay where you look for it), home as soon as it
+  stops. Mechanism: the `.wander` group around the parent slot, one transition per step and a
+  timer between steps — the kids' walk, applied to the parent.
+- **Gravity** (`layout: gravity`, opt-in): families are pulled to the centre and push each other away,
+  on three **depth planes** — front (the session waiting for you, else the busiest), middle
+  (working), back (asleep or done: ×0.7, faded, drawn behind). A family changes plane only
+  after holding the new state for 3 s, and glides there: its size never jumps.
+- **Galaxy** (gravity only): the middle and back planes turn slowly around the centre — a turn
+  in 90 s and 150 s, the farther the slower, so the planes slide past each other — while the
+  front plane, the session that needs you, stays still. Each plane is an `.orbit` group with a
+  CSS rotation; each family counter-turns around its own centre, so creatures stay upright. The
+  orbit radius is bounded so no family leaves the window at any angle; the phase comes from a
+  clock that only advances while things move, so a re-layout does not jump; the orbit holds
+  while the why bubble points at a turning family. Measured (MacBook Air, screen in use, four
+  sessions under a moderate load, A/B ×4): about +2 points of CPU against the grid; nothing at rest.
+- **Bump**: rarely (one stroll in ten, at most once per family every 20 s), a parent walks to a
+  neighbour **of the same plane**; when they touch, both squash (`bump`, a one-shot removed on
+  `animationend`) and the walker steps back. Measured on virtual time: about one bump a minute
+  with three or four working sessions, none across planes.
+
 ## Performance budget and measurement
 
 Targets (M-series Mac, share of one core): idle **< 1 %** with zero running animations;

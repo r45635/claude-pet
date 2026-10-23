@@ -154,6 +154,22 @@ fn size_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri:
         .build()
 }
 
+/// Layout ▸ grid or gravity, the spacing between sessions, and the parents' strolls.
+fn layout_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> tauri::Result<tauri::menu::Submenu<R>> {
+    let check = |key: &str, value: &str, label: String| {
+        CheckMenuItemBuilder::with_id(format!("pref:{key}:{value}"), label).checked(prefs[key] == value).build(app)
+    };
+    let mut sub = SubmenuBuilder::new(app, w.get("menu.layout"));
+    for value in ["grid", "gravity"] {
+        sub = sub.item(&check("layout", value, w.get(&format!("menu.layout.{value}")))?);
+    }
+    sub = sub.separator();
+    for value in ["tight", "normal", "roomy"] {
+        sub = sub.item(&check("spacing", value, w.get(&format!("menu.spacing.{value}")))?);
+    }
+    sub.separator().item(&toggle(app, w, prefs, "wander", "menu.wander")?).build()
+}
+
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
 #[allow(clippy::too_many_arguments)]
@@ -196,6 +212,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_o
         .item(&radio(app, &w, prefs, "temperament", "menu.temperament",
             &[("zen", "menu.temperament.zen"), ("normal", "menu.temperament.normal"), ("nervous", "menu.temperament.nervous")])?)
         .item(&size_menu(app, &w, prefs)?)
+        .item(&layout_menu(app, &w, prefs)?)
         .item(&radio(app, &w, prefs, "display", "menu.display",
             &[("desktop", "menu.display.desktop"), ("menubar", "menu.display.menubar"), ("both", "menu.display.both")])?)
         .item(&toggle(app, &w, prefs, "showSessions", "menu.sessionPastilles")?)
