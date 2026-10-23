@@ -838,9 +838,11 @@
   const orbitPhase = () => (orbitMs + (orbitSince !== null ? performance.now() - orbitSince : 0)) / 1000;
   /** How far a plane has turned, radians (0 for the still heart, or outside the gravity layout). */
   function orbitAngle(plane) {
-    const period = prefs.layout === 'gravity' ? ORBIT_PERIOD[plane] : 0;
+    const period = prefs.layout === 'gravity' && ORBIT_PERIOD[plane] ? orbitPeriod(plane) : 0;
     return period ? (2 * Math.PI * (orbitPhase() % period)) / period : 0;
   }
+  /** Seconds per turn; the harness may speed it up for a short demo (&orbitSpeed=4). */
+  const orbitPeriod = (plane) => ORBIT_PERIOD[plane] / Math.max(0.1, Number(params.get('orbitSpeed') ?? 1));
   const rotateAround = (p, c, a) => ({ x: c.x + (p.x - c.x) * Math.cos(a) - (p.y - c.y) * Math.sin(a),
                                        y: c.y + (p.x - c.x) * Math.sin(a) + (p.y - c.y) * Math.cos(a) });
 
@@ -1004,7 +1006,7 @@
           if (!placed.some((p) => p.plane === plane)) continue;
           const group = document.createElementNS(SVG_NS, 'g');
           group.setAttribute('class', 'orbit');
-          const period = ORBIT_PERIOD[plane];
+          const period = orbitPeriod(plane);
           Object.assign(group.style, { transformOrigin: `80px ${H / 2}px`, animationDuration: `${period}s`,
                                        animationDelay: `${(-(orbitPhase() % period)).toFixed(2)}s` });
           crittersLayer.appendChild(group);
@@ -1759,7 +1761,7 @@
   //   index.html#demo=avatar&avatar=ghost&state=THINKING[&kids=2][&signal=none][&ctx=92]
   //     [&sessions=CODING,WAITING,READING] one family per state (kids go to the first one)
   //     [&gauge=63] the usage gauge, % of the 5-hour window   [&bg=%23101418] the backdrop   [&size=220] px
-  //     [&spacing=tight|normal|roomy] [&layout=grid|gravity] [&wander=off]
+  //     [&spacing=tight|normal|roomy] [&layout=grid|gravity] [&wander=off] [&orbitSpeed=4] (demo only)
   // It reads the avatar folder like the widget's importer would, minus the validation — from the
   // library's clone next to this one (r45635/claude-pet-avatars → ../claude-pet-avatars).
   if (params.get('demo') === 'avatar') {

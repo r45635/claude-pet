@@ -28,6 +28,8 @@ const SCENES: Scene[] = [
   { name: 'hero', hash: 'state=CODING&kids=3&gauge=42&size=230', w: 300, h: 260, seconds: 4 },
   { name: 'sessions', hash: 'sessions=CODING,WAITING,THINKING,READING&kids=2&state=TOOL_CALL&gauge=63&size=250', w: 300, h: 290, seconds: 4 },
   { name: 'storm', hash: 'state=HIGH_LOAD&kids=4&size=230', w: 300, h: 260, seconds: 3 },
+  // The galaxy (gravity layout), turning 4× faster than in the app so a few seconds show it.
+  { name: 'galaxy', hash: 'layout=gravity&orbitSpeed=4&state=CODING&sessions=CODING,THINKING,IDLE,DONE,READING&size=250', w: 300, h: 290, seconds: 5 },
   { name: 'tired', hash: 'state=CODING&ctx=93&size=170', w: 200, h: 200, seconds: 3 },
   ...['IDLE', 'THINKING', 'READING', 'CODING', 'TOOL_CALL', 'WAITING', 'DONE', 'ERROR'].map((st) =>
     ({ name: `state-${st.toLowerCase()}`, hash: `state=${st}&size=150`, w: 170, h: 170, still: true })),
