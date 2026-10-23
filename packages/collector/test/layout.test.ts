@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-ignore — a plain browser module, like behavior.js.
-import { ORBIT_PERIOD, SPACING, bumpCheck, gravityLayout, gridLayout, planes, wantedPlane } from '../../../apps/widget/web/layout.js';
+import { ORBIT_PERIOD, ORBIT_TILT, SPACING, bumpCheck, gravityLayout, gridLayout, onScreen, planes, wantedPlane } from '../../../apps/widget/web/layout.js';
 
-type Placed = { id: string; plane: string; f: number; cx: number; cy: number; r: number; x: number; y: number };
+type Placed = { id: string; plane: string; f: number; cx: number; cy: number; sx: number; sy: number; r: number; x: number; y: number;
+                hw: number; hh: number; m: number; turns: boolean; oy: number };
 
 // The page's templates (index.html): cells with a walking area, and close-packed ones.
 const CELL = { w: 180, h: 96, parent: { x: 55, y: 6, size: 70 }, step: { x: 144, y: 74 } };
@@ -56,15 +57,16 @@ test('gravity: inside the box, the front family closest to the centre, same plan
     for (const H of [160, 146]) {
       const out: Placed[] = gravityLayout(fams, G, H, 1);
       for (const a of out) {
-        assert.ok(a.x >= -1e-6 && a.y >= -1e-6, `${a.id} origin inside`);
-        assert.ok(a.x + G.w * a.f <= 160 + 1e-6 && a.y + G.h * a.f <= H + 1e-6, `${a.id} end inside`);
+        assert.ok(a.sx - a.hw >= -1e-6 && a.sy - a.hh >= -1e-6, `${a.id} origin inside`);
+        assert.ok(a.sx + a.hw <= 160 + 1e-6 && a.sy + a.hh <= H + 1e-6, `${a.id} end inside`);
       }
-      const dist = (a: Placed) => Math.hypot(a.cx - 80, a.cy - H / 2);
+      const oy = out[0]!.oy;
+      const dist = (a: Placed) => Math.hypot(a.sx - 80, a.sy - oy);
       const front = out.find((a) => a.plane === 'front')!;
       assert.ok(out.every((a) => dist(front) <= dist(a) + 1e-6), 'front is the most central');
       for (const a of out) for (const b of out) {
         if (a.id < b.id && a.plane === b.plane) {
-          assert.ok(Math.hypot(a.cx - b.cx, a.cy - b.cy) >= (a.r + b.r) * 0.6, `${a.id}/${b.id} apart`);
+          assert.ok(Math.hypot(a.sx - b.sx, a.sy - b.sy) >= (a.r + b.r) * 0.6, `${a.id}/${b.id} apart`);
         }
       }
       const scale = Object.fromEntries(out.map((a) => [a.id, a.f]));
@@ -90,19 +92,36 @@ test('bump: same plane, close, and not twice within the gap', () => {
   assert.equal(bumpCheck(a, b, 25_000, last), true);
 });
 
-test('orbit: every family stays inside the box at every angle of its turn; the heart stays still', () => {
+test('orbit: inside the box at every angle, with room to stroll; the cluster rests on the floor', () => {
   assert.equal(ORBIT_PERIOD.front, 0, 'what needs you does not move');
   assert.ok(ORBIT_PERIOD.back > ORBIT_PERIOD.middle, 'the farther, the slower');
+  assert.ok(ORBIT_TILT > 0 && ORBIT_TILT < 1, 'a tilted galaxy');
   for (const G of [CELL, COMPACT]) {
     for (const H of [160, 146]) {
-      const out: Placed[] = gravityLayout(fams, G, H, 1, { orbit: true });
-      for (const a of out) {
-        if (a.plane === 'front') continue;
-        const d = Math.hypot(a.cx - 80, a.cy - H / 2);
-        const hw = (G.w * a.f) / 2;
-        const hh = (G.h * a.f) / 2;
-        assert.ok(d + hw <= 80 + 1e-6 && d + hh <= H / 2 + 1e-6, `${a.id} leaves the box while turning (d ${d.toFixed(1)})`);
+      for (const set of [fams, fams.slice(0, 2), [{ id: 'a', plane: 'front' }, { id: 'b', plane: 'back' }]]) {
+        const out: Placed[] = gravityLayout(set, G, H, 1, { orbit: true });
+        let lowest = -Infinity;
+        for (const a of out) {
+          for (let k = 0; k < 72; k++) {
+            const p = onScreen(a, (k / 72) * 2 * Math.PI);
+            const e = a.hw + a.m;
+            const v = a.hh + a.m;
+            assert.ok(p.x - e >= -1e-6 && p.x + e <= 160 + 1e-6, `${a.id} out sideways at ${k * 5}°`);
+            assert.ok(p.y - v >= -1e-6 && p.y + v <= H + 1e-6, `${a.id} out vertically at ${k * 5}°`);
+            lowest = Math.max(lowest, p.y + v);
+            if (!a.turns) break;
+          }
+        }
+        assert.ok(Math.abs(lowest - H) < 0.5, `rests on the floor (lowest ${lowest.toFixed(2)} vs ${H})`);
+        const p0 = onScreen(out[0]!, 0);
+        assert.ok(Math.abs(p0.x - out[0]!.sx) < 1e-6 && Math.abs(p0.y - out[0]!.sy) < 1e-6, 'θ = 0 is where it was laid out');
       }
     }
   }
+});
+
+test('grid: bottom alignment rests the rows on the floor', () => {
+  const g = gridLayout(2, COMPACT, 146, 1, { align: 'bottom' });
+  const bottom = Math.max(...g.cells.map((c: { y: number }) => c.y)) + COMPACT.h * g.f;
+  assert.ok(Math.abs(bottom - 146) < 1e-6);
 });

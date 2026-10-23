@@ -139,9 +139,14 @@ transition — never per frame.
   after holding the new state for 3 s, and glides there: its size never jumps.
 - **Galaxy** (gravity only): the middle and back planes turn slowly around the centre — a turn
   in 90 s and 150 s, the farther the slower, so the planes slide past each other — while the
-  front plane, the session that needs you, stays still. Each plane is an `.orbit` group with a
-  CSS rotation; each family counter-turns around its own centre, so creatures stay upright. The
-  orbit radius is bounded so no family leaves the window at any angle; the phase comes from a
+  front plane, the session that needs you, stays still. The galaxy is **seen at an angle**:
+  orbits are ellipses (`ORBIT_TILT` 0.55), which reads as depth and leaves room above and
+  below. Each plane is an `.orbit` group drawn `scale(1, tilt)·rotate(θ)`; each family
+  counter-turns `rotate(−θ)·scale(1, 1/tilt)` around its own centre, so creatures stay upright
+  and unflattened. The orbit radius is bounded so no family leaves the window at any angle, with
+  a margin for strolls, and every stroll or bump step is clamped to the window (v0.5.2: a
+  back-plane creature could be cut at the top); the whole layout, grid included, **rests on the
+  floor** so the usage gauge sits under the feet; the phase comes from a
   clock that only advances while things move, so a re-layout does not jump; the orbit holds
   while the why bubble points at a turning family. Measured (MacBook Air, screen in use, four
   sessions under a moderate load, A/B ×4): about +2 points of CPU against the grid; nothing at rest.

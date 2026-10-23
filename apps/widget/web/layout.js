@@ -26,11 +26,22 @@ export const PLANES = ['back', 'middle', 'front'];
  * slide past each other like a galaxy's arms.
  */
 export const ORBIT_PERIOD = { front: 0, middle: 90, back: 150 };
+/**
+ * The galaxy is seen at an angle: orbits are ellipses this much flatter than wide. It leaves
+ * room above and below (a round orbit needed the whole window height), and reads as depth.
+ */
+export const ORBIT_TILT = 0.55;
+/** Room kept around each parent, as a share of its size, for its strolls and bumps. */
+export const MOVE_MARGIN = 0.12;
 
 export const span = (n, size, step) => size + step * (n - 1);
 
-/** The grid: column count where families are biggest, and each family's cell origin. */
-export function gridLayout(n, G, H, spacing = 1) {
+/**
+ * The grid: column count where families are biggest, and each family's cell origin. With
+ * `align: 'bottom'` the rows rest on the floor (the usage gauge sits right under the feet),
+ * the free space going above.
+ */
+export function gridLayout(n, G, H, spacing = 1, { align = 'centre' } = {}) {
   const step = { x: G.step.x * spacing, y: G.step.y * spacing };
   let best = { f: 0, cols: 1, rows: 1 };
   for (let cols = 1; cols <= n; cols += 1) {
@@ -40,7 +51,8 @@ export function gridLayout(n, G, H, spacing = 1) {
   }
   const { f, cols, rows } = best;
   const x0 = (160 - f * span(cols, G.w, step.x)) / 2;
-  const y0 = (H - f * span(rows, G.h, step.y)) / 2;
+  const free = H - f * span(rows, G.h, step.y);
+  const y0 = align === 'bottom' ? free : free / 2;
   const cells = Array.from({ length: n }, (_, i) =>
     ({ x: x0 + (i % cols) * step.x * f, y: y0 + Math.floor(i / cols) * step.y * f }));
   return { f, cols, rows, cells };
@@ -87,12 +99,22 @@ function angleOf(id) {
 
 /**
  * Gravity: families pulled to the centre (front ones hardest), pushed apart by neighbours of
- * the same plane, kept apart more gently across planes (the back may pass behind). Returns,
- * per family, its cell origin and scale for the template `G`, plus its centre and radius.
+ * the same plane, kept apart more gently across planes (the back may pass behind). Computed in
+ * screen space; then the whole cluster rests on the floor (bottom of `H`).
+ *
+ * With `orbit`, the middle and back planes turn on tilted ellipses around the centre. Their
+ * radius is bounded so that, at every angle, the family stays inside the box with room left
+ * for its strolls (MOVE_MARGIN). The page draws a turning family inside a group transformed by
+ * `scale(1, ORBIT_TILT) rotate(θ)` around (80, oy): its returned centre (cx, cy) and origin
+ * (x, y) are in that group's frame — the unflattened orbit — while (sx, sy) is where it shows
+ * at θ = 0. A still family has both the same.
  */
 export function gravityLayout(fams, G, H, spacing = 1, { orbit = false } = {}) {
   const n = fams.length;
-  const base = gridLayout(n, G, H, spacing).f * (n > 1 ? 1.08 : 1);
+  // A little bigger than the grid (gravity packs tighter), but never so big that a family —
+  // with its walking area and its margin — could not fit the box on its own.
+  const fit = Math.min(80 / (G.w / 2 + MOVE_MARGIN * G.parent.size), (H / 2) / (G.h / 2 + MOVE_MARGIN * G.parent.size));
+  const base = Math.min(fit, gridLayout(n, G, H, spacing).f * (n > 1 ? 1.08 : 1));
   const cx = 80;
   const cy = H / 2;
   const pull = { front: 0.05, middle: 0.025, back: 0.012 };
@@ -102,6 +124,7 @@ export function gravityLayout(fams, G, H, spacing = 1, { orbit = false } = {}) {
     const a = angleOf(fam.id);
     const d = fam.plane === 'front' ? 4 : 20 + 6 * i;
     return { id: fam.id, plane: fam.plane, f, r, hw: (G.w * f) / 2, hh: (G.h * f) / 2,
+             m: MOVE_MARGIN * G.parent.size * f, turns: orbit && ORBIT_PERIOD[fam.plane] > 0,
              x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d };
   });
   for (let it = 0; it < 400; it++) {
@@ -130,22 +153,45 @@ export function gravityLayout(fams, G, H, spacing = 1, { orbit = false } = {}) {
       }
     }
     for (const a of nodes) {
-      a.x = Math.min(160 - a.hw, Math.max(a.hw, a.x));
-      a.y = Math.min(H - a.hh, Math.max(a.hh, a.y));
-      // Orbiting: every angle of the turn must stay inside the box, so the distance to the
-      // centre is held under what the family's own size leaves.
-      if (orbit && ORBIT_PERIOD[a.plane] > 0) {
-        const max = Math.max(0, Math.min(80 - a.hw, H / 2 - a.hh));
-        const d = Math.hypot(a.x - cx, a.y - cy);
-        if (d > max) {
-          a.x = cx + ((a.x - cx) * max) / d;
-          a.y = cy + ((a.y - cy) * max) / d;
+      a.x = Math.min(160 - a.hw - a.m, Math.max(a.hw + a.m, a.x));
+      a.y = Math.min(H - a.hh - a.m, Math.max(a.hh + a.m, a.y));
+      // Turning: the orbit's radius (in its unflattened frame) must leave the family inside
+      // the box at every angle — horizontally ρ, vertically ρ × tilt — with its margin.
+      if (a.turns) {
+        const max = Math.max(0, Math.min(80 - a.hw - a.m, (H / 2 - a.hh - a.m) / ORBIT_TILT));
+        const rho = Math.hypot(a.x - cx, (a.y - cy) / ORBIT_TILT);
+        if (rho > max) {
+          a.x = cx + ((a.x - cx) * max) / rho;
+          a.y = cy + ((a.y - cy) * max) / rho;
         }
       }
     }
   }
-  return nodes.map((a) => ({ id: a.id, plane: a.plane, f: a.f, cx: a.x, cy: a.y, r: a.r,
-                             x: a.x - a.hw, y: a.y - a.hh }));
+  // Rest on the floor: the lowest point any family can reach — a turning one at the bottom of
+  // its ellipse — goes to the bottom of the box, the free space above.
+  const lowest = Math.max(...nodes.map((a) => (a.turns
+    ? cy + Math.hypot(a.x - cx, (a.y - cy) / ORBIT_TILT) * ORBIT_TILT
+    : a.y) + a.hh + a.m));
+  const shift = Math.max(0, H - lowest);
+  const oy = cy + shift;
+  return nodes.map((a) => {
+    const sx = a.x;
+    const sy = a.y + shift;
+    // In the turning group's frame the vertical offset from the centre is unflattened.
+    const lx = sx;
+    const ly = a.turns ? oy + (sy - oy) / ORBIT_TILT : sy;
+    return { id: a.id, plane: a.plane, f: a.f, r: a.r, hw: a.hw, hh: a.hh, m: a.m, turns: a.turns, oy,
+             sx, sy, cx: lx, cy: ly, x: lx - a.hw, y: ly - a.hh };
+  });
+}
+
+/** Where a family's centre shows when its plane has turned by `angle` (radians). */
+export function onScreen(node, angle) {
+  if (!node.turns) return { x: node.cx, y: node.cy };
+  const dx = node.cx - 80;
+  const dy = node.cy - node.oy;
+  return { x: 80 + dx * Math.cos(angle) - dy * Math.sin(angle),
+           y: node.oy + (dx * Math.sin(angle) + dy * Math.cos(angle)) * ORBIT_TILT };
 }
 
 /**
