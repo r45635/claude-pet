@@ -20,6 +20,12 @@ export const SPACING = { tight: 0.75, normal: 1, roomy: 1.2 };
 /** Depth plane → scale of the family. */
 export const PLANE_SCALE = { front: 1, middle: 0.85, back: 0.7 };
 export const PLANES = ['back', 'middle', 'front'];
+/**
+ * Seconds per turn around the centre, per plane: the heart (front) stays still — what needs
+ * you is always where you look — and the farther a plane, the slower it turns, so the planes
+ * slide past each other like a galaxy's arms.
+ */
+export const ORBIT_PERIOD = { front: 0, middle: 90, back: 150 };
 
 export const span = (n, size, step) => size + step * (n - 1);
 
@@ -84,7 +90,7 @@ function angleOf(id) {
  * the same plane, kept apart more gently across planes (the back may pass behind). Returns,
  * per family, its cell origin and scale for the template `G`, plus its centre and radius.
  */
-export function gravityLayout(fams, G, H, spacing = 1) {
+export function gravityLayout(fams, G, H, spacing = 1, { orbit = false } = {}) {
   const n = fams.length;
   const base = gridLayout(n, G, H, spacing).f * (n > 1 ? 1.08 : 1);
   const cx = 80;
@@ -126,6 +132,16 @@ export function gravityLayout(fams, G, H, spacing = 1) {
     for (const a of nodes) {
       a.x = Math.min(160 - a.hw, Math.max(a.hw, a.x));
       a.y = Math.min(H - a.hh, Math.max(a.hh, a.y));
+      // Orbiting: every angle of the turn must stay inside the box, so the distance to the
+      // centre is held under what the family's own size leaves.
+      if (orbit && ORBIT_PERIOD[a.plane] > 0) {
+        const max = Math.max(0, Math.min(80 - a.hw, H / 2 - a.hh));
+        const d = Math.hypot(a.x - cx, a.y - cy);
+        if (d > max) {
+          a.x = cx + ((a.x - cx) * max) / d;
+          a.y = cy + ((a.y - cy) * max) / d;
+        }
+      }
     }
   }
   return nodes.map((a) => ({ id: a.id, plane: a.plane, f: a.f, cx: a.x, cy: a.y, r: a.r,

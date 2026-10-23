@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-ignore — a plain browser module, like behavior.js.
-import { SPACING, bumpCheck, gravityLayout, gridLayout, planes, wantedPlane } from '../../../apps/widget/web/layout.js';
+import { ORBIT_PERIOD, SPACING, bumpCheck, gravityLayout, gridLayout, planes, wantedPlane } from '../../../apps/widget/web/layout.js';
 
 type Placed = { id: string; plane: string; f: number; cx: number; cy: number; r: number; x: number; y: number };
 
@@ -88,4 +88,21 @@ test('bump: same plane, close, and not twice within the gap', () => {
   last.set('a', 0);
   assert.equal(bumpCheck(a, b, 10_000, last), false, 'a bumped 10 s ago');
   assert.equal(bumpCheck(a, b, 25_000, last), true);
+});
+
+test('orbit: every family stays inside the box at every angle of its turn; the heart stays still', () => {
+  assert.equal(ORBIT_PERIOD.front, 0, 'what needs you does not move');
+  assert.ok(ORBIT_PERIOD.back > ORBIT_PERIOD.middle, 'the farther, the slower');
+  for (const G of [CELL, COMPACT]) {
+    for (const H of [160, 146]) {
+      const out: Placed[] = gravityLayout(fams, G, H, 1, { orbit: true });
+      for (const a of out) {
+        if (a.plane === 'front') continue;
+        const d = Math.hypot(a.cx - 80, a.cy - H / 2);
+        const hw = (G.w * a.f) / 2;
+        const hh = (G.h * a.f) / 2;
+        assert.ok(d + hw <= 80 + 1e-6 && d + hh <= H / 2 + 1e-6, `${a.id} leaves the box while turning (d ${d.toFixed(1)})`);
+      }
+    }
+  }
 });

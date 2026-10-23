@@ -205,6 +205,16 @@
      bump — one squash each, removed on animationend (seekBump in the script). */
   .family[data-plane="back"] { opacity: .8; transition: opacity .5s ease; }
   .critter.bump { animation: bump .36s ease-out 1; }
+  /* The galaxy: the middle and back planes turn slowly around the centre (an .orbit group per
+     plane), each family counter-turning around its own centre so its creatures stay upright.
+     Paused at rest with everything else, and while the why bubble points at a turning family. */
+  .orbit, .family.orbiting { transform-box: view-box; animation-timing-function: linear;
+                             animation-iteration-count: infinite; }
+  .orbit { animation-name: orbit; }
+  .family.orbiting { animation-name: orbit-counter; }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+  @keyframes orbit-counter { to { transform: rotate(-360deg); } }
+  #pet[data-orbit-hold="true"] .orbit, #pet[data-orbit-hold="true"] .family.orbiting { animation-play-state: paused; }
   @keyframes bump { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.14, .84); }
                     65% { transform: scale(.94, 1.07); } }
   .family[data-still="true"] * { animation-play-state: paused !important; }
@@ -509,7 +519,7 @@
   import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
-  import { PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, planes } from './layout.js';
+  import { ORBIT_PERIOD, PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, planes } from './layout.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -814,6 +824,26 @@
   // Two parents of the same plane meet: both squash, the walker steps back, the other is nudged.
   // Exceptional by design — gravity keeps same-plane families apart, so it only happens when a
   // stroll heads for a neighbour on purpose, and at most once per family every 20 s.
+  // The galaxy's clock: seconds of turning so far. It only advances while things move (the CSS
+  // orbits are paused otherwise), so a re-layout restarts each orbit exactly where it stood.
+  let orbitMs = 0;
+  let orbitSince = null;
+  let orbitHeld = false;
+  let orbitCentre = { x: 80, y: 80 };
+  function orbitClock(moving) {
+    const now = performance.now();
+    if (orbitSince !== null) { orbitMs += now - orbitSince; orbitSince = null; }
+    if (moving) orbitSince = now;
+  }
+  const orbitPhase = () => (orbitMs + (orbitSince !== null ? performance.now() - orbitSince : 0)) / 1000;
+  /** How far a plane has turned, radians (0 for the still heart, or outside the gravity layout). */
+  function orbitAngle(plane) {
+    const period = prefs.layout === 'gravity' ? ORBIT_PERIOD[plane] : 0;
+    return period ? (2 * Math.PI * (orbitPhase() % period)) / period : 0;
+  }
+  const rotateAround = (p, c, a) => ({ x: c.x + (p.x - c.x) * Math.cos(a) - (p.y - c.y) * Math.sin(a),
+                                       y: c.y + (p.x - c.x) * Math.sin(a) + (p.y - c.y) * Math.cos(a) });
+
   const lastBump = new Map(); // family id → ms
   let centres = new Map();    // family id → { id, plane, cx, cy, r } (r: the parent's body)
   function seekBump(id, d) {
@@ -832,8 +862,12 @@
       if (!target || dist < target.dist) target = { other, dist, contact };
     }
     if (!target || target.dist <= target.contact) return false;
-    const ux = (target.other.cx - mine.cx) / target.dist;
-    const uy = (target.other.cy - mine.cy) / target.dist;
+    // Same plane, so both have turned by the same angle: the way to the other, on screen.
+    const turn = orbitAngle(me.plane);
+    const bx = (target.other.cx - mine.cx) / target.dist;
+    const by = (target.other.cy - mine.cy) / target.dist;
+    const ux = bx * Math.cos(turn) - by * Math.sin(turn);
+    const uy = bx * Math.sin(turn) + by * Math.cos(turn);
     const travel = target.dist - target.contact;
     const seconds = Math.max(0.6, travel / (7 * familyPace(id)));
     lastBump.set(id, now);
@@ -916,6 +950,7 @@
     const asleep = prefs.paused;
     animatingNow = !asleep && !motionReduced && (s.sources?.hooks || s.sources?.statusline) && s.visual !== 'IDLE';
     if (!animatingNow) for (const slot of parentSlots.values()) slot.classList.remove('regrid');
+    orbitClock(animatingNow && !orbitHeld);
     const groups = multi
       ? sessions.map((x) => ({ id: x.id, state: asleep ? 'IDLE' : x.state, load: loadStep(x.load ?? 0),
                                ctx: x.context_load ?? null, agents: urgentFirst(x.agents ?? []) }))
@@ -955,13 +990,26 @@
         const gravity = prefs.layout === 'gravity' && groups.length > 1;
         let placed;
         if (gravity) {
-          placed = gravityLayout(groups.map((g) => ({ id: g.id, plane: planeMap.get(g.id)?.plane ?? 'middle' })), G, H, spacing);
+          placed = gravityLayout(groups.map((g) => ({ id: g.id, plane: planeMap.get(g.id)?.plane ?? 'middle' })), G, H, spacing, { orbit: true });
         } else {
           const { f, cells: grid } = gridLayout(groups.length, G, H, spacing);
           placed = grid.map((c, i) => ({ id: groups[i].id, x: c.x, y: c.y, f, plane: null }));
         }
         const at = new Map(placed.map((p) => [p.id, p]));
         centres = new Map();
+        // The galaxy: one turning group per orbiting plane, the back one drawn first.
+        orbitCentre = { x: 80, y: H / 2 };
+        const orbits = new Map();
+        for (const plane of gravity ? ['back', 'middle'] : []) {
+          if (!placed.some((p) => p.plane === plane)) continue;
+          const group = document.createElementNS(SVG_NS, 'g');
+          group.setAttribute('class', 'orbit');
+          const period = ORBIT_PERIOD[plane];
+          Object.assign(group.style, { transformOrigin: `80px ${H / 2}px`, animationDuration: `${period}s`,
+                                       animationDelay: `${(-(orbitPhase() % period)).toFixed(2)}s` });
+          crittersLayer.appendChild(group);
+          orbits.set(plane, group);
+        }
         // The back plane first, so nearer families are drawn over farther ones.
         const order = gravity
           ? [...groups].sort((a, b) => PLANES.indexOf(at.get(a.id).plane) - PLANES.indexOf(at.get(b.id).plane))
@@ -989,7 +1037,13 @@
           // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
           familyAnchors.set(g.id, { x: cell.x + (P.x + P.size * (geo.why[0] + 6) / 160) * f,
                                     y: cell.y + (P.y + 6 + (geo.why[1] - 26) * P.size / 160) * f });
-          crittersLayer.appendChild(family);
+          const orbit = orbits.get(p.plane);
+          if (orbit) {
+            family.classList.add('orbiting');
+            Object.assign(family.style, { transformOrigin: `${p.cx.toFixed(2)}px ${p.cy.toFixed(2)}px`,
+                                          animationDuration: orbit.style.animationDuration, animationDelay: orbit.style.animationDelay });
+          }
+          (orbit ?? crittersLayer).appendChild(family);
           keepCritters.add(parentKey(g));
 
           g.agents.slice(0, MAX_KIDS).forEach((a, k) => {
@@ -1135,7 +1189,9 @@
     rect.setAttribute('x', String(80 - w / 2));
     // The bubble floats just above the head it is about (a lower row's family gets it over
     // the row above), its tail's two dots leading down to that head.
-    const anchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
+    const placedAnchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
+    // A turning family's anchor has turned with it (its orbit is held while the bubble shows).
+    const anchor = rotateAround(placedAnchor, orbitCentre, orbitAngle(planeMap.get(family)?.plane));
     const dy = Math.min(Math.max(0, anchor.y - 26), 120);
     whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
     const [near, far] = whyBubble.querySelectorAll('circle');
@@ -1872,9 +1928,13 @@
     // Its own Claude answering is observable from right here (the run is ours), so it
     // shows as thinking even though that session bypasses the hooks.
     pet.dataset.visual = prefs.paused ? 'IDLE' : chatBusy && s.visual === 'IDLE' ? 'ACTIVE' : s.visual;
+    // The why bubble points at one family: if that family is turning, its orbit holds still.
+    const why = prefs.paused ? { text: '', family: '' } : whyMessage(s);
+    orbitHeld = Boolean(why.text) && ORBIT_PERIOD[planeMap.get(why.family)?.plane] > 0;
+    pet.dataset.orbitHold = String(orbitHeld);
     renderCritters(s, prefs.paused ? 'IDLE' : chatBusy && s.visual !== 'HIGH_LOAD' ? 'THINKING' : s.state);
     renderSessions(s.sessions ?? [], s.focus);
-    renderWhy(prefs.paused ? { text: '', family: '' } : whyMessage(s));
+    renderWhy(why);
     // "no signal" is a distinct look from "idle": see docs/RISKS.md #5.
     pet.dataset.signal = s.sources.hooks || s.sources.statusline ? 'live' : 'none';
 
