@@ -38,9 +38,12 @@ impl Daemon {
         let mut stream = TcpStream::connect(&self.addr).map_err(|e| format!("daemon unreachable: {e}"))?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(timeout_s)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+        // HTTP/1.0: the reply comes as a plain body until the connection closes. Over HTTP/1.1
+        // Node answers in chunked encoding, which this client used to read as broken JSON — the
+        // library menu said "unavailable" and Sessions ▸ never appeared (v0.5.3).
         let request = format!(
-            "{method} {path}?token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\n\
-             X-Claude-Pet-Native: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "{method} {path}?token={} HTTP/1.0\r\nHost: {}\r\nContent-Type: text/plain\r\n\
+             X-Claude-Pet-Native: 1\r\nContent-Length: {}\r\n\r\n{body}",
             self.token,
             self.addr,
             body.len()
@@ -50,10 +53,67 @@ impl Daemon {
         stream.read_to_string(&mut response).map_err(|e| e.to_string())?;
         let (head, payload) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
         let status = head.split_whitespace().nth(1).unwrap_or("0");
+        let payload = body_of(head, payload);
         if status.starts_with('2') {
-            Ok(payload.to_owned())
+            Ok(payload)
         } else {
             Err(format!("daemon answered {status}: {payload}"))
+        }
+    }
+}
+
+/// The body, de-chunked if the server used chunked transfer encoding anyway.
+fn body_of(head: &str, payload: &str) -> String {
+    let chunked = head.lines().any(|l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("transfer-encoding:") && l.contains("chunked")
+    });
+    if !chunked {
+        return payload.to_owned();
+    }
+    let mut out = String::new();
+    let mut rest = payload;
+    while let Some((size_line, after)) = rest.split_once("\r\n") {
+        let size = usize::from_str_radix(size_line.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+        if size == 0 || after.len() < size {
+            break;
+        }
+        out.push_str(&after[..size]);
+        rest = after[size..].strip_prefix("\r\n").unwrap_or(&after[size..]);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_body_is_kept_as_is() {
+        assert_eq!(body_of("HTTP/1.1 200 OK\r\nContent-Length: 2", "{}"), "{}");
+    }
+
+    #[test]
+    fn a_chunked_body_is_decoded() {
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nTransfer-Encoding: chunked";
+        let payload = "5\r\n{\"a\":\r\n3\r\n12}\r\n0\r\n\r\n";
+        assert_eq!(body_of(head, payload), "{\"a\":12}");
+        let json: serde_json::Value = serde_json::from_str(&body_of(head, payload)).unwrap();
+        assert_eq!(json["a"], 12);
+    }
+
+    /// Against the daemon running on this Mac (`cargo test -- --ignored`): every route the
+    /// menu reads must come back as JSON.
+    #[test]
+    #[ignore]
+    fn the_live_daemon_answers_json() {
+        let root = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".claude-pet");
+        let token = std::fs::read_to_string(root.join("token")).unwrap().trim().to_owned();
+        let d = Daemon::new("http://127.0.0.1:8787", token);
+        for path in ["/avatars/catalog", "/sessions", "/config"] {
+            let body = d.get(path).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_else(|e| panic!("{path}: {e}: {body:.80}"));
+            eprintln!("{path}: {}", &json.to_string()[..json.to_string().len().min(70)]);
         }
     }
 }
