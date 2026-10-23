@@ -212,8 +212,8 @@
                              animation-iteration-count: infinite; }
   .orbit { animation-name: orbit; }
   .family.orbiting { animation-name: orbit-counter; }
-  @keyframes orbit { to { transform: rotate(360deg); } }
-  @keyframes orbit-counter { to { transform: rotate(-360deg); } }
+  /* The keyframes themselves (a tilted orbit, and the counter-turn that undoes the tilt) are
+     written by the script from layout.js's ORBIT_TILT. */
   #pet[data-orbit-hold="true"] .orbit, #pet[data-orbit-hold="true"] .family.orbiting { animation-play-state: paused; }
   @keyframes bump { 0%, 100% { transform: scale(1, 1); } 30% { transform: scale(1.14, .84); }
                     65% { transform: scale(.94, 1.07); } }
@@ -519,7 +519,7 @@
   import { buildImageProto, buildSvgProto, scopeCss, keyframeNames, resolveStates, DEFAULT_GEO, DEFAULT_HITBOX } from './avatar.js';
   import { DEFAULT_BEHAVIOR, PROFILES, compileBehavior, mergeBehavior, behaviorFromManifest, enterStates, enterNames } from './behavior.js';
   import { t, fmt, setLocale, currentLocale, translateDom } from './i18n.js';
-  import { ORBIT_PERIOD, PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, planes } from './layout.js';
+  import { ORBIT_PERIOD, ORBIT_TILT, PLANES, SPACING, bumpCheck, gravityLayout, gridLayout, onScreen, planes } from './layout.js';
   const pet = document.getElementById('pet');
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
@@ -813,8 +813,7 @@
     const a = Math.random() * 2 * Math.PI;
     const k = Math.sqrt(Math.random());
     // Mostly sideways, a little up and down: it walks on the floor, it does not fly.
-    const tx = d.dx * 0.35 + Math.cos(a) * k * d.r * 0.65;
-    const ty = d.dy * 0.35 + Math.sin(a) * k * d.r * 0.25;
+    const [tx, ty] = clampOffset(id, d.dx * 0.35 + Math.cos(a) * k * d.r * 0.65, d.dy * 0.35 + Math.sin(a) * k * d.r * 0.25);
     const pace = familyPace(id);
     const seconds = Math.max(0.8, Math.hypot(tx - d.dx, ty - d.dy) / (5 * pace));
     driftTo(d, tx, ty, seconds);
@@ -843,16 +842,42 @@
   }
   /** Seconds per turn; the harness may speed it up for a short demo (&orbitSpeed=4). */
   const orbitPeriod = (plane) => ORBIT_PERIOD[plane] / Math.max(0.1, Number(params.get('orbitSpeed') ?? 1));
-  const rotateAround = (p, c, a) => ({ x: c.x + (p.x - c.x) * Math.cos(a) - (p.y - c.y) * Math.sin(a),
-                                       y: c.y + (p.x - c.x) * Math.sin(a) + (p.y - c.y) * Math.cos(a) });
+  // A tilted orbit, and the counter-turn that keeps each family upright and unflattened:
+  // the group draws scale(1, tilt)·rotate(θ), the family rotate(−θ)·scale(1, 1/tilt).
+  const orbitStyle = document.createElement('style');
+  orbitStyle.textContent =
+    `@keyframes orbit { from { transform: scale(1, ${ORBIT_TILT}) rotate(0deg); } to { transform: scale(1, ${ORBIT_TILT}) rotate(360deg); } }\n` +
+    `@keyframes orbit-counter { from { transform: rotate(0deg) scale(1, ${1 / ORBIT_TILT}); } to { transform: rotate(-360deg) scale(1, ${1 / ORBIT_TILT}); } }`;
+  document.head.appendChild(orbitStyle);
+  /** Where a family's parent stands on screen now (its orbit turned, its stroll applied). */
+  function screenOf(c) {
+    const p = onScreen(c, c.turns ? orbitAngle(c.plane) : 0);
+    const d = drifts.get(c.id);
+    return { x: p.x + (d?.dx ?? 0), y: p.y + (d?.dy ?? 0) };
+  }
+  /**
+   * A stroll or bump offset that keeps the parent inside the window wherever its orbit has
+   * taken it: the layout leaves a margin, this makes leaving impossible rather than unlikely.
+   */
+  let floorH = 160;
+  function clampOffset(id, dx, dy) {
+    const c = centres.get(id);
+    if (!c) return [dx, dy];
+    const p = onScreen(c, c.turns ? orbitAngle(c.plane) : 0);
+    return [Math.min(160 - c.half - p.x, Math.max(c.half - p.x, dx)),
+            Math.min(floorH - c.half - p.y, Math.max(c.half - p.y, dy))];
+  }
 
   const lastBump = new Map(); // family id → ms
-  let centres = new Map();    // family id → { id, plane, cx, cy, r } (r: the parent's body)
+  // family id → { id, plane, turns, oy, cx, cy (the parent's centre, in its orbit's frame), r (its
+  // body), half (half its box) }
+  let centres = new Map();
   function seekBump(id, d) {
     const me = centres.get(id);
     if (!me?.plane) return false;
     const now = Date.now();
-    const at = (c) => ({ ...c, cx: c.cx + (drifts.get(c.id)?.dx ?? 0), cy: c.cy + (drifts.get(c.id)?.dy ?? 0) });
+    // Everything on screen: where each parent shows now, orbit and stroll included.
+    const at = (c) => { const p = screenOf(c); return { ...c, cx: p.x, cy: p.y }; };
     const mine = at(me);
     let target = null;
     for (const c of centres.values()) {
@@ -864,17 +889,16 @@
       if (!target || dist < target.dist) target = { other, dist, contact };
     }
     if (!target || target.dist <= target.contact) return false;
-    // Same plane, so both have turned by the same angle: the way to the other, on screen.
-    const turn = orbitAngle(me.plane);
-    const bx = (target.other.cx - mine.cx) / target.dist;
-    const by = (target.other.cy - mine.cy) / target.dist;
-    const ux = bx * Math.cos(turn) - by * Math.sin(turn);
-    const uy = bx * Math.sin(turn) + by * Math.cos(turn);
+    const ux = (target.other.cx - mine.cx) / target.dist;
+    const uy = (target.other.cy - mine.cy) / target.dist;
     const travel = target.dist - target.contact;
+    const [tx, ty] = clampOffset(id, d.dx + ux * travel, d.dy + uy * travel);
+    // The window's edge would stop it short of the other: no bump this time.
+    if (Math.hypot(tx - d.dx, ty - d.dy) < travel - 0.5) return false;
     const seconds = Math.max(0.6, travel / (7 * familyPace(id)));
     lastBump.set(id, now);
     lastBump.set(target.other.id, now);
-    driftTo(d, d.dx + ux * travel, d.dy + uy * travel, seconds);
+    driftTo(d, tx, ty, seconds);
     d.timer = setTimeout(() => bump(id, target.other.id, ux, uy, mine.r), seconds * 1000);
     return true;
   }
@@ -882,9 +906,9 @@
     const da = drifts.get(a);
     if (!da?.el.isConnected || !animating()) return;
     for (const id of [a, b]) critterEls.get(`s:${id}`)?.classList.add('bump');
-    driftTo(da, da.dx - ux * r * 0.7, da.dy - uy * r * 0.7, 0.35);
+    driftTo(da, ...clampOffset(a, da.dx - ux * r * 0.7, da.dy - uy * r * 0.7), 0.35);
     const db = drifts.get(b);
-    if (db?.on) driftTo(db, db.dx + ux * r * 0.4, db.dy + uy * r * 0.4, 0.35);
+    if (db?.on) driftTo(db, ...clampOffset(b, db.dx + ux * r * 0.4, db.dy + uy * r * 0.4), 0.35);
     da.timer = setTimeout(() => stroll(a), 1_200 + Math.random() * 1_500);
   }
 
@@ -994,20 +1018,22 @@
         if (gravity) {
           placed = gravityLayout(groups.map((g) => ({ id: g.id, plane: planeMap.get(g.id)?.plane ?? 'middle' })), G, H, spacing, { orbit: true });
         } else {
-          const { f, cells: grid } = gridLayout(groups.length, G, H, spacing);
-          placed = grid.map((c, i) => ({ id: groups[i].id, x: c.x, y: c.y, f, plane: null }));
+          // Resting on the floor: the usage gauge sits right under the feet.
+          const { f, cells: grid } = gridLayout(groups.length, G, H, spacing, { align: 'bottom' });
+          placed = grid.map((c, i) => ({ id: groups[i].id, x: c.x, y: c.y, f, plane: null, turns: false }));
         }
         const at = new Map(placed.map((p) => [p.id, p]));
         centres = new Map();
         // The galaxy: one turning group per orbiting plane, the back one drawn first.
-        orbitCentre = { x: 80, y: H / 2 };
+        floorH = H;
+        orbitCentre = { x: 80, y: gravity ? placed[0].oy : H / 2 };
         const orbits = new Map();
         for (const plane of gravity ? ['back', 'middle'] : []) {
           if (!placed.some((p) => p.plane === plane)) continue;
           const group = document.createElementNS(SVG_NS, 'g');
           group.setAttribute('class', 'orbit');
           const period = orbitPeriod(plane);
-          Object.assign(group.style, { transformOrigin: `80px ${H / 2}px`, animationDuration: `${period}s`,
+          Object.assign(group.style, { transformOrigin: `80px ${orbitCentre.y.toFixed(2)}px`, animationDuration: `${period}s`,
                                        animationDelay: `${(-(orbitPhase() % period)).toFixed(2)}s` });
           crittersLayer.appendChild(group);
           orbits.set(plane, group);
@@ -1032,8 +1058,9 @@
           const parent = parentSlot(parentKey(g),
             `translate(${(cell.x + P.x * f).toFixed(2)}px, ${(cell.y + P.y * f).toFixed(2)}px) scale(${(P.size * f / 160).toFixed(4)})`);
           family.append(back, strollWrap(g.id, parent, P.size * f * 0.14), front);
-          centres.set(g.id, { id: g.id, plane: p.plane, cx: cell.x + (P.x + P.size / 2) * f,
-                              cy: cell.y + (P.y + P.size * 0.58) * f, r: P.size * f * 0.3 });
+          centres.set(g.id, { id: g.id, plane: p.plane, turns: Boolean(p.turns), oy: p.oy,
+                              cx: cell.x + (P.x + P.size / 2) * f, cy: cell.y + (P.y + P.size / 2) * f,
+                              r: P.size * f * 0.3, half: (P.size * f) / 2 });
           familyEls.set(g.id, family);
           // Above the parent's head: the avatar's why anchor, in the parent's scaled box
           // (classic: x 66 + 6, y 26 → the same spot as before avatars existed).
@@ -1193,7 +1220,8 @@
     // the row above), its tail's two dots leading down to that head.
     const placedAnchor = familyAnchors.get(family) ?? { x: geo.why[0], y: geo.why[1] };
     // A turning family's anchor has turned with it (its orbit is held while the bubble shows).
-    const anchor = rotateAround(placedAnchor, orbitCentre, orbitAngle(planeMap.get(family)?.plane));
+    const c = centres.get(family);
+    const anchor = c?.turns ? onScreen({ ...c, cx: placedAnchor.x, cy: placedAnchor.y }, orbitAngle(c.plane)) : placedAnchor;
     const dy = Math.min(Math.max(0, anchor.y - 26), 120);
     whyBubble.setAttribute('transform', `translate(0 ${dy.toFixed(1)})`);
     const [near, far] = whyBubble.querySelectorAll('circle');
