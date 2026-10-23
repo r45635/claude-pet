@@ -245,7 +245,10 @@ async function postUpdate(req: IncomingMessage, res: ServerResponse): Promise<vo
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
 function view(): string {
-  return JSON.stringify({ ...runtime.snapshot(), version: VERSION, update, avatarsRev, prefs, config: { invalid: configInvalid, warnings: configWarnings } });
+  // `library`: the avatar catalog's state, so the menu-bar icon rebuilds its menu when the
+  // catalog arrives (it is built from the feed, not on click like the right-click menu).
+  return JSON.stringify({ ...runtime.snapshot(), version: VERSION, update, avatarsRev, library: { status: catalogStatus(), at: catalogAt },
+                          prefs, config: { invalid: configInvalid, warnings: configWarnings } });
 }
 
 function broadcast(): void {
