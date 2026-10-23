@@ -237,11 +237,15 @@ fn apply_frame(app: &AppHandle, frame: Option<Value>, look: Look, locale: String
     }
     let Some(frame) = frame else { return };
     let pet = app.state::<crate::Pet>();
-    let key = serde_json::to_string(&(&frame["prefs"], &locale, &frame["update"], pet.chat.busy(), session_statuses(&frame))).unwrap_or_default();
+    // The library's state is part of it: a menu built before the catalog arrived must not keep
+    // saying "unavailable" (it did, after a restart, until a setting changed).
+    let key = serde_json::to_string(&(&frame["prefs"], &locale, &frame["update"], pet.chat.busy(), session_statuses(&frame),
+                                      &frame["library"], &frame["avatarsRev"])).unwrap_or_default();
     if st.menu_key != key {
         match crate::main_menu(app, &pet, &frame["prefs"], &locale, frame["update"].clone()) {
             Ok(menu) => {
                 let _ = icon.set_menu(Some(menu));
+                eprintln!("menu bar: menu rebuilt (library {})", frame["library"]["status"].as_str().unwrap_or("?"));
                 st.menu_key = key;
             }
             Err(e) => eprintln!("menu bar: menu: {e}"),
@@ -277,7 +281,8 @@ pub fn spawn_feed(app: AppHandle, url: String, token: String) {
                 let busy = app.state::<crate::Pet>().chat.busy();
                 let l = look(Some(&v), &locale, busy);
                 // Everything the main thread would act on: skip the frame when none of it moved.
-                let digest = serde_json::to_string(&(&v["prefs"], &v["update"], busy, session_statuses(&v))).unwrap_or_default();
+                let digest = serde_json::to_string(&(&v["prefs"], &v["update"], busy, session_statuses(&v), &v["library"], &v["avatarsRev"]))
+                    .unwrap_or_default();
                 let now = (l.clone(), digest, locale.clone());
                 if last.as_ref() == Some(&now) {
                     return;
