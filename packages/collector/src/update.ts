@@ -9,12 +9,13 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { GITHUB_REPO, VERSION } from './entry.ts';
 import { LABELS } from './login.ts';
 import { APP_DIR, ROOT_DIR } from './paths.ts';
-import { checksumMatches, releaseUrl, verifySignature } from './widget.ts';
+import { manifestName } from './manifest.ts';
+import { CURL_HTTPS, releaseProblem, releaseUrl } from './widget.ts';
 
 /** The standalone release archive (scripts/build-standalone.ts) and what it must contain. */
 export const STANDALONE_ARCHIVE = 'claude-pet-aarch64-apple-darwin.tar.gz';
@@ -28,8 +29,6 @@ export type UpdateState = {
   error: string | null;
   pinnedLocalBuild: boolean;
   layout: 'standalone' | 'clone';
-  /** The detected release has no signature: only a human-confirmed install may proceed. */
-  unsigned: boolean;
 };
 
 export const freshUpdateState = (layout: UpdateState['layout'], pinnedLocalBuild: boolean): UpdateState => ({
@@ -40,7 +39,6 @@ export const freshUpdateState = (layout: UpdateState['layout'], pinnedLocalBuild
   error: null,
   pinnedLocalBuild,
   layout,
-  unsigned: false,
 });
 
 /** `v1.2.3` or `v1.2.3-rc1` → comparable parts; null when it is not a release tag. */
@@ -77,7 +75,7 @@ export function latestTag(repo = GITHUB_REPO): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       'curl',
-      ['-fsSI', '--max-time', '20', `https://github.com/${repo}/releases/latest`],
+      ['-fsSI', ...CURL_HTTPS, '--max-time', '20', `https://github.com/${repo}/releases/latest`],
       { timeout: 25_000 },
       (error, stdout) => resolve(error ? null : latestTagFromHeaders(stdout)),
     );
@@ -102,56 +100,57 @@ const run = (cmd: string, args: string[]): Promise<void> =>
 /** Puts `file` of release `tag` at `dest`; rejects when it is not published. */
 export type FetchAsset = (tag: string, file: string, dest: string) => Promise<void>;
 const curlAsset: FetchAsset = (tag, file, dest) =>
-  run('curl', ['-fsSL', '--retry', '2', '--max-time', '170', '-o', dest, releaseUrl(tag, file)]);
+  run('curl', ['-fsSL', ...CURL_HTTPS, '--retry', '2', '--max-time', '170', '-o', dest, releaseUrl(tag, file)]);
 
-export type InstallResult = { ok: true } | { ok: false; error: string; unsigned?: true };
+export type InstallResult = { ok: true } | { ok: false; error: string };
+
+/** Every path under `dir` that is neither a directory nor a regular file (a symlink…). */
+function oddEntries(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((p) => {
+    const st = lstatSync(join(dir, p));
+    return !st.isDirectory() && !st.isFile();
+  });
+}
 
 /**
  * Download, verify and swap in the standalone release `tag`. Nothing in ~/.claude-pet/app is
- * touched until the archive's SHA-256 and signature have both passed and the unpacked folder
- * holds every expected file; the previous version is kept as app.old (rollback:
+ * touched until the release manifest's signature verifies, the manifest names this tag and
+ * this archive with its SHA-256, and the unpacked folder holds every expected file as a
+ * regular file; the previous version is kept as app.old (rollback:
  * `mv ~/.claude-pet/app.old ~/.claude-pet/app`, then `claude-pet restart`).
  *
- * A missing signature (a release made before signing existed) refuses unless
- * `allowUnsigned` — which only a human's explicit confirmation may set; an invalid one
- * always refuses. Never throws: every failure comes back as `{ok:false, error}`.
+ * Only a version newer than `current` installs: an older signed release, however genuine,
+ * is a downgrade. No signature, no install — there is no "install anyway". Never throws:
+ * every failure comes back as `{ok:false, error}`.
  */
 export async function installStandalone(
   tag: string,
-  { allowUnsigned = false, root = ROOT_DIR, app = APP_DIR, fetchAsset = curlAsset, pubkey }:
-    { allowUnsigned?: boolean; root?: string; app?: string; fetchAsset?: FetchAsset; pubkey?: string } = {},
+  { root = ROOT_DIR, app = APP_DIR, fetchAsset = curlAsset, pubkey, current = `v${VERSION}` }:
+    { root?: string; app?: string; fetchAsset?: FetchAsset; pubkey?: string; current?: string } = {},
 ): Promise<InstallResult> {
   if (!parseTag(tag)) return { ok: false, error: `not a release tag: ${tag}` };
+  if (compareTags(tag, current) <= 0) return { ok: false, error: `${tag} is not newer than the installed ${current}, not installed` };
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const tmp = mkdtempSync(join(root, '.update-'));
   try {
     const archive = join(tmp, STANDALONE_ARCHIVE);
+    const manifest = join(tmp, manifestName(STANDALONE_ARCHIVE));
     try {
       await fetchAsset(tag, STANDALONE_ARCHIVE, archive);
-      await fetchAsset(tag, `${STANDALONE_ARCHIVE}.sha256`, `${archive}.sha256`);
+      await fetchAsset(tag, manifestName(STANDALONE_ARCHIVE), manifest);
+      await fetchAsset(tag, `${manifestName(STANDALONE_ARCHIVE)}.sig`, `${manifest}.sig`);
     } catch {
-      return { ok: false, error: `could not download ${STANDALONE_ARCHIVE} for ${tag}` };
+      return { ok: false, error: `could not download ${STANDALONE_ARCHIVE} and its signed manifest for ${tag}` };
     }
-    const sha256File = readFileSync(`${archive}.sha256`, 'utf8');
-    if (!checksumMatches(readFileSync(archive), sha256File)) {
-      return { ok: false, error: `${tag}: SHA-256 does not match the published one, not installed` };
-    }
-    let sig: string | null = null;
-    try {
-      await fetchAsset(tag, `${STANDALONE_ARCHIVE}.sha256.sig`, `${archive}.sha256.sig`);
-      sig = readFileSync(`${archive}.sha256.sig`, 'utf8');
-    } catch {
-      sig = null;
-    }
-    if (sig === null && !allowUnsigned) {
-      return { ok: false, unsigned: true, error: `${tag} is not signed; only a confirmed manual install may proceed` };
-    }
-    if (sig !== null && !verifySignature(Buffer.from(sha256File), sig, pubkey)) {
-      return { ok: false, error: `${tag}: the release signature does not verify, not installed` };
-    }
+    const problem = releaseProblem(readFileSync(archive), readFileSync(manifest, 'utf8'), readFileSync(`${manifest}.sig`, 'utf8'),
+                                   { tag, file: STANDALONE_ARCHIVE }, pubkey);
+    if (problem) return { ok: false, error: `${tag}: ${problem}, not installed` };
 
-    await run('tar', ['-xzf', archive, '-C', tmp]);
     const unpacked = join(tmp, 'claude-pet');
+    mkdirSync(unpacked);
+    await run('tar', ['-xzf', archive, '-C', tmp]);
+    const odd = oddEntries(unpacked);
+    if (odd.length > 0) return { ok: false, error: `${tag}: archive holds links or special files (${odd.join(', ')}), not installed` };
     const missing = APP_FILES.filter((f) => !existsSync(join(unpacked, f)));
     if (missing.length > 0) return { ok: false, error: `${tag}: archive incomplete, missing ${missing.join(', ')}` };
     for (const f of ['claude-pet', 'claude-pet-widget']) chmodSync(join(unpacked, f), 0o755);

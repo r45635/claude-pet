@@ -247,27 +247,26 @@ fn confirm_enable_chat(app: &AppHandle) {
 }
 
 /// "Install vX…": confirm, then ask the daemon, which downloads, verifies and restarts
-/// both processes. An unsigned release gets its own, warning-worded confirmation.
-fn confirm_update(app: &AppHandle, unsigned: bool) {
+/// both processes — a newer, signed release or nothing (update.ts).
+fn confirm_update(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
     let update = app.state::<MenuUpdate>().0.lock().map(|u| u.clone()).unwrap_or(Value::Null);
     let Some(tag) = update["latest"].as_str().filter(|t| menu::valid_tag(t)).map(str::to_owned) else { return };
     let w = menu::Words::new(&locale);
-    let key = if unsigned { "dialog.updateUnsigned" } else { "dialog.update" };
+    let key = "dialog.update";
     let handle = app.clone();
     app.dialog()
         .message(w.get(&format!("{key}.body")).replace("{v}", &tag))
         .title(w.get(&format!("{key}.title")).replace("{v}", &tag))
-        .kind(if unsigned { MessageDialogKind::Warning } else { MessageDialogKind::Info })
+        .kind(MessageDialogKind::Info)
         .buttons(MessageDialogButtons::OkCancelCustom(w.get(&format!("{key}.ok")), w.get("dialog.cancel")))
         .show(move |confirmed| {
             if !confirmed {
                 return;
             }
             if let Some(d) = &handle.state::<Pet>().daemon {
-                let body = serde_json::json!({ "allowUnsigned": unsigned }).to_string();
-                if let Err(e) = d.post("/update", &body) {
+                if let Err(e) = d.post("/update", "{}") {
                     eprintln!("update: {e}");
                 }
             }
@@ -519,8 +518,7 @@ fn on_menu(app: &AppHandle, id: &str) {
     }
     match id {
         "chat:enable" => confirm_enable_chat(app),
-        "update:install" => confirm_update(app, false),
-        "update:install-unsigned" => confirm_update(app, true),
+        "update:install" => confirm_update(app),
         "update:how" => explain_update(app),
         "avatar:remove" => confirm_remove_avatar(app),
         go if go.starts_with("session:focus:") => {

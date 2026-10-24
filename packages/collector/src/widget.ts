@@ -9,8 +9,8 @@
  *
  * The download runs when the user asks for it (`fetch`, or `autostart install` with no
  * binary) — the daemon's only own outbound request is the daily update check (update.ts,
- * docs/PRIVACY.md) — and the archive is checked against its published SHA-256 and release
- * signature before it is unpacked.
+ * docs/PRIVACY.md) — and the archive is checked against its signed release manifest
+ * (manifest.ts) before it is unpacked.
  * It goes through curl, which, unlike a browser, does not set com.apple.quarantine: the
  * binary is ad-hoc signed, not notarized, and Gatekeeper would otherwise refuse it.
  *
@@ -18,11 +18,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash, createPublicKey, verify } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { createPublicKey, verify } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GITHUB_REPO, isMain, VERSION } from './entry.ts';
+import { manifestMismatch, manifestName } from './manifest.ts';
 import { ROOT_DIR } from './paths.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -34,6 +35,8 @@ export const downloadedPath = (tag: string, root = ROOT_DIR): string => join(roo
 export const assetName = (tag: string): string => `${BIN}-${tag}-${TARGET}.tar.gz`;
 export const releaseUrl = (tag: string, file: string, repo = GITHUB_REPO): string =>
   `https://github.com/${repo}/releases/download/${tag}/${file}`;
+/** Every download: HTTPS only, redirects included — never a downgrade to plain HTTP. */
+export const CURL_HTTPS = ['--proto', '=https', '--proto-redir', '=https'];
 
 /** The binary to run, or null when there is neither a local build nor a download yet. */
 export function resolveWidget(tag = `v${VERSION}`, root = ROOT_DIR): string | null {
@@ -62,11 +65,6 @@ export function pruneWidgets(keep: string | null, root = ROOT_DIR): string[] {
   return removed;
 }
 
-/** `<hex>  <file>` as written by `shasum -a 256`; the hash must match the archive's. */
-export function checksumMatches(archive: Buffer, sha256File: string): boolean {
-  const expected = sha256File.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-  return /^[0-9a-f]{64}$/.test(expected) && createHash('sha256').update(archive).digest('hex') === expected;
-}
 
 /**
  * The pinned release public key (ed25519); CI signs with its private half. Embedded as a
@@ -91,6 +89,16 @@ export function verifySignature(data: Buffer, sigBase64: string, pubkeyPem = REL
   }
 }
 
+/**
+ * Null when `archive` is release `want.tag`'s `want.file`, as the manifest signed by the
+ * release key says; otherwise why it must not be installed.
+ */
+export function releaseProblem(archive: Buffer, manifest: string, sig: string, want: { tag: string; file: string },
+                               pubkeyPem = RELEASE_PUBKEY): string | null {
+  if (!verifySignature(Buffer.from(manifest), sig, pubkeyPem)) return 'the release signature does not verify';
+  return manifestMismatch(archive, manifest, want);
+}
+
 function has(cmd: string): boolean {
   try {
     execFileSync('/bin/sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' });
@@ -101,29 +109,24 @@ function has(cmd: string): boolean {
 }
 
 /**
- * Puts the archive and its .sha256 in `dir`. curl covers a public repository; while the
- * repository is private, an authenticated `gh` is the only way in, so it is the fallback.
+ * Puts the archive, its manifest and the manifest's signature in `dir` — all three required.
+ * curl covers a public repository; while the repository is private, an authenticated `gh`
+ * is the only way in, so it is the fallback.
  */
 function download(tag: string, dir: string): void {
   const asset = assetName(tag);
+  const names = [asset, manifestName(asset), `${manifestName(asset)}.sig`];
   try {
-    for (const name of [asset, `${asset}.sha256`]) {
-      execFileSync('curl', ['-fsSL', '--retry', '2', '-o', join(dir, name), releaseUrl(tag, name)], { stdio: 'ignore' });
+    for (const name of names) {
+      execFileSync('curl', ['-fsSL', ...CURL_HTTPS, '--retry', '2', '-o', join(dir, name), releaseUrl(tag, name)], { stdio: 'ignore' });
     }
   } catch {
-    if (!has('gh')) throw new Error(`could not download ${releaseUrl(tag, asset)}`);
+    if (!has('gh')) throw new Error(`could not download ${asset} and its signed manifest for ${tag} (releases before v0.5.5 have none)`);
     try {
-      execFileSync('gh', ['release', 'download', tag, '-R', GITHUB_REPO, '-p', asset, '-p', `${asset}.sha256`, '-D', dir, '--clobber'], { stdio: 'ignore' });
+      execFileSync('gh', ['release', 'download', tag, '-R', GITHUB_REPO, ...names.flatMap((n) => ['-p', n]), '-D', dir, '--clobber'], { stdio: 'ignore' });
     } catch {
-      throw new Error(`could not download ${asset} from ${GITHUB_REPO} (no release ${tag}, or no access)`);
+      throw new Error(`could not download ${asset} and its signed manifest from ${GITHUB_REPO} (no release ${tag}, or no access)`);
     }
-  }
-  // The signature is optional on the wire (releases before v0.3 have none): its absence
-  // warns, its invalidity refuses — fetchWidget decides.
-  try {
-    execFileSync('curl', ['-fsSL', '--retry', '2', '-o', join(dir, `${asset}.sha256.sig`), releaseUrl(tag, `${asset}.sha256.sig`)], { stdio: 'ignore' });
-  } catch {
-    /* no .sig published for this tag */
   }
 }
 
@@ -140,20 +143,11 @@ export function fetchWidget(tag = `v${VERSION}`, { force = false, root = ROOT_DI
   try {
     download(tag, tmp);
     const asset = assetName(tag);
-    const archive = readFileSync(join(tmp, asset));
-    const sha256File = readFileSync(join(tmp, `${asset}.sha256`), 'utf8');
-    if (!checksumMatches(archive, sha256File)) {
-      throw new Error(`${asset}: SHA-256 does not match the published one, not installed`);
-    }
-    const sigPath = join(tmp, `${asset}.sha256.sig`);
-    if (existsSync(sigPath)) {
-      if (!verifySignature(Buffer.from(sha256File), readFileSync(sigPath, 'utf8'))) {
-        throw new Error(`${asset}: the release signature does not verify, not installed`);
-      }
-    } else {
-      process.stderr.write(`warning: ${tag} is unsigned (released before signing existed); integrity checked, authenticity not\n`);
-    }
+    const problem = releaseProblem(readFileSync(join(tmp, asset)), readFileSync(join(tmp, manifestName(asset)), 'utf8'),
+                                   readFileSync(join(tmp, `${manifestName(asset)}.sig`), 'utf8'), { tag, file: asset });
+    if (problem) throw new Error(`${asset}: ${problem}, not installed`);
     execFileSync('tar', ['-xzf', join(tmp, asset), '-C', tmp, BIN]);
+    if (!lstatSync(join(tmp, BIN)).isFile()) throw new Error(`${asset}: ${BIN} is not a regular file, not installed`);
     chmodSync(join(tmp, BIN), 0o755);
     mkdirSync(dirname(dest), { recursive: true, mode: 0o700 });
     renameSync(join(tmp, BIN), dest);

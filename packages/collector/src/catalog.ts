@@ -3,7 +3,10 @@
  * installed, and the download of one package.
  *
  * Trust: `index.json` is refused unless its ed25519 signature verifies against the pinned
- * release key (widget.ts) — no unsigned fallback, the library never published unsigned.
+ * catalog key below (`index.json.catalog.sig`, over manifest.ts's catalog prefix + the index)
+ * — its own key, so a leak on the library side cannot sign app updates. Transition: a library
+ * published before v0.5.5 has only `index.json.sig`, by the release key (widget.ts); it is
+ * accepted only when no catalog signature is published at all. No unsigned fallback.
  * A package is then refused unless its bytes match the sha256 the signed index gives. The
  * daemon never unzips anything: Rust's avatars::import does, with its unchanged untrusted-
  * content rules (zip-slip, sizes, sniffing). The signature gates distribution; the import
@@ -19,9 +22,16 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { join } from 'node:path';
 import { checkManifest, FORMAT } from './avatar-format.ts';
 import { ROOT_DIR } from './paths.ts';
-import { verifySignature } from './widget.ts';
+import { catalogSignedBytes } from './manifest.ts';
+import { CURL_HTTPS, verifySignature } from './widget.ts';
 
 export const LIBRARY_REPO = 'r45635/claude-pet-avatars';
+
+/** The catalog's own public key (ed25519); catalog-pubkey.pem is the canonical copy, test-pinned. */
+export const CATALOG_PUBKEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAkdeoVhpLdxQXPUgkJcHKJ69XUhRZA/twCIYuuXcdqog=
+-----END PUBLIC KEY-----
+`;
 const latestUrl = (file: string) => `https://github.com/${LIBRARY_REPO}/releases/latest/download/${file}`;
 const DOWNLOAD_PREFIX = '.avatar-dl-';
 const MAX_ENTRIES = 500;
@@ -83,16 +93,27 @@ export function parseCatalog(raw: unknown): Catalog | { error: string } {
 export type FetchBytes = (url: string, maxBytes: number) => Promise<Buffer | null>;
 const curlBytes: FetchBytes = (url, maxBytes) =>
   new Promise((resolve) => {
-    execFile('curl', ['-fsSL', '--max-time', '60', '--max-filesize', String(maxBytes), url],
+    execFile('curl', ['-fsSL', ...CURL_HTTPS, '--max-time', '60', '--max-filesize', String(maxBytes), url],
       { encoding: 'buffer', maxBuffer: maxBytes + 1, timeout: 65_000 },
       (error, stdout) => resolve(error ? null : stdout));
   });
 
 /** Fetch, verify the signature, parse. Never throws. */
-export async function fetchCatalog(fetchBytes: FetchBytes = curlBytes, pubkey?: string): Promise<Catalog | { error: string }> {
-  const [index, sig] = await Promise.all([fetchBytes(latestUrl('index.json'), 1_048_576), fetchBytes(latestUrl('index.json.sig'), 1_024)]);
-  if (!index || !sig) return { error: 'catalog: could not download the library index' };
-  if (!verifySignature(index, sig.toString('utf8'), pubkey)) return { error: 'catalog: the index signature does not verify, refused' };
+export async function fetchCatalog(fetchBytes: FetchBytes = curlBytes, releaseKey?: string, catalogKey = CATALOG_PUBKEY): Promise<Catalog | { error: string }> {
+  const [index, catalogSig, legacySig] = await Promise.all([
+    fetchBytes(latestUrl('index.json'), 1_048_576),
+    fetchBytes(latestUrl('index.json.catalog.sig'), 1_024),
+    fetchBytes(latestUrl('index.json.sig'), 1_024),
+  ]);
+  if (!index) return { error: 'catalog: could not download the library index' };
+  if (catalogSig) {
+    // Published: it alone decides — an invalid one never falls back to the release key.
+    if (!verifySignature(catalogSignedBytes(index), catalogSig.toString('utf8'), catalogKey)) {
+      return { error: 'catalog: the index signature does not verify, refused' };
+    }
+  } else if (!legacySig || !verifySignature(index, legacySig.toString('utf8'), releaseKey)) {
+    return { error: 'catalog: the index signature does not verify, refused' };
+  }
   try {
     return parseCatalog(JSON.parse(index.toString('utf8')));
   } catch {

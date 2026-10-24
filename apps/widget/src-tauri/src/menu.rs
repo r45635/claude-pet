@@ -235,8 +235,9 @@ pub fn valid_tag(t: &str) -> bool {
         && pre.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
-/// What the update item does, from the daemon's update state: install it (standalone, signed
-/// or after a warning), say it is installing, or explain how (a clone is never touched).
+/// What the update item does, from the daemon's update state: install it (standalone; the
+/// daemon takes only a newer, signed release), say it is installing, or explain how (a clone
+/// is never touched).
 pub fn update_action(update: &Value) -> Option<(&'static str, &'static str, bool)> {
     if update["available"] != true || !update["latest"].as_str().is_some_and(valid_tag) {
         return None;
@@ -245,8 +246,6 @@ pub fn update_action(update: &Value) -> Option<(&'static str, &'static str, bool
         ("update:installing", "menu.update.installing", false)
     } else if update["layout"] != "standalone" {
         ("update:how", "menu.update.how", true)
-    } else if update["unsigned"] == true {
-        ("update:install-unsigned", "menu.update.installUnsigned", true)
     } else {
         ("update:install", "menu.update.install", true)
     })
@@ -307,11 +306,11 @@ mod tests {
 
     #[test]
     fn the_update_item_says_what_will_happen() {
-        let base = json!({"available": true, "latest": "v0.4.0", "layout": "standalone", "installing": false, "unsigned": false});
+        let base = json!({"available": true, "latest": "v0.4.0", "layout": "standalone", "installing": false});
         assert_eq!(update_action(&base).unwrap().0, "update:install");
         let mut u = base.clone();
         u["unsigned"] = json!(true);
-        assert_eq!(update_action(&u).unwrap().0, "update:install-unsigned");
+        assert_eq!(update_action(&u).unwrap().0, "update:install", "an old daemon's flag offers no unsigned install");
         u["installing"] = json!(true);
         assert_eq!(update_action(&u).unwrap(), ("update:installing", "menu.update.installing", false));
         let mut clone = base.clone();

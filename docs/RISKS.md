@@ -147,7 +147,10 @@ A `.claudepet` comes from anywhere, and the widget's page holds the chat's IPC: 
   checked by content); SVG through an allow-list sanitizer (`web/avatar.js`); CSS scoped to the
   avatar, no `@import`/`@font-face`/`@media`/escapes/external `url()`.
 - **The library** (`packages/collector/src/catalog.ts`): its `index.json` must verify against
-  the pinned release key (no unsigned fallback) and each package must match the index's
+  the pinned **catalog** key — its own key, over a domain prefix, so a leak on the library
+  side cannot sign app updates (until the library publishes `index.json.catalog.sig`, the
+  release-key signature is accepted, and only when no catalog signature exists); no unsigned
+  fallback, and each package must match the index's
   SHA-256 — that gates *distribution*. The package is then imported by Rust exactly like a
   drop — that gates *content*. The daemon downloads but never unzips; its install route is
   native-only (§10) and only serves ids from the verified catalog; Rust only imports from the
@@ -162,11 +165,20 @@ Release assets are built in GitHub Actions and downloaded by `curl` without quar
 (the binaries are ad-hoc signed, not notarized — Gatekeeper never sees them). A `.sha256`
 from the same release page proves integrity in transit, nothing more.
 
-- **Mitigation:** tag builds sign every `.sha256` with an ed25519 key held as an Actions
-  secret (`scripts/sign-release.ts` → `.sig`); the collector verifies against the public key
-  pinned in `packages/collector/src/widget.ts` (canonical copy: `release-pubkey.pem`).
-  An invalid signature always refuses the install; a missing one (releases that predate
-  signing) warns and proceeds for a manual fetch, and never qualifies for automatic install.
+- **Mitigation:** each archive comes with a signed **manifest** (`packages/collector/src/
+  manifest.ts`): a domain-prefixed text naming the tag, the file and its SHA-256, signed with
+  an ed25519 key (`scripts/sign-release.ts`); the collector verifies it against the public key
+  pinned in `packages/collector/src/widget.ts` (canonical copy: `release-pubkey.pem`). Signing
+  the bare `.sha256` (before v0.5.5, still published for older installs) bound an archive to a
+  hash, not to a release — an old genuine archive re-uploaded under a new tag verified; the
+  manifest cannot be replayed under another tag or file. No signed manifest, no install —
+  there is no "install anyway" — and a version not newer than the installed one is refused
+  (no downgrade, however genuine).
+- **Where the key lives:** only the tag-only `publish` job of `release.yml` sees it, through
+  the `release` environment, which only `v*` tags may deploy to; that job runs no third-party
+  code (it checks out the tag's own signing script). The `build` job — npm, cargo build
+  scripts, actions — is read-only and holds no secret. Actions are pinned by commit SHA, and
+  a ruleset lets only an admin create, move or delete a `v*` tag.
 - **What the signature proves — and does not:** it proves the artifact came out of this
   repository's CI holding the secret (or from the key's owner). It does **not** protect
   against a compromised GitHub account, a compromised Actions runner, or a malicious commit
@@ -175,14 +187,14 @@ from the same release page proves integrity in transit, nothing more.
   the standalone layout, only for a release whose signature verifies; the archive is fully
   verified and unpacked before `~/.claude-pet/app` is touched, the previous version is kept
   as `app.old`, and a failure is reported (`/health`, the creature's bubble), never silent.
-  A clone is never modified: the creature only tells its owner how to pull. An unsigned
-  release needs a human's confirmation in a native dialog. `POST /update` is native-only
-  as a whole (the `X-Claude-Pet-Native` header, §10): the page can neither trigger an install
-  nor consent to an unsigned one.
+  A clone is never modified: the creature only tells its owner how to pull. `POST /update`
+  is native-only as a whole (the `X-Claude-Pet-Native` header, §10), and nothing in its body
+  can relax a check: the page cannot trigger an install.
 - **The settings are page-writable on purpose:** the worst a compromised page could do is
   turn automatic install on — of a release signed by the pinned key from the pinned
   repository. It cannot point the updater anywhere else.
-- **Guard:** tag builds fail if the secret is absent; tests pin the signing step, the
-  pubkey/pem identity, the verify/refuse behavior, and the installer's refusals (tampered
-  checksum, bad or foreign signature, incomplete archive, unsigned without consent) — in
-  each case the installed version is left untouched.
+- **Guard:** tag builds fail if the secret is absent; tests pin the workflow's shape (read-only
+  build, no secret outside `publish`, SHA-pinned actions), the pubkey/pem identities, the
+  signing script against the verifier, and the installer's refusals (tampered archive, bad or
+  foreign signature, no manifest, a manifest for another tag, a downgrade, links in the
+  archive, incomplete archive) — in each case the installed version is left untouched.

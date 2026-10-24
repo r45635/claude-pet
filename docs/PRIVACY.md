@@ -94,8 +94,8 @@ which the daemon refuses — and can only add token counts to sessions the hooks
 - `claude-pet avatars …` downloads the library catalog and packages when you run it, even
   with `updatesCheck` off — you asked; same URLs, same nothing-but-the-URL;
 - at install time, when asked, `packages/collector/src/widget.ts` downloads the prebuilt
-  widget from this repository's GitHub Releases, checks its SHA-256 and its release
-  signature (docs/RISKS.md #12). It sends nothing but the request for that file;
+  widget from this repository's GitHub Releases and checks it against its signed release
+  manifest (docs/RISKS.md #12). It sends nothing but the request for that file;
 - `~/.claude-pet/` is `0700`; the spool is `0600` (the hook creates it under `umask 077`);
 - `claude-pet uninstall` removes the hooks, the status line **and** the OpenTelemetry
   settings it added, so Claude Code stops exporting to a port nobody listens on.
