@@ -5,8 +5,10 @@ pictures, or one SVG — packed into a `.claudepet` file. **Drag the file onto t
 install it; **right-click → Avatar** to switch. Everything else keeps working whatever it looks
 like: the states, breathing, storms, subagents walking around, the chat, clicks.
 
-Examples live in the [avatar library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars): `ghost` and `alien` (pictures), `mint` (SVG, a
-commented template), `cowboy` (SVG, with a hat that moves with the mood) and five seasonal ones.
+Examples live in the [avatar library](https://github.com/r45635/claude-pet-avatars/tree/main/avatars): pictures (`ghost`, `alien`, and
+nine-state AI-assisted ones such as `teacher-girl`, `chloe-princess`, `maxaqua` and `baptawan`), SVG
+(`mint`, a commented template; `cowboy`, with a hat that moves with the mood; `slime`) and five
+seasonal ones.
 
 ## Get more avatars — the library
 
