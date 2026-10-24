@@ -166,7 +166,16 @@ export function buildSvgProto(doc, avatar) {
 
 // The token list lives in avatar-format.json (cssForbidden) for the tooling and the
 // importer; a conformance test keeps this regex covering every token.
-export const FORBIDDEN_CSS = /@import|@font-face|@namespace|@charset|javascript:|expression\s*\(|<\/|\\/i;
+export const FORBIDDEN_CSS = /@import|@font-face|@namespace|@charset|javascript:|expression\s*\(|image-set|<\/|\\/i;
+
+/**
+ * Strings in an avatar's CSS may only hold letters, digits, `_`, `-` and spaces — enough for
+ * `[data-state="DONE"]`. A brace or a quote inside a string would make the scoper below and
+ * the browser disagree on where a block ends, and let a rule escape the avatar's scope.
+ */
+export function cssStringsOk(text) {
+  return !/["']|\/\*/.test(text.replace(/"[\w -]*"|'[\w -]*'/g, ''));
+}
 
 /** The @keyframes names a stylesheet defines (before scoping renames them). */
 export function keyframeNames(css) {
@@ -192,6 +201,7 @@ export function scopeCss(css, id) {
   const text = String(css).replace(/\/\*[\s\S]*?\*\//g, '');
   if (FORBIDDEN_CSS.test(text)) throw new Error('@import, @font-face, escapes and javascript: are not allowed');
   if (!safeValue(text)) throw new Error('url() may only point to #id');
+  if (!cssStringsOk(text)) throw new Error('strings may only hold letters, digits, _, - and spaces');
   const scope = `.critter[data-avatar="${id}"]`;
   const names = [...text.matchAll(/@keyframes\s+([A-Za-z_][\w-]*)/g)].map((m) => m[1]);
   const rename = (body) => names.reduce(

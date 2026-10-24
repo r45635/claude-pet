@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOOK_EVENTS, planInstall, planUninstall, type Settings } from '../src/install.ts';
+import { HOOK_EVENTS, isOurs, planInstall, planUninstall, STATUSLINE_SCRIPT, type Settings } from '../src/install.ts';
 
 const INSTALL = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'install.ts');
 
@@ -97,4 +97,28 @@ test('install: re-pointed at another copy of the scripts, rewrites our entries i
   assert.ok(settings.statusLine!.command.includes('/home/.claude-pet/app/hooks/'));
   assert.deepEqual(settings.hooks!.SessionStart[0], HUB.hooks!.SessionStart[0]);
   assert.equal(planInstall(settings, '/home/.claude-pet/app/hooks').changes.length, 0);
+});
+
+test('install: only the exact command it writes is ours, never a wrapper of the user', () => {
+  assert.ok(isOurs('sh "/Users/me/.claude-pet/app/hooks/claude-pet-statusline.sh"', STATUSLINE_SCRIPT));
+  assert.ok(isOurs('sh "/Users/me/my \\"pet\\"/claude-pet-statusline.sh"', STATUSLINE_SCRIPT));
+  assert.ok(!isOurs('bash ~/bin/my-line.sh; sh ~/.claude-pet/app/hooks/claude-pet-statusline.sh', STATUSLINE_SCRIPT));
+  assert.ok(!isOurs('sh "/x/not-claude-pet-statusline.sh"', STATUSLINE_SCRIPT));
+});
+
+test('install: settings.json keeps its mode, and a symlinked one stays a symlink', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pet-settings-'));
+  const real = join(dir, 'real.json');
+  writeFileSync(real, '{}\n');
+  chmodSync(real, 0o600);
+  const link = join(dir, 'settings.json');
+  symlinkSync(real, link);
+  // In a child with its own CLAUDE_PET_HOME: the backup must not land in the real ~/.claude-pet.
+  execFileSync(process.execPath, ['--input-type=module', '-e',
+    `import { writeSettings } from ${JSON.stringify(INSTALL)}; writeSettings(${JSON.stringify(link)}, { model: 'opus' });`],
+    { env: { ...process.env, CLAUDE_PET_HOME: join(dir, 'home') }, stdio: 'ignore' });
+  assert.ok(lstatSync(link).isSymbolicLink(), 'the link is kept');
+  assert.equal(statSync(real).mode & 0o777, 0o600, 'a private file stays private');
+  assert.deepEqual(JSON.parse(readFileSync(real, 'utf8')), { model: 'opus' });
+  assert.deepEqual(readdirSync(dir).sort(), ['home', 'real.json', 'settings.json'], 'no temp file left behind');
 });

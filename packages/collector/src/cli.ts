@@ -93,6 +93,8 @@ function setup(): number {
 function uninstall(): number {
   manage('uninstall', appLaunch());
   if (installHooks(['uninstall']) !== 0) return 1;
+  // Without this, Claude Code would keep exporting its logs to a port nobody owns any more.
+  if (otel(['disable']) !== 0) return 1;
   rmSync(APP_DIR, { recursive: true, force: true });
   process.stdout.write(`removed ${APP_DIR} (your settings and logs in ${ROOT_DIR} are kept)\n`);
   return 0;

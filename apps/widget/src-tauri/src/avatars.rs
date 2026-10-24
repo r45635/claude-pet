@@ -85,6 +85,40 @@ fn css_ok(text: &str) -> bool {
         .filter_map(Value::as_str)
         .all(|token| !t.contains(&token.to_ascii_lowercase()))
         && t.match_indices("url(").all(|(i, _)| t[i + 4..].trim_start().trim_start_matches(['\'', '"']).starts_with('#'))
+        && css_strings_ok(text)
+}
+
+/// Strings may only hold letters, digits, `_`, `-` and spaces, comments aside — the page's
+/// rule (web/avatar.js `cssStringsOk`): a brace or quote inside a string would let a rule
+/// escape the avatar's scope.
+fn css_strings_ok(text: &str) -> bool {
+    let mut bare = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("/*") {
+        bare.push_str(&rest[..i]);
+        match rest[i + 2..].find("*/") {
+            Some(j) => rest = &rest[i + 2 + j + 2..],
+            None => return false,
+        }
+    }
+    bare.push_str(rest);
+    let b = bare.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' || b[i] == b'\'' {
+            let mut j = i + 1;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b"_ -".contains(&b[j])) {
+                j += 1;
+            }
+            if j >= b.len() || b[j] != b[i] {
+                return false;
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    true
 }
 
 /// The format's keyframePattern (`^[A-Za-z_][A-Za-z0-9_-]{0,31}$`) without a regex crate.
@@ -485,6 +519,19 @@ mod tests {
     use std::io::Write;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\x0d";
+
+    #[test]
+    fn css_strings_cannot_hide_a_brace() {
+        // What the library writes: attribute values, comments with apostrophes.
+        assert!(css_ok(".critter[data-state=\"DONE\"] .hat { fill: red } /* the hat's band */"));
+        assert!(css_ok(".critter[data-state='IDLE'] .hat { fill: red }"));
+        // A brace or quote inside a string would let a rule escape the avatar's scope.
+        assert!(!css_ok("@keyframes k { to { x: \"{\" } } #chat { display: none } }"));
+        assert!(!css_ok(".a { content: \"}\" }"));
+        assert!(!css_ok(".a[title='a;b'] { fill: red }"));
+        assert!(!css_ok(".a { fill: red } /* unterminated"));
+        assert!(!css_ok(".a { background: image-set(#x 1x) }"));
+    }
 
     fn tmp_root(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("claude-pet-avatars-{tag}-{}", std::process::id()));

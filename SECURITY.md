@@ -7,7 +7,7 @@ reads, and how to report a problem.
 
 | Where | What | Undo |
 |---|---|---|
-| `~/.claude/settings.json` | adds its hook entries and a `statusLine`, **merged** with yours (never overwritten), after a backup in `~/.claude-pet/backups/` | `claude-pet uninstall` removes only its own entries |
+| `~/.claude/settings.json` | adds its hook entries and a `statusLine` — and, if you turn the OpenTelemetry source on, five `env` entries — **merged** with yours (never overwritten), after a backup in `~/.claude-pet/backups/`; the file keeps its permissions | `claude-pet uninstall` removes only its own entries, OpenTelemetry ones included |
 | `~/.claude/settings.json` → `env` | only if you run `claude-pet otel enable`: five OpenTelemetry variables (logs signal only) | `claude-pet otel disable` removes exactly those |
 | `~/Library/LaunchAgents/dev.r45635.claude-pet.*.plist` | starts the daemon and the creature at login | `claude-pet uninstall` |
 | `~/.claude-pet/` | the app, settings, logs, the event spool, avatars — all `0700` | delete the folder after `uninstall` |

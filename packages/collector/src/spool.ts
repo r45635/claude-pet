@@ -8,6 +8,7 @@
 
 import {
   appendFileSync,
+  chmodSync,
   closeSync,
   copyFileSync,
   existsSync,
@@ -24,6 +25,14 @@ import { SPOOL_DIR, SPOOL_FILE, SPOOL_MAX_BYTES, ROOT_DIR } from './paths.ts';
 export function ensureSpool(): void {
   mkdirSync(SPOOL_DIR, { recursive: true, mode: 0o700 });
   mkdirSync(ROOT_DIR, { recursive: true, mode: 0o700 });
+  // Spools created by hooks before they set `umask 077` were 0644: bring them back to 0600.
+  for (const f of [SPOOL_FILE, `${SPOOL_FILE}.1`]) {
+    try {
+      chmodSync(f, 0o600);
+    } catch {
+      // not created yet: the hook will create it 0600
+    }
+  }
 }
 
 /** Append one already-normalized event. Used by the simulator and by tests. */

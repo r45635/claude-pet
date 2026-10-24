@@ -65,7 +65,12 @@ export function compareTags(a: string, b: string): number {
 /** The tag `releases/latest` redirects to, read from the Location header of one HEAD request. */
 export function latestTagFromHeaders(headers: string): string | null {
   const m = /^location:\s*\S*\/releases\/tag\/([^\s/]+)\s*$/im.exec(headers);
-  return m ? decodeURIComponent(m[1]) : null;
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return null; // a malformed %-escape in the redirect: no tag, not a crash
+  }
 }
 
 export function latestTag(repo = GITHUB_REPO): Promise<string | null> {

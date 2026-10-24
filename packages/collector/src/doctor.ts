@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isMain, STANDALONE, VERSION } from './entry.ts';
-import { BIN_DIR, HOOK_EVENTS, HOOK_SCRIPT, hookCommand, isOurs, settingsPath, statusCommand, STATUSLINE_SCRIPT, type Settings } from './install.ts';
+import { BIN_DIR, HOOK_EVENTS, HOOK_SCRIPT, hookCommand, isOurs, scriptOf, settingsPath, statusCommand, STATUSLINE_SCRIPT, type Settings } from './install.ts';
 import { LABELS } from './login.ts';
 import { APP_DIR, ROOT_DIR, SPOOL_FILE, TOKEN_FILE } from './paths.ts';
 import { daemonPort, otelEnvState, type OtelEnvState } from './otel.ts';
@@ -73,11 +73,7 @@ const LAG_BYTES = 64 * 1024;
 
 const minutes = (ms: number) => `${Math.round(ms / 60_000)} min`;
 
-/** The script path inside `sh "<path>"`, as install.ts writes it. */
-export function scriptOf(command: string): string | null {
-  const m = /^sh "((?:[^"\\]|\\.)*)"$/.exec(command.trim());
-  return m ? m[1]!.replace(/\\(.)/g, '$1') : null;
-}
+export { scriptOf };
 
 function hooksCheck(f: Facts, settings: Settings): Check {
   const expected = hookCommand(f.binDir);

@@ -12,9 +12,10 @@
  *   node packages/collector/src/install.ts [install|uninstall] [--dry-run] [--settings <file>]
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './entry.ts';
 import { ROOT_DIR } from './paths.ts';
@@ -56,8 +57,19 @@ export type Settings = {
 export type Plan = { settings: Settings; changes: string[]; warnings: string[] };
 
 const quote = (p: string): string => `"${p.replace(/(["\\$`])/g, '\\$1')}"`;
-export const isOurs = (cmd: unknown, script: string): boolean =>
-  typeof cmd === 'string' && cmd.includes(script);
+/** The script path inside `sh "<path>"`, exactly as `quote` writes it; null for anything else. */
+export function scriptOf(command: string): string | null {
+  const m = /^sh "((?:[^"\\]|\\.)*)"$/.exec(command.trim());
+  return m ? m[1]!.replace(/\\(.)/g, '$1') : null;
+}
+/**
+ * Ours = exactly what we write, from any install folder. Not a substring: a status line of
+ * the user's own that wraps claude-pet-statusline.sh is theirs, never rewritten or removed.
+ */
+export const isOurs = (cmd: unknown, script: string): boolean => {
+  const path = typeof cmd === 'string' ? scriptOf(cmd) : null;
+  return path !== null && basename(path) === script;
+};
 /** Exactly what `install` writes for a hook / the status line run from `binDir`. */
 export const hookCommand = (binDir: string): string => `sh ${quote(join(binDir, HOOK_SCRIPT))}`;
 export const statusCommand = (binDir: string): string => `sh ${quote(join(binDir, STATUSLINE_SCRIPT))}`;
@@ -169,10 +181,14 @@ export function writeSettings(file: string, settings: Settings): void {
     copyFileSync(file, backup);
     process.stdout.write(`backup: ${backup}\n`);
   }
-  mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.claude-pet.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o644 });
-  renameSync(tmp, file);
+  // Through a symlink (dotfiles), the real file is replaced, not the link. Its mode is kept:
+  // settings.json may hold tokens in `env`, and a 0600 file must not come back 0644.
+  const target = existsSync(file) ? realpathSync(file) : file;
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600;
+  mkdirSync(dirname(target), { recursive: true });
+  const tmp = join(dirname(target), `.${basename(target)}.claude-pet-${randomBytes(6).toString('hex')}.tmp`);
+  writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode, flag: 'wx' });
+  renameSync(tmp, target);
 }
 
 if (isMain(import.meta.url)) {

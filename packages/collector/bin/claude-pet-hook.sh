@@ -13,6 +13,8 @@
 #      cannot reach the spool even if a future Claude Code version adds more of them.
 #      See docs/PRIVACY.md.
 set -u
+# The spool is created by `>>` below: 0600 like everything under ~/.claude-pet. A builtin, no fork.
+umask 077
 
 PET_HOME="${CLAUDE_PET_HOME:-$HOME/.claude-pet}"
 SPOOL_DIR="$PET_HOME/spool"
@@ -51,10 +53,14 @@ jq -c --arg ppid "${PPID:-}" '
   # to correlate events and carry nothing about the user. No hashing process in the hot path.
   def sid: ((.session_id // "") | .[0:8]);
 
+  # Codes and names Claude Code reports (error type, end reason, agent type): kept to a short
+  # identifier, so no free text can reach the spool whatever a future version puts there.
+  def code: (. // "" | tostring | ascii_downcase | gsub("[^a-z0-9_-]"; "") | .[0:32]);
+
   . as $h
   | ($h.hook_event_name // "") as $e
   | ($h.tool_name | toolclass) as $t
-  | ($h.agent_type // "" | ascii_downcase) as $a
+  | ($h.agent_type | code) as $a
   # Which subagent did this (absent on the main thread): an opaque id, cut to 12 safe
   # characters. It only lets the pet draw one creature per agent.
   | ($h.agent_id // "" | tostring | gsub("[^A-Za-z0-9_-]"; "") | .[0:12]) as $aid
@@ -72,7 +78,7 @@ jq -c --arg ppid "${PPID:-}" '
       elif $e == "UserPromptSubmit"  then { type: "PROMPT_SUBMITTED" }
       elif $e == "Stop"              then { type: "TURN_COMPLETED" }
       elif $e == "StopFailure"       then { type: "ERROR", scope: "api",
-                                           code: ($h.error_type // "unknown") }
+                                           code: ($h.error_type | code | if . == "" then "unknown" else . end) }
       elif $e == "SubagentStart"     then { type: "SUBAGENT_STARTED", agent: $a }
       elif $e == "SubagentStop"      then { type: "SUBAGENT_FINISHED", agent: $a }
       elif $e == "PermissionRequest" then { type: "PERMISSION_WAITING", tool: $t }
@@ -80,7 +86,7 @@ jq -c --arg ppid "${PPID:-}" '
       elif $e == "MessageDisplay"    then { type: "OUTPUT_STREAMING" }
       elif $e == "SessionStart"      then { type: "SESSION_STARTED" }
       elif $e == "SessionEnd"        then { type: "SESSION_ENDED",
-                                           reason: ($h.end_reason // "other") }
+                                           reason: ($h.end_reason | code | if . == "" then "other" else . end) }
       elif $e == "PostCompact"       then { type: "COMPACTED" }
       elif $e == "Notification" then
         (if   ($h.notification_type // "") == "permission_prompt" then

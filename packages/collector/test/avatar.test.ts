@@ -160,6 +160,20 @@ test('css: escapes, external url(), @media, :root and body are refused', () => {
   assert.doesNotThrow(() => scopeCss('.a { fill: url(#grad) }', 'demo'));
 });
 
+test('css: a brace or quote inside a string cannot end a block early and escape the scope', () => {
+  // The scoper counted the `{` in "{" and took the whole text as one @keyframes body, while
+  // the browser ends it at the second `}` — leaving `#chat` as an unscoped rule.
+  for (const css of ['@keyframes k { to { x: "{" } } #chat { display: none } }',
+                     '.a { content: "}" } #chat { display: none }',
+                     ".a[title='a;b'] { fill: red }", '.a { fill: red } /* unterminated',
+                     '.a { background: image-set(#x 1x) }']) {
+    assert.throws(() => scopeCss(css, 'demo'), css);
+  }
+  // What the library's avatars write: attribute values and comments with apostrophes.
+  assert.doesNotThrow(() => scopeCss(".critter[data-state=\"DONE\"] .hat { fill: red } /* the hat's band */", 'demo'));
+  assert.doesNotThrow(() => scopeCss(".critter[data-state='IDLE'] .hat { fill: red }", 'demo'));
+});
+
 test('images: only base64 data: images may be shown', () => {
   assert.ok(isSafeImageUrl('data:image/png;base64,iVBORw0KGgo='));
   assert.ok(!isSafeImageUrl('https://example.com/x.png'));

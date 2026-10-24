@@ -9,6 +9,8 @@
 # append is a single atomic write and never a read-modify-write: a cancellation can lose
 # at most one sample. See docs/RISKS.md.
 set -u
+# The spool may be created by this script's `>>`: 0600, like the hook's.
+umask 077
 
 PET_HOME="${CLAUDE_PET_HOME:-$HOME/.claude-pet}"
 SPOOL_DIR="$PET_HOME/spool"
@@ -18,9 +20,12 @@ input=$(cat)
 
 # ---- 1. the visible status line -------------------------------------------------------
 if command -v jq >/dev/null 2>&1; then
+  # Control characters stripped: a folder named with an escape sequence must not reach
+  # the terminal as one.
   printf '%s' "$input" | jq -r '
-    (.model.display_name // "?") as $m
-    | ((.workspace.current_dir // .cwd // "") | split("/") | last // "~") as $d
+    def plain: tostring | gsub("[[:cntrl:]]"; "");
+    (.model.display_name // "?" | plain) as $m
+    | ((.workspace.current_dir // .cwd // "") | split("/") | last // "~" | plain) as $d
     | (.context_window.used_percentage // null) as $c
     | (.cost.total_cost_usd // 0) as $cost
     | "[\($m)] 📁 \($d)"
