@@ -96,9 +96,10 @@ and when it resets.
 <img src="docs/media/avatar-cowboy.gif" width="120" alt="Cowboy">
 <img src="docs/media/avatar-halloween.gif" width="120" alt="Halloween">
 <img src="docs/media/avatar-noel.gif" width="120" alt="Noël">
+<img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-teacher-girl.gif" width="120" alt="Teacher-Girl">
 </p>
 
-Ghosts, aliens, a cowboy whose hat follows the mood, seasonal looks… Browse the
+Ghosts, aliens, a cowboy whose hat follows the mood, a teacher among her books, seasonal looks… Browse the
 **[claude-pet avatar library →](https://github.com/r45635/claude-pet-avatars)** and install
 one from the creature's menu (right-click → **Avatar ▸ Library**) or in one line:
 
