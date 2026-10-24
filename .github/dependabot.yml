@@ -1,0 +1,32 @@
+# Weekly, grouped dependency updates: one PR per ecosystem, never a flood.
+# Security updates (Dependabot alerts) open their own PRs whenever needed.
+version: 2
+updates:
+  # npm workspaces: one lockfile at the root covers packages/collector, core and simulator.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: cargo
+    directory: /apps/widget/src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  # Keeps the workflows' actions current — and, once they are pinned by SHA, the pins too.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    open-pull-requests-limit: 3
