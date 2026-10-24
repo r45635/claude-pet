@@ -27,14 +27,14 @@ These Claude Code hook fields are available to us and are **never extracted**:
 | `session_id` | first 8 chars | already an opaque random UUID, so hashing it would buy nothing and cost a `shasum` process on every tool call. Enough to correlate events from one session |
 | `tool_name` | one of 11 lowercase classes | `mcp__acme__get_customer_pii` must not become a line in a file. The server name is discarded with the rest |
 | `cwd`, `workspace.repo.*`, `gitBranch` | **dropped entirely** | a repo name is a client name |
-| `error_type` | kept — it is a closed enum (`rate_limit`, `overloaded`, …) | no free text can appear in it |
-| `notification_type` | kept — closed enum | same |
-| `agent_type` | kept, lowercased | agent names are ours, not data |
+| `error_type`, `end_reason` | reduced to a short identifier: lowercase letters, digits, `_` and `-`, 32 characters at most (`rate_limit`, `overloaded`, `clear`, …) | they are enums today; the reduction keeps any free text out if a future version puts some there |
+| `notification_type` | never stored: only decides the event type (`permission_prompt`, `idle_prompt`) | — |
+| `agent_type` | reduced the same way as `error_type` | a custom agent's name is yours, so it is cut to an identifier |
 
 ## Two allow-lists, not one
 
 1. **`claude-pet-hook.sh`** builds the output line with an explicit `jq` object construction
-   (`{v, ts, type, sid, tool, n}`). There is no code path that copies an input object
+   (`{v, ts, sid, ppid, aid, type, tool, scope, code, agent, reason}`). There is no code path that copies an input object
    through, so a new Claude Code field cannot appear in the spool by default.
 2. **`parsePetEvent()`** in `@claude-pet/core` rebuilds the event from a known key list and
    drops everything else before it reaches the engine.
@@ -83,7 +83,8 @@ which the daemon refuses — and can only add token counts to sessions the hooks
 
 ## Nothing about you leaves the machine
 
-- the collector binds `127.0.0.1` only, with a per-run token in the SSE URL;
+- the collector binds `127.0.0.1` only, with a token in every URL: a random secret kept in `~/.claude-pet/token` (`0600`),
+  so only your account can read it;
 - no analytics dependency. The daemon makes exactly one kind of outbound request at
   runtime, and only while the *Check for updates* setting is on (it is by default): at
   startup and then daily it asks `github.com` which release and avatar catalog are the
@@ -95,7 +96,9 @@ which the daemon refuses — and can only add token counts to sessions the hooks
 - at install time, when asked, `packages/collector/src/widget.ts` downloads the prebuilt
   widget from this repository's GitHub Releases, checks its SHA-256 and its release
   signature (docs/RISKS.md #12). It sends nothing but the request for that file;
-- `~/.claude-pet/` is `0700`; the spool is `0600`.
+- `~/.claude-pet/` is `0700`; the spool is `0600` (the hook creates it under `umask 077`);
+- `claude-pet uninstall` removes the hooks, the status line **and** the OpenTelemetry
+  settings it added, so Claude Code stops exporting to a port nobody listens on.
 
 ## Talking to the creature
 

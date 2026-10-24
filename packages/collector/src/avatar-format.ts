@@ -264,6 +264,9 @@ export function validateDir(dir: string): Report {
       const bad = FORMAT.cssForbidden.find((token) => lower.includes(token.toLowerCase()));
       if (bad) errors.push(`${name}: "${bad}" is not allowed`);
       if (/url\(\s*['"]?(?!#)/i.test(cssText)) errors.push(`${name}: url() to anything but #id is not allowed`);
+      // Same rule as the page's scoper (apps/widget/web/avatar.js cssStringsOk).
+      const bare = cssText.replace(/\/\*[\s\S]*?\*\//g, '').replace(/"[\w -]*"|'[\w -]*'/g, '');
+      if (/["']|\/\*/.test(bare)) errors.push(`${name}: strings may only hold letters, digits, _, - and spaces`);
     } else if (real !== expected) {
       errors.push(`${name}: content is ${real ?? 'unknown'}, not .${ext}`);
     } else if (manifest.kind === 'images' && manifest.states?.IDLE === name && isAnimated(real, bytes)) {

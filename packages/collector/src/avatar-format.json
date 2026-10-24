@@ -40,7 +40,7 @@
     "ampRange": [0, 3],
     "maxCount": 10
   },
-  "cssForbidden": ["@import", "@font-face", "@namespace", "@charset", "javascript:", "expression(", "</", "\\"],
+  "cssForbidden": ["@import", "@font-face", "@namespace", "@charset", "javascript:", "expression(", "image-set", "</", "\\"],
   "defaults": {
     "feet": [80, 146],
     "why": [66, 26],

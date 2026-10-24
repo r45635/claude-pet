@@ -258,10 +258,19 @@ fn update_item<R: Runtime>(app: &AppHandle<R>, w: &Words, update: &Value) -> tau
     MenuItemBuilder::with_id(id, label).enabled(enabled).build(app).map(Some)
 }
 
+/// The preferences a `pref:` menu id may change. Never `chatEnabled` (its own confirmed item)
+/// nor `position` (written by Rust when the window moves).
+const MENU_PREFS: [&str; 10] = ["avatar", "size", "chatModel", "temperament", "display", "showSessions", "paused", "layout", "spacing", "wander"];
+
 /// `pref:size:small` → `{"size":"small"}`; `pref:paused:true` → `{"paused":true}`.
 pub fn pref_patch(id: &str) -> Option<String> {
     let rest = id.strip_prefix("pref:")?;
     let (key, value) = rest.split_once(':')?;
+    // Only the keys our own menus write. Menu events reach every listener, whoever built the
+    // menu: an id like `pref:chatEnabled:true` must not skip the chat's confirmation dialog.
+    if !MENU_PREFS.contains(&key) {
+        return None;
+    }
     let value = match value {
         "true" => Value::Bool(true),
         "false" => Value::Bool(false),
@@ -283,6 +292,9 @@ mod tests {
         assert_eq!(pref_patch("pref:paused:true").unwrap(), r#"{"paused":true}"#);
         assert_eq!(pref_patch("quit"), None);
         assert_eq!(pref_patch("pref:avatar:ghost").unwrap(), r#"{"avatar":"ghost"}"#);
+        assert_eq!(pref_patch("pref:chatEnabled:true"), None);
+        assert_eq!(pref_patch("pref:position:0,0"), None);
+        assert_eq!(pref_patch("pref:otel:true"), None);
     }
 
     #[test]

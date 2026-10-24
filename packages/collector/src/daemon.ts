@@ -15,6 +15,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { capLog, ensureSpool, rotateIfNeeded } from './spool.ts';
@@ -39,7 +40,8 @@ import { catalogView, downloadAvatar, fetchCatalog, installedAvatars, sweepDownl
 
 const PORT = Number(process.env.CLAUDE_PET_PORT ?? 8787);
 // Persistent (~/.claude-pet/token) so a daemon restart does not orphan a running widget.
-const TOKEN = process.env.CLAUDE_PET_TOKEN ?? readOrCreateToken();
+// `||`, not `??`: an empty CLAUDE_PET_TOKEN must not become an empty — always matching — token.
+const TOKEN = process.env.CLAUDE_PET_TOKEN || readOrCreateToken();
 
 /** 100 ms while events flow, 1 s when idle — an always-on widget must cost nothing. */
 const TICK_BUSY_MS = 100;
@@ -50,6 +52,7 @@ ensureSpool();
 const runtime = new Runtime({ spoolFile: SPOOL_FILE, warmStartMs: 2 * 60 * 60_000 }); // turns can run for an hour
 
 const clients = new Set<ServerResponse>();
+const MAX_CLIENTS = 16;
 
 // The config as last read: the file's prefs, and what was wrong with it. An unreadable file
 // keeps the last good config — and is never written over (prefs.ts, ConfigFileError).
@@ -345,7 +348,9 @@ function schedule(): void {
 }
 
 function authorized(url: URL): boolean {
-  return url.searchParams.get('token') === TOKEN;
+  const given = Buffer.from(url.searchParams.get('token') ?? '');
+  const want = Buffer.from(TOKEN);
+  return given.length === want.length && timingSafeEqual(given, want);
 }
 
 /**
@@ -360,8 +365,27 @@ function isNative(req: IncomingMessage): boolean {
   return req.headers[NATIVE_HEADER] === '1';
 }
 
+/** Any page in a browser can reach 127.0.0.1: nothing it sends may take the daemon down. */
+function handleSafely(req: IncomingMessage, res: ServerResponse): void {
+  try {
+    handle(req, res);
+  } catch (err) {
+    process.stderr.write(`request ${req.method} failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+    res.end('{"error":"internal"}');
+  }
+}
+
 function handle(req: IncomingMessage, res: ServerResponse): void {
-  const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+  let url: URL;
+  try {
+    // `//a:b` and the like make `new URL` throw: a malformed request, not a crash.
+    url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end('{"error":"bad request"}');
+    return;
+  }
 
   // The widget runs from `tauri://localhost` (or `file://` for the browser harness), so
   // without this header EventSource is blocked as cross-origin. Wildcard is safe here:
@@ -494,6 +518,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
 
   if (url.pathname === '/events') {
+    // A widget and a menu-bar icon hold one stream each; a few more for curl and doctor.
+    if (clients.size >= MAX_CLIENTS) {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end('{"error":"too many streams"}');
+      return;
+    }
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
@@ -509,7 +539,20 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   res.end('{"error":"not found"}');
 }
 
-const server = createServer(handle);
+const server = createServer(handleSafely);
+
+// Another process (another account's, possibly) on the port: say so, never run deaf.
+server.on('error', (err: NodeJS.ErrnoException) => {
+  process.stderr.write(err.code === 'EADDRINUSE'
+    ? `port ${PORT} is already in use by another process: the daemon cannot listen, stopping\n`
+    : `daemon server error: ${err.message}\n`);
+  process.exit(1);
+});
+
+// An async handler that throws (a disk error while writing the config…) is reported, not fatal.
+process.on('unhandledRejection', (err) => {
+  process.stderr.write(`unhandled: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+});
 
 server.listen(PORT, '127.0.0.1', () => {
   // The widget reads this file to learn the URL; 0600, inside the 0700 root.

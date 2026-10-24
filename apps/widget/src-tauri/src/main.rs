@@ -429,9 +429,18 @@ fn install_dropped(app: &AppHandle, path: &Path) {
     }
 }
 
+/// The page's sizes, bounded: the pet is at most 400 px (+30 of margin), the panel 340×320.
+/// A transparent always-on-top window must never be made to cover the screen.
+const MAX_PET: f64 = 600.0;
+const MAX_PANEL: f64 = 800.0;
+fn bounded(v: f64, min: f64, max: f64) -> Result<f64, String> {
+    if v.is_finite() && v >= 0.0 { Ok(v.clamp(min, max)) } else { Err(format!("invalid size {v}")) }
+}
+
 /// Resize from the page (size preference), keeping the window's top-left corner.
 #[tauri::command]
 fn resize(window: Window, width: f64, height: f64) -> Result<(), String> {
+    let (width, height) = (bounded(width, 40.0, MAX_PET)?, bounded(height, 40.0, MAX_PET)?);
     window.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())
 }
 
@@ -441,6 +450,8 @@ fn resize(window: Window, width: f64, height: f64) -> Result<(), String> {
 /// it was. Returns the layout the page must draw.
 #[tauri::command]
 fn layout_panel(window: Window, open: bool, pet: f64, panel_w: f64, panel_h: f64) -> Result<Value, String> {
+    let pet = bounded(pet, 40.0, MAX_PET)?;
+    let (panel_w, panel_h) = (bounded(panel_w, 0.0, MAX_PANEL)?, bounded(panel_h, 0.0, MAX_PANEL)?);
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     let pos = window.outer_position().map_err(|e| e.to_string())?.to_logical::<f64>(scale);
     let (mx, my, mw, mh) = match window.current_monitor().map_err(|e| e.to_string())? {

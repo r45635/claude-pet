@@ -13,6 +13,8 @@ test('update: the latest tag is read from the redirect, not guessed', () => {
   assert.equal(latestTagFromHeaders('HTTP/2 302\r\nLocation: /r45635/claude-pet/releases/tag/v1.0.0-rc.1\r\n'), 'v1.0.0-rc.1');
   assert.equal(latestTagFromHeaders('HTTP/2 200\r\nserver: GitHub.com\r\n'), null, 'no redirect, no claim');
   assert.equal(latestTagFromHeaders('location: https://evil.example/releases\r\n'), null);
+  assert.equal(latestTagFromHeaders('location: https://github.com/r45635/claude-pet/releases/tag/v%E0%A4%A\r\n'), null,
+               'a malformed escape is no tag, not an exception');
 });
 
 test('update: tags compare as versions, a prerelease is older than its release', () => {

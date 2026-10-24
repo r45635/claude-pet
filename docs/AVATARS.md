@@ -172,7 +172,8 @@ An avatar is someone else's file, and the creature's window can talk to Claude. 
 - SVG goes through an **allow-list**: shapes, text, gradients, masks, `<use>`/`<image>` pointing to
   `#id` or a `data:` picture. Scripts, `on…` attributes, `<foreignObject>`, `<style>`, links,
   SMIL animation and `style=` attributes are removed;
-- CSS: no `@import`, `@font-face`, `@media`, escapes, or `url()` to anything but `#id`;
+- CSS: no `@import`, `@font-face`, `@media`, escapes, `image-set()`, or `url()` to anything but `#id`;
+  strings (`[data-state="DONE"]`) may only hold letters, digits, `_`, `-` and spaces;
 - the window's Content-Security-Policy blocks any request outside the pet itself.
 
 An avatar can therefore change how the creature looks — never what it does.
