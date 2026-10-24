@@ -92,9 +92,10 @@ struct Pet {
 fn chat_model() -> Option<String> {
     let text = fs::read_to_string(root().join("config.json")).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;
+    // The schema's values only (settings-schema.json): anything else is the default model.
     match v["ui"]["chatModel"].as_str()? {
-        "default" => None,
-        m => Some(m.to_owned()),
+        m @ ("sonnet" | "haiku") => Some(m.to_owned()),
+        _ => None,
     }
 }
 
@@ -343,13 +344,11 @@ fn install_from_library(app: &AppHandle, id: &str) {
             p.parent() == Some(root().as_path())
                 && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".avatar-dl-"))
         }).ok_or("unexpected package location")?.to_owned();
-        let imported = avatars::import(&root(), &path);
+        // The expected id is checked before the swap: a package naming another avatar must
+        // not replace (or, once refused, delete) the one already installed under that name.
+        let imported = avatars::import(&root(), &path, Some(&id));
         let _ = fs::remove_dir_all(&folder);
         let (installed_id, name) = imported?;
-        if installed_id != id {
-            let _ = avatars::remove(&root(), &installed_id);
-            return Err(format!("the package installs \"{installed_id}\", not \"{id}\""));
-        }
         let record = serde_json::json!({
             "source": "library",
             "sha256": reply["sha256"],
@@ -414,7 +413,7 @@ fn get_avatar(id: String) -> Result<Value, String> {
 
 /// A `.claudepet` dropped on the creature: install it, switch to it, tell the page.
 fn install_dropped(app: &AppHandle, path: &Path) {
-    match avatars::import(&root(), path) {
+    match avatars::import(&root(), path, None) {
         Ok((id, name)) => {
             if let Some(d) = &app.state::<Pet>().daemon {
                 let _ = d.post("/config", &serde_json::json!({ "avatar": id }).to_string());

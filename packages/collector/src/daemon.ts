@@ -116,9 +116,13 @@ async function postOtlp(req: IncomingMessage, res: ServerResponse, logs: boolean
   if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
     return reply(415, '{"error":"OTLP/HTTP JSON only: set OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json"}');
   }
+  // Off (the default) or paused: nothing is read — an exporter left configured costs nothing.
+  if (!logs || !prefs.otel || prefs.paused) {
+    req.resume();
+    return reply(200);
+  }
   const body = await readBody(req, OTLP_MAX_BYTES);
   if (body === null) return reply(413);
-  if (!logs || !prefs.otel || prefs.paused) return reply(200);
   let signals: ReturnType<typeof parseOtlpLogs> = [];
   try {
     signals = parseOtlpLogs(JSON.parse(body));
@@ -358,6 +362,8 @@ function isNative(req: IncomingMessage): boolean {
   return req.headers[NATIVE_HEADER] === '1';
 }
 
+const LOCAL_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+
 /** Any page in a browser can reach 127.0.0.1: nothing it sends may take the daemon down. */
 function handleSafely(req: IncomingMessage, res: ServerResponse): void {
   try {
@@ -377,6 +383,13 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   } catch {
     res.writeHead(400, { 'content-type': 'application/json' });
     res.end('{"error":"bad request"}');
+    return;
+  }
+  // DNS rebinding: a page on evil.example re-pointed at 127.0.0.1 is same-origin to its own
+  // name, and sends that name as Host. Every real client names the loopback.
+  if (!LOCAL_HOSTS.has(String(req.headers.host ?? '').toLowerCase())) {
+    res.writeHead(421, { 'content-type': 'application/json' });
+    res.end('{"error":"wrong host"}');
     return;
   }
 

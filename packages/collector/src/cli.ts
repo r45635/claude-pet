@@ -25,6 +25,7 @@ import { main as snapshot } from './snapshot.ts';
 import { main as avatars } from './avatars-cli.ts';
 import { main as doctor } from './doctor.ts';
 import { main as otel } from './otel.ts';
+import { compareTags } from './update.ts';
 
 const EXE = 'claude-pet';
 const WIDGET = 'claude-pet-widget';
@@ -46,8 +47,23 @@ const USAGE = `claude-pet ${VERSION}
 `;
 
 /** Replaces ~/.claude-pet/app with the folder this executable was started from. */
+/** The installed app's version ("0.5.5"), or null: none, or it does not answer. */
+function installedVersion(): string | null {
+  try {
+    return execFileSync(join(APP_DIR, 'claude-pet'), ['version'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function copyApp(from: string): void {
   if (resolve(from) === resolve(APP_DIR)) return; // `setup` again from the installed copy
+  // `brew install` then a self-update: brew's copy is now the older one, never put it back.
+  const have = installedVersion();
+  if (have && compareTags(`v${have}`, `v${VERSION}`) > 0) {
+    process.stdout.write(`keeping the installed v${have}, newer than this v${VERSION}\n`);
+    return;
+  }
   const missing = FILES.filter((f) => !existsSync(join(from, f)));
   if (missing.length > 0) throw new Error(`incomplete download, missing in ${from}: ${missing.join(', ')}`);
   mkdirSync(ROOT_DIR, { recursive: true, mode: 0o700 });

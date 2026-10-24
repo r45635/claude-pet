@@ -45,7 +45,7 @@ async function zipEntries(pkg: string): Promise<{ name: string; size: number; ki
  * Install a `.claudepet` file into `root/avatars/<id>`: the same rules as the widget's
  * importer, so a package the widget would refuse is refused here.
  */
-export async function installPackage(pkg: string, root = ROOT_DIR): Promise<{ id: string; name: string; version: string | null }> {
+export async function installPackage(pkg: string, root = ROOT_DIR, expected?: string): Promise<{ id: string; name: string; version: string | null }> {
   const entries = (await zipEntries(pkg)).filter((e) => !e.name.startsWith('__MACOSX/') && !e.name.endsWith('/'));
   if (entries.length === 0) throw new Error('not a .claudepet (zip) file, or empty');
   if (entries.length > FORMAT.limits.files + 1) throw new Error('too many files');
@@ -56,6 +56,9 @@ export async function installPackage(pkg: string, root = ROOT_DIR): Promise<{ id
     if (e.name.includes('/') || e.name.includes('\\') || e.name.startsWith('.') || e.name.includes('..')) {
       throw new Error(`${e.name}: files must be flat, at the top level`);
     }
+    // The names go to unzip as arguments: no option (-x), no wildcard (* ? [), the widget's
+    // own rule for a file name (avatars.rs valid_file).
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(e.name)) throw new Error(`${e.name}: not a plain file name`);
     if (e.size > FORMAT.limits.fileBytes) throw new Error(`${e.name}: too large`);
     total += e.size;
   }
@@ -70,6 +73,7 @@ export async function installPackage(pkg: string, root = ROOT_DIR): Promise<{ id
     const report = validateDir(tmp);
     if (!report.manifest || report.errors.length > 0) throw new Error(report.errors.join('; ') || 'invalid avatar');
     const { id, name, version } = report.manifest;
+    if (expected !== undefined && id !== expected) throw new Error(`the package installs "${id}", not "${expected}"`);
     // Keep only what the manifest references, like the widget's importer.
     clean = mkdtempSync(join(avatars, `.import-cli-${process.pid}-`));
     for (const f of ['manifest.json', ...report.files]) renameSync(join(tmp, f), join(clean, f));
@@ -95,11 +99,8 @@ export async function installFromLibrary(id: string, catalog: Catalog, root = RO
   const dl = await downloadAvatar(entry, root, fetchBytes);
   if ('error' in dl) throw new Error(dl.error);
   try {
-    const installed = await installPackage(dl.path, root);
-    if (installed.id !== id) {
-      rmSync(join(root, 'avatars', installed.id), { recursive: true, force: true });
-      throw new Error(`the package installs "${installed.id}", not "${id}"`);
-    }
+    // Checked before the swap: a package naming another avatar never touches the installed one.
+    const installed = await installPackage(dl.path, root, id);
     writeFileSync(join(root, 'avatars', id, '.install.json'),
       JSON.stringify({ source: 'library', sha256: entry.sha256, installed_at: Math.floor(Date.now() / 1000) }));
     return installed;

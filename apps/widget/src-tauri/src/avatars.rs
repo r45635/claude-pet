@@ -291,7 +291,29 @@ pub fn check_manifest(m: &Value) -> Result<Vec<String>, String> {
         add("css", &m["css"], &["css"])?;
     }
     check_animations(m)?;
+    check_geometry(m)?;
     Ok(files)
+}
+
+/// `anchors` and `hitbox`, as the tooling checks them (avatar-format.ts): the page reads them
+/// on every render, so a wrong type would leave the creature broken.
+fn check_geometry(m: &Value) -> Result<(), String> {
+    let num = |v: &Value, lo: f64, hi: f64| v.as_f64().is_some_and(|x| x.is_finite() && (lo..=hi).contains(&x));
+    let pair = |v: &Value| v.as_array().is_some_and(|a| a.len() == 2 && num(&a[0], -40.0, 200.0) && num(&a[1], -40.0, 200.0));
+    if let Some(a) = m.get("anchors") {
+        let a = a.as_object().ok_or("\"anchors\" must be an object")?;
+        for key in ["feet", "why"] {
+            if a.get(key).is_some_and(|v| !pair(v)) {
+                return Err(format!("\"anchors.{key}\" must be [x, y] in the 160×160 box"));
+            }
+        }
+    }
+    if let Some(h) = m.get("hitbox") {
+        if !(num(&h["cx"], -40.0, 200.0) && num(&h["cy"], -40.0, 200.0) && num(&h["rx"], 1.0, 120.0) && num(&h["ry"], 1.0, 120.0)) {
+            return Err("\"hitbox\" must be {cx, cy, rx, ry} in the 160×160 box".into());
+        }
+    }
+    Ok(())
 }
 
 /// Bytes of a referenced file, checked: size, and real type matching the extension.
@@ -447,8 +469,9 @@ pub fn write_install_record(root: &Path, id: &str, record: &Value) -> Result<(),
 }
 
 /// Install a `.claudepet`: every entry flat, bounded and checked before anything is
-/// written; then an atomic swap, keeping the previous version as `<id>.bak`.
-pub fn import(root: &Path, archive: &Path) -> Result<(String, String), String> {
+/// written; then an atomic swap, keeping the previous version as `<id>.bak`. With `expected`
+/// (a library install), a package for any other id is refused before anything is touched.
+pub fn import(root: &Path, archive: &Path, expected: Option<&str>) -> Result<(String, String), String> {
     let file = fs::File::open(archive).map_err(|e| format!("cannot open: {e}"))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|_| "not a .claudepet (zip) file".to_string())?;
     if zip.len() as u64 > limit("files") + 1 + 8 {
@@ -493,6 +516,9 @@ pub fn import(root: &Path, archive: &Path) -> Result<(String, String), String> {
     }
     let id = m["id"].as_str().unwrap().to_owned();
     let name = m["name"].as_str().unwrap().to_owned();
+    if let Some(want) = expected.filter(|w| *w != id) {
+        return Err(format!("the package installs \"{id}\", not \"{want}\""));
+    }
 
     // Write only what the manifest references, into a temporary folder, then swap.
     let avatars = dir(root);
@@ -550,12 +576,37 @@ mod tests {
     const MANIFEST: &[u8] = br#"{"format":1,"id":"demo","name":"Demo","kind":"images","states":{"IDLE":"idle.png"}}"#;
 
     #[test]
+    fn a_package_for_another_id_never_touches_the_installed_one() {
+        let root = tmp_root("expected");
+        let pkg = root.join("demo.claudepet");
+        zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", PNG)]);
+        import(&root, &pkg, None).unwrap(); // the user's own "demo"
+        let err = import(&root, &pkg, Some("ghost")).unwrap_err();
+        assert!(err.contains("installs \"demo\", not \"ghost\""), "{err}");
+        assert!(dir(&root).join("demo").exists() && !dir(&root).join("demo.bak").exists(), "nothing swapped");
+        assert!(import(&root, &pkg, Some("demo")).is_ok());
+    }
+
+    #[test]
+    fn anchors_and_hitbox_are_checked_like_the_tooling_does() {
+        let base = json!({"format": 1, "id": "demo", "name": "Demo", "kind": "images", "states": {"IDLE": "idle.png"}});
+        let with = |k: &str, v: Value| { let mut m = base.clone(); m[k] = v; check_manifest(&m) };
+        assert!(with("anchors", json!({"feet": [80, 146], "why": [66, 26]})).is_ok());
+        assert!(with("hitbox", json!({"cx": 80, "cy": 90, "rx": 50, "ry": 60})).is_ok());
+        assert!(with("anchors", json!({"feet": "80,146"})).is_err());
+        assert!(with("anchors", json!({"why": [66]})).is_err());
+        assert!(with("anchors", json!([1, 2])).is_err());
+        assert!(with("hitbox", json!({"cx": 80, "cy": 90, "rx": 0, "ry": 60})).is_err());
+        assert!(with("hitbox", json!("big")).is_err());
+    }
+
+    #[test]
     fn remove_deletes_the_avatar_and_its_backup_but_never_classic() {
         let root = tmp_root("rm");
         let pkg = root.join("demo.claudepet");
         zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", PNG)]);
-        import(&root, &pkg).unwrap();
-        import(&root, &pkg).unwrap(); // leaves demo.bak
+        import(&root, &pkg, None).unwrap();
+        import(&root, &pkg, None).unwrap(); // leaves demo.bak
         write_install_record(&root, "demo", &json!({"source": "library", "sha256": "ab"})).unwrap();
         assert!(load(&root, "demo").is_ok(), "the record does not disturb load()");
         assert_eq!(list(&root).len(), 1, "nor list()");
@@ -580,13 +631,13 @@ mod tests {
         let root = tmp_root("ok");
         let pkg = root.join("demo.claudepet");
         zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", PNG), ("README.txt", b"ignored")]);
-        assert_eq!(import(&root, &pkg).unwrap(), ("demo".into(), "Demo".into()));
+        assert_eq!(import(&root, &pkg, None).unwrap(), ("demo".into(), "Demo".into()));
         assert!(!dir(&root).join("demo/README.txt").exists(), "only referenced files are installed");
         let a = load(&root, "demo").unwrap();
         assert!(a["images"]["THINKING"].as_str().unwrap().starts_with("data:image/png;base64,"));
         assert_eq!(list(&root).len(), 1);
         // Re-importing keeps the previous version aside.
-        import(&root, &pkg).unwrap();
+        import(&root, &pkg, None).unwrap();
         assert!(dir(&root).join("demo.bak").exists());
         assert_eq!(list(&root).len(), 1, "the .bak is not listed");
     }
@@ -596,9 +647,9 @@ mod tests {
         let root = tmp_root("slip");
         let pkg = root.join("evil.claudepet");
         zip_of(&pkg, &[("manifest.json", MANIFEST), ("../../evil.png", PNG)]);
-        assert!(import(&root, &pkg).unwrap_err().contains("unsafe path"));
+        assert!(import(&root, &pkg, None).unwrap_err().contains("unsafe path"));
         zip_of(&pkg, &[("manifest.json", MANIFEST), ("sub/idle.png", PNG)]);
-        assert!(import(&root, &pkg).unwrap_err().contains("top level"));
+        assert!(import(&root, &pkg, None).unwrap_err().contains("top level"));
         assert!(!root.join("evil.png").exists() && !dir(&root).join("demo").exists());
     }
 
@@ -607,7 +658,7 @@ mod tests {
         let root = tmp_root("sniff");
         let pkg = root.join("x.claudepet");
         zip_of(&pkg, &[("manifest.json", MANIFEST), ("idle.png", b"<html><script>alert(1)</script>")]);
-        assert!(import(&root, &pkg).unwrap_err().contains("not .png"));
+        assert!(import(&root, &pkg, None).unwrap_err().contains("not .png"));
     }
 
     #[test]
@@ -637,7 +688,7 @@ mod tests {
         let pkg = root.join("demo.claudepet");
         let manifest = br#"{"format":1,"id":"demo","name":"Demo","license":"MIT","version":"2.0.0","kind":"images","states":{"IDLE":"idle.png"}}"#;
         zip_of(&pkg, &[("manifest.json", manifest), ("idle.png", PNG)]);
-        import(&root, &pkg).unwrap();
+        import(&root, &pkg, None).unwrap();
         let listed = list(&root);
         assert_eq!(listed[0]["version"], "2.0.0");
         assert_eq!(listed[0]["license"], "MIT");
@@ -687,7 +738,7 @@ mod tests {
             "animations":{"states":{"DONE":{"enter":{"keyframes":"tip","dur":900}}}}}"#;
         zip_of(&pkg, &[("manifest.json", manifest), ("idle.png", PNG),
                        ("skin.css", b"@keyframes tip { to { transform: rotate(-12deg) } }")]);
-        import(&root, &pkg).unwrap();
+        import(&root, &pkg, None).unwrap();
         let a = load(&root, "demo").unwrap();
         assert!(a["css"].as_str().unwrap().contains("@keyframes tip"));
         assert_eq!(a["animations"]["states"]["DONE"]["enter"]["dur"], 900);

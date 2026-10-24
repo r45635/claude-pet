@@ -524,6 +524,10 @@
   const hud = document.getElementById('hud');
   const dotsLayer = document.getElementById('dots');
   const tray = document.getElementById('tray');
+  // Looked up once, now, before any avatar is drawn: an avatar's SVG may carry ids of its
+  // own, and a later getElementById('bubble') would find the avatar's element first.
+  const bubbleBox = document.getElementById('bubble');
+  const whoEl = document.getElementById('who');
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   // Pastilles in a tray under the feet, centred, 12 px apart, in first-seen order so a
@@ -1498,8 +1502,7 @@
     const petTop = layout.above ? PANEL.h : 0;
     Object.assign(pet.style, { left: `${petLeft + 15}px`, top: `${petTop + 15}px` });
     Object.assign(drag.style, { left: `${petLeft}px`, top: `${petTop}px`, width: `${sq}px`, height: `${sq}px` });
-    const bubble = document.getElementById('bubble');
-    Object.assign(bubble.style, layout.above
+    Object.assign(bubbleBox.style, layout.above
       ? { top: '10px', bottom: `${sq + 4}px` }
       : { top: `${sq + 4}px`, bottom: '10px' });
     bubble.style.setProperty('--tail-x', `${petLeft + sq / 2 - 10}px`);
@@ -1559,7 +1562,7 @@
   }
   function setBusy(value) {
     chatBusy = value;
-    document.getElementById('bubble').classList.toggle('busy', value);
+    bubbleBox.classList.toggle('busy', value);
     sendBtn.classList.toggle('stop', value);
     sendBtn.textContent = value ? '■' : '↑';
     sendBtn.title = t(value ? 'chat.stop' : 'chat.send');
@@ -1748,7 +1751,7 @@
     bubbleEl.classList.toggle('settings', open);
     settingsEl.hidden = !open;
     gear.setAttribute('aria-pressed', String(open));
-    document.getElementById('who').textContent = t(open ? 'chat.settings' : 'chat.header');
+    whoEl.textContent = t(open ? 'chat.settings' : 'chat.header');
     settingsStatus.textContent = '';
     if (open) void loadSchema(); // fresh avatar list and words each time it opens
   }
@@ -2022,8 +2025,8 @@
       if (r) shapes.push({ kind: 'ellipse', cx: r.x + r.width / 2, cy: r.y + r.height / 2,
                            rx: r.width / 2 + HIT_PAD, ry: r.height / 2 + HIT_PAD });
     }
-    const boxes = [document.getElementById('why'), document.getElementById('tray')];
-    if (chatOpen) boxes.push(document.getElementById('bubble'));
+    const boxes = [whyBubble, tray];
+    if (chatOpen) boxes.push(bubbleBox);
     if (!hud.hidden) boxes.push(hud);
     for (const el of boxes) {
       const r = visibleRect(el);

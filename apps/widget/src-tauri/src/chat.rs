@@ -81,7 +81,7 @@ pub fn build_args(session: &Session, model: Option<&str>) -> Vec<String> {
     .map(|s| s.to_string())
     .collect();
     if let Some(m) = model {
-        args.extend(["--model".into(), m.into()]);
+        args.push(format!("--model={m}"));
     }
     if session.started {
         args.extend(["--resume".into(), session.id.clone()]);
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(&first[first.len() - 2..], ["--session-id", "abc"]);
         let next = build_args(&Session { id: "abc".into(), started: true }, Some("sonnet"));
         assert_eq!(&next[next.len() - 2..], ["--resume", "abc"]);
-        assert!(next.contains(&"sonnet".to_string()));
+        assert!(next.contains(&"--model=sonnet".to_string()), "one argument: a value can never be read as a flag");
         let i = first.iter().position(|a| a == "--permission-mode").unwrap();
         assert_eq!(first[i + 1], "auto");
     }

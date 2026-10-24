@@ -52,6 +52,9 @@ test('cli install: nested paths, symlinks and invalid content are refused, nothi
     [pack({ 'manifest.json': manifest('demo') }, { symlink: 'idle.png' }), /plain files/],
     [pack({ 'manifest.json': manifest('demo'), 'idle.png': '<html>not a png</html>' }), /not \.png/],
     [pack({ 'manifest.json': manifest('classic'), 'idle.png': PNG }), /reserved/],
+    // Names reach unzip as arguments: a wildcard or an option-looking name is refused.
+    [pack({ 'manifest.json': manifest('demo'), 'idle.png': PNG, 'i*.png': PNG }), /not a plain file name/],
+    [pack({ 'manifest.json': manifest('demo'), 'idle.png': PNG, 'x[1].png': PNG }), /not a plain file name/],
   ] as const) {
     const root = home();
     await assert.rejects(installPackage(pkg, root), why);
@@ -79,8 +82,10 @@ test('cli library install: verified against the index, recorded, and must be the
   await assert.rejects(installFromLibrary('nope', catalog, home(), async () => good), /not in the library/);
   await assert.rejects(installFromLibrary('ghost', catalog, home(), async () => other), /does not match/);
   const tricked = home();
+  await installPackage(pack({ 'manifest.json': manifest('impostor', '0.1.0'), 'idle.png': PNG }), tricked); // the user's own
   await assert.rejects(installFromLibrary('ghost', { generated: '', avatars: [entry(other)] }, tricked, async () => other), /installs "impostor"/);
-  assert.equal(existsSync(join(tricked, 'avatars', 'impostor')), false);
+  assert.match(readFileSync(join(tricked, 'avatars', 'impostor', 'manifest.json'), 'utf8'), /0\.1\.0/, 'the installed one is untouched');
+  assert.equal(existsSync(join(tricked, 'avatars', 'impostor.bak')), false, 'nothing was swapped');
 });
 
 test('cli remove: deletes the avatar and its backup, never classic', async () => {

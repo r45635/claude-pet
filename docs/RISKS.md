@@ -133,6 +133,10 @@ commands, with nobody there to answer a permission prompt.
   needs a CORS preflight; the daemon refuses every preflight). Until 2026-10-18 only the Rust
   check existed: the page holds the daemon token, so a direct `fetch` POST could have turned
   the chat on. Verified closed in headless Chrome (header request blocked, plain one 403).
+  Since v0.5.5 the page cannot build native menus of its own either (its Tauri capabilities
+  are only event listening and window dragging), and menu ids can only change the menus' own
+  preferences. The daemon also refuses any request whose `Host` is not `127.0.0.1:<port>` or
+  `localhost:<port>`, so a DNS-rebound page cannot reach it under its own name.
 - **Guards:** `auto` mode (Claude Code's classifier) rather than `bypassPermissions`; one run
   at a time; a stop button; a dedicated working folder `~/.claude-pet/chat` — which Bash
   can still leave, so it is a default, not a sandbox.

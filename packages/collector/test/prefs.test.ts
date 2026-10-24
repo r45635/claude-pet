@@ -189,3 +189,12 @@ test('native-only: the schema decides which writes need the native side', async 
   assert.equal(nativeOnlyKey({ avatar: 'ghost', zoom: 1.2 }), null);
   assert.equal(nativeOnlyKey(null), null);
 });
+
+test('prefs: __proto__ and constructor in config.json are unknown keys, never prototypes', () => {
+  const user = JSON.parse('{"__proto__": {"polluted": 1}, "constructor": 5, "load": {"__proto__": {"x": 1}}}');
+  const { user: out, warnings } = sanitizeEngine(user);
+  assert.equal(Object.getPrototypeOf(out), Object.prototype);
+  assert.equal((out as Record<string, unknown>).polluted, undefined);
+  assert.ok(!Object.hasOwn(out, 'constructor'));
+  assert.ok(warnings.some((w) => w.startsWith('__proto__')) && warnings.some((w) => w.startsWith('constructor')));
+});
