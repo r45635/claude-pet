@@ -94,12 +94,16 @@ and when it resets.
 <img src="docs/media/avatar-alien.gif" width="120" alt="Alien">
 <img src="docs/media/avatar-mint.gif" width="120" alt="Mint">
 <img src="docs/media/avatar-cowboy.gif" width="120" alt="Cowboy">
+<img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-slime.gif" width="120" alt="Slime">
+<img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-baptawan.gif" width="120" alt="Baptawan">
+<img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-chloe-princess.gif" width="120" alt="ChloePrincess">
+<img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-maxaqua.gif" width="120" alt="MaxAqua">
 <img src="docs/media/avatar-halloween.gif" width="120" alt="Halloween">
 <img src="docs/media/avatar-noel.gif" width="120" alt="Noël">
 <img src="https://raw.githubusercontent.com/r45635/claude-pet-avatars/main/docs/media/avatar-teacher-girl.gif" width="120" alt="Teacher-Girl">
 </p>
 
-Ghosts, aliens, a cowboy whose hat follows the mood, a teacher among her books, seasonal looks… Browse the
+Ghosts, aliens, a cowboy whose hat follows the mood, a slime, a candy princess, a swimmer, a teacher among her books, seasonal looks… Browse the
 **[claude-pet avatar library →](https://github.com/r45635/claude-pet-avatars)** and install
 one from the creature's menu (right-click → **Avatar ▸ Library**) or in one line:
 
