@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { catalogSignedBytes } from '../src/manifest.ts';
 import { catalogView, downloadAvatar, fetchCatalog, installedAvatars, parseCatalog, type FetchBytes } from '../src/catalog.ts';
 
 const KEYS = generateKeyPairSync('ed25519');
@@ -27,6 +28,34 @@ function library(index: unknown, { signWith = KEYS.privateKey, tamper = false } 
   };
 }
 
+/** A library that also publishes the catalog key's signature (v0.5.5+ clients). */
+const CAT = generateKeyPairSync('ed25519');
+const CAT_PUB = CAT.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+function library2(index: unknown, { catalogSig = 'good' as 'good' | 'bad' | 'none', legacy = true } = {}): FetchBytes {
+  const json = Buffer.from(JSON.stringify(index));
+  const legacySig = sign(null, json, KEYS.privateKey).toString('base64');
+  const signed = catalogSig === 'bad' ? json : catalogSignedBytes(json); // bad: no prefix
+  const catSig = sign(null, signed, CAT.privateKey).toString('base64');
+  return async (url) => {
+    if (url.endsWith('/index.json')) return json;
+    if (url.endsWith('/index.json.catalog.sig')) return catalogSig === 'none' ? null : Buffer.from(catSig);
+    if (url.endsWith('/index.json.sig')) return legacy ? Buffer.from(legacySig) : null;
+    return null;
+  };
+}
+
+test('catalog: the catalog key decides when its signature is published; the release key only before', async () => {
+  const idx = { format: 1, avatars: [entry()] };
+  assert.ok(!('error' in await fetchCatalog(library2(idx), PUB, CAT_PUB)), 'catalog signature');
+  assert.ok(!('error' in await fetchCatalog(library2(idx, { legacy: false }), PUB, CAT_PUB)), 'no legacy needed');
+  assert.ok(!('error' in await fetchCatalog(library2(idx, { catalogSig: 'none' }), PUB, CAT_PUB)), 'transition: legacy only');
+  // A bad catalog signature never falls back to the (valid) release-key one.
+  assert.match((await fetchCatalog(library2(idx, { catalogSig: 'bad' }), PUB, CAT_PUB) as { error: string }).error, /signature/);
+  // The catalog key signs the prefixed bytes: a signature over the bare index (or by the release key) fails.
+  assert.match((await fetchCatalog(library2(idx), PUB, PUB) as { error: string }).error, /signature/);
+  assert.match((await fetchCatalog(library2(idx, { catalogSig: 'none', legacy: false }), PUB, CAT_PUB) as { error: string }).error, /signature/);
+});
+
 test('catalog: a signed index parses; names are kept, junk names dropped', async () => {
   const c = await fetchCatalog(library({ format: 1, generated: 'now', avatars: [entry({ names: { fr: 'Fantôme', 'way-too-long': 'x' } })] }), PUB);
   assert.ok(!('error' in c));
@@ -40,7 +69,9 @@ test('catalog: unsigned, tampered or foreign-key indexes are refused', async () 
   assert.match((await fetchCatalog(library(idx, { signWith: generateKeyPairSync('ed25519').privateKey }), PUB) as { error: string }).error, /signature/);
   assert.match((await fetchCatalog(library(idx)) as { error: string }).error, /signature/, 'the pinned key is not the test key');
   const noSig: FetchBytes = async (url) => (url.endsWith('.sig') ? null : Buffer.from(JSON.stringify(idx)));
-  assert.match((await fetchCatalog(noSig, PUB) as { error: string }).error, /download/);
+  assert.match((await fetchCatalog(noSig, PUB) as { error: string }).error, /signature/);
+  const nothing: FetchBytes = async () => null;
+  assert.match((await fetchCatalog(nothing, PUB) as { error: string }).error, /download/);
 });
 
 test('catalog: any malformed entry refuses the whole catalog', () => {

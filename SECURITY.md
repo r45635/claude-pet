@@ -29,9 +29,10 @@ scripts. Details: [docs/PRIVACY.md](docs/PRIVACY.md).
   chat on, installing an update) need a header a web page cannot send.
 - **Network:** once a day, and when you open the avatar menu, it asks GitHub whether a newer
   release or avatar exists — a request carrying nothing but the URL. `updatesCheck` turns it off.
-- **Updates and avatars are signed:** a release installs on its own only if its checksum carries
-  this project's ed25519 signature (public key pinned in the code); the avatar library's index
-  is signed the same way, and each package is checked against it.
+- **Updates and avatars are signed:** a release installs only if its manifest — tag, file and
+  checksum — carries this project's ed25519 signature (public key pinned in the code), and only
+  if it is newer than what you run; the avatar library's index is signed by its own key, and
+  each package is checked against it. Release signing runs in a separate, tag-only CI job.
 - **Avatars are untrusted files:** an imported avatar is validated, its SVG sanitized and its
   CSS scoped; it cannot run code.
 - **The chat is a full Claude Code agent**, so it is **off by default** and can only be turned

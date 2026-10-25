@@ -169,21 +169,20 @@ async function updateCheckLoop(): Promise<void> {
   update = await checkForUpdate(update);
   if (update.error) process.stderr.write(`${update.error}\n`);
   if (JSON.stringify(update) !== before) broadcast();
-  // Automatic install: standalone only, and only a signed release (allowUnsigned stays false).
+  // Automatic install: standalone only; installStandalone takes only a newer, signed release.
   if (prefs.updatesAuto && update.available && update.layout === 'standalone' && update.latest && autoTried !== update.latest) {
     autoTried = update.latest;
-    await runInstall(update.latest, false);
+    await runInstall(update.latest);
   }
 }
 
 /** The one install path, automatic or from the menu. Failure is reported, never silent. */
-async function runInstall(tag: string, allowUnsigned: boolean): Promise<void> {
-  update = { ...update, installing: true, error: null, unsigned: false };
+async function runInstall(tag: string): Promise<void> {
+  update = { ...update, installing: true, error: null };
   broadcast();
-  const result = await installStandalone(tag, { allowUnsigned });
+  const result = await installStandalone(tag);
   if (!result.ok) {
-    // An unsigned release is not an error to hide: the menu offers a warned, manual install.
-    update = { ...update, installing: false, error: result.error, unsigned: result.unsigned === true };
+    update = { ...update, installing: false, error: result.error };
     process.stderr.write(`update: ${result.error}\n`);
     broadcast();
     return;
@@ -220,9 +219,9 @@ async function postAvatarInstall(req: IncomingMessage, res: ServerResponse): Pro
 }
 
 /**
- * POST /update — install the detected release (standalone only). Body {} or
- * {"allowUnsigned":true}, the latter sent only after the native "unsigned" warning dialog.
- * Native-only, the whole route: only the menu's confirmation dialogs call it (isNative).
+ * POST /update — install the detected release (standalone only), signed and newer or not at
+ * all: the body is ignored, nothing in it can relax the checks. Native-only, the whole
+ * route: only the menu's confirmation dialog calls it (isNative).
  */
 async function postUpdate(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const refuse = (status: number, error: string) => {
@@ -230,20 +229,14 @@ async function postUpdate(req: IncomingMessage, res: ServerResponse): Promise<vo
     res.end(JSON.stringify({ error, update }));
   };
   if (!isNative(req)) return refuse(403, 'native_only');
-  const body = await readBody(req);
-  let allowUnsigned = false;
-  try {
-    allowUnsigned = JSON.parse(body || '{}').allowUnsigned === true;
-  } catch {
-    /* an empty or broken body is a plain install request */
-  }
+  await readBody(req);
   if (update.layout !== 'standalone') return refuse(400, 'clone');
   if (update.installing) return refuse(409, 'installing');
   if (!update.available || !update.latest) return refuse(409, 'no_update');
   // Accepted now, reported over SSE: a download outlasts the menu's 5 s localhost call.
   res.writeHead(202, { 'content-type': 'application/json' });
   res.end('{"ok":true}');
-  void runInstall(update.latest, allowUnsigned);
+  void runInstall(update.latest);
 }
 
 /** What the widget receives: the engine snapshot plus the menu's preferences. */
@@ -355,7 +348,7 @@ function authorized(url: URL): boolean {
 
 /**
  * The token proves "on this Mac", not "not the page": the widget's page holds it too. What
- * only the native side may do (turn the chat on, consent to an unsigned update…) also
+ * only the native side may do (turn the chat on, install an update…) also
  * requires this header, which Rust's localhost client sends (src-tauri/src/daemon.rs). A
  * webview cannot attach a custom header to a cross-origin request without a CORS
  * preflight, and the daemon refuses every preflight — so the page can never send it.

@@ -87,10 +87,10 @@ the menu keeps it closed until the next login). Logs are in `~/.claude-pet/logs/
 
 The standalone install updates itself. Once a day the daemon asks GitHub which release is
 the latest (a request carrying nothing but the URL — [`PRIVACY.md`](PRIVACY.md)). When a newer
-one is out, it downloads it, checks its SHA-256 **and its release signature** (ed25519,
-public key pinned in the code), swaps it in and restarts the creature; right-click →
-*Install vX…* does the same on demand. Only signed releases install on their own; an
-unsigned one is offered behind a warning. The previous version stays in
+one is out, it downloads it, checks its **signed release manifest** (ed25519, public key pinned
+in the code: this tag, this file, this SHA-256), swaps it in and restarts the creature;
+right-click → *Install vX…* does the same on demand. Unsigned or older releases never install.
+The previous version stays in
 `~/.claude-pet/app.old` — to go back:
 `mv ~/.claude-pet/app ~/.claude-pet/app.bad && mv ~/.claude-pet/app.old ~/.claude-pet/app && ~/.claude-pet/app/claude-pet restart`.
 A clone is never updated behind its owner's back: the menu says how and opens the release.

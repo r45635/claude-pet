@@ -33,8 +33,8 @@ claude-pet avatars remove ghost      # uninstall (back to Classic if it was show
 repository, use `npm run avatars -- list` (same commands). The creature on screen follows at
 once if it is running.
 
-How it stays safe: the library's `index.json` is signed with claude-pet's release key and is
-refused unsigned or altered; each package must match the SHA-256 the signed index gives; it
+How it stays safe: the library's `index.json` is signed with the catalog's own key, pinned in
+claude-pet, and is refused unsigned or altered; each package must match the SHA-256 the signed index gives; it
 is then installed with the same checks as a dropped file (below). The menu loads the library
 at startup and refreshes it with *Check for updates* (off ⇒ the menu says so; the terminal
 commands still work, you asked). A library install leaves a `.install.json` (source, SHA-256,
