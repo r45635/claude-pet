@@ -224,7 +224,8 @@ export function sanitizeEngine(user: UserFile): { user: UserFile; warnings: stri
       }
       const sub: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        if (!(k in (def as Record<string, unknown>))) warnings.push(`${path}.${k}: unknown key — ignored`);
+        // Own keys only: `in` would let `__proto__` or `constructor` through.
+        if (!Object.hasOwn(def as object, k)) warnings.push(`${path}.${k}: unknown key — ignored`);
         else walk(v, (def as Record<string, unknown>)[k], `${path}.${k}`, sub, k);
       }
       if (Object.keys(sub).length) into[key] = sub;
@@ -237,7 +238,7 @@ export function sanitizeEngine(user: UserFile): { user: UserFile; warnings: stri
   };
   for (const [key, value] of Object.entries(user)) {
     if (NOT_ENGINE.has(key)) out[key] = value;
-    else if (!(key in DEFAULT_CONFIG)) warnings.push(`${key}: unknown key — ignored`);
+    else if (!Object.hasOwn(DEFAULT_CONFIG, key)) warnings.push(`${key}: unknown key — ignored`);
     else walk(value, (DEFAULT_CONFIG as Record<string, unknown>)[key], key, out, key);
   }
   return { user: out, warnings };

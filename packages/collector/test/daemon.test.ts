@@ -33,11 +33,13 @@ test('daemon: a malformed request target is a 400, never a crash; an empty token
       child.stderr.on('data', (d: Buffer) => { if (d.toString().includes('daemon on')) resolve(); });
       child.on('exit', (code) => reject(new Error(`daemon exited ${code}`)));
     });
-    assert.match(await raw(port, 'GET //a:b HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'), / 400 /);
+    assert.match(await raw(port, `GET /health HTTP/1.1\r\nHost: evil.example:${port}\r\nConnection: close\r\n\r\n`), / 421 /,
+                 'a rebound name is refused before anything else');
+    assert.match(await raw(port, `GET //a:b HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`), / 400 /);
     assert.equal(child.exitCode, null, 'still running');
     // CLAUDE_PET_TOKEN="" must not mean "the token is the empty string".
-    assert.match(await raw(port, 'GET /health?token= HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'), / 401 /);
-    assert.match(await raw(port, 'GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'), / 401 /);
+    assert.match(await raw(port, `GET /health?token= HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`), / 401 /);
+    assert.match(await raw(port, `GET /health HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`), / 401 /);
   } finally {
     child.kill('SIGTERM');
   }
