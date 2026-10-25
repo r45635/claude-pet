@@ -481,7 +481,8 @@ pub fn import(root: &Path, archive: &Path, expected: Option<&str>) -> Result<(St
     let mut total = 0u64;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        let raw = entry.name().to_owned();
+        // zip 9: a name that is not valid UTF-8 is an error, not a lossy string.
+        let raw = entry.name().map_err(|_| "an entry name is not valid UTF-8".to_string())?.into_owned();
         if entry.is_dir() || raw.starts_with("__MACOSX/") {
             continue; // folders and Finder's metadata are ignored, never extracted
         }
