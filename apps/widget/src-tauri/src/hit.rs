@@ -53,6 +53,15 @@ pub fn takes_click(shapes: Option<&[Shape]>, x: f64, y: f64, width: f64, height:
 #[derive(Default)]
 pub struct HitRegions(pub Mutex<Option<Vec<Shape>>>);
 
+/// The cursor relative to the window, in logical points. On macOS, tao gives the cursor in
+/// pixels of the **primary** display's scale and the window's position in pixels of **its
+/// own** display's scale: each is divided by its own factor before they are compared. With a
+/// Retina laptop and a 1x external screen, mixing them put the cursor far outside the window,
+/// and the creature ignored every click on the external screen (v0.5.5).
+pub fn local_point(cursor: (f64, f64), primary_scale: f64, window_pos: (f64, f64), window_scale: f64) -> (f64, f64) {
+    (cursor.0 / primary_scale - window_pos.0 / window_scale, cursor.1 / primary_scale - window_pos.1 / window_scale)
+}
+
 /// Follow the cursor and toggle click-through. Polls fast only near the window: ~30 Hz
 /// when the cursor is on it, ~10 Hz within 80 px, ~4 Hz farther away.
 pub fn spawn_tracker(app: AppHandle, window: WebviewWindow) {
@@ -66,8 +75,8 @@ pub fn spawn_tracker(app: AppHandle, window: WebviewWindow) {
                 window.outer_size(),
                 window.scale_factor(),
             ) {
-                let x = (cursor.x - pos.x as f64) / scale;
-                let y = (cursor.y - pos.y as f64) / scale;
+                let primary = app.primary_monitor().ok().flatten().map_or(scale, |m| m.scale_factor());
+                let (x, y) = local_point((cursor.x, cursor.y), primary, (pos.x as f64, pos.y as f64), scale);
                 let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
                 let take = {
                     let state = app.state::<HitRegions>();
@@ -109,6 +118,17 @@ mod tests {
         assert!(takes_click(Some(&shapes), 15.0, 15.0, 180.0, 180.0));
         assert!(!takes_click(Some(&shapes), 100.0, 100.0, 180.0, 180.0));
         assert!(!takes_click(Some(&[]), 15.0, 15.0, 180.0, 180.0));
+    }
+
+    #[test]
+    fn the_cursor_and_the_window_are_compared_in_logical_points() {
+        // One screen, Retina: both in 2x pixels, as before.
+        assert_eq!(local_point((2020.0, 1020.0), 2.0, (2000.0, 1000.0), 2.0), (10.0, 10.0));
+        // Creature on a 1x screen placed above a 2x primary: window at (100, -1080) logical is
+        // (100, -1080) in its own pixels; the cursor 10 points inside is (220, -2140) in 2x pixels.
+        assert_eq!(local_point((220.0, -2140.0), 2.0, (100.0, -1080.0), 1.0), (10.0, 10.0));
+        // The old formula, (cursor - pos) / scale, put that same cursor far outside: (120, -1060).
+        assert!(takes_click(None, 10.0, 10.0, 180.0, 180.0));
     }
 
     #[test]
