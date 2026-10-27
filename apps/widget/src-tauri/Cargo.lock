@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "claude-pet-widget"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "base64 0.23.1",
  "objc2",
