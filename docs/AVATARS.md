@@ -18,7 +18,9 @@ same result:
 
 **From the creature:** right-click → **Avatar** → **Library ▸**, pick one, confirm — it is
 installed and shown. **Update <name>…** appears when the library has a newer version of one you
-have; **Remove current avatar…** uninstalls the one on screen and goes back to Classic.
+have (**Update all avatars (n)…** when several do: one confirmation, and the creature keeps the
+avatar it has on); **Remove current avatar…** uninstalls the one on screen and goes back to
+Classic. Each avatar in the menu shows its thumbnail, the current one has a ✓ after its name.
 
 **From a terminal** (also what an agent should use — it cannot click a menu):
 
@@ -98,6 +100,12 @@ Optional: `"names": {"fr": "Fantôme", "en": "Ghost"}` names the avatar per lang
 menu and the settings panel (`name` is the fallback). `"license": "MIT"` (an SPDX identifier)
 says what others may do with your artwork — required for the avatar library, recommended
 everywhere. The avatars in the library are all MIT.
+
+`"thumb": "thumb.png"` is the avatar's picture in the menu: a PNG of at most 256 × 256 pixels,
+the creature alone on a transparent background (the menu trims the margins and draws it 18
+points high). Without one, a picture avatar shows its `IDLE` PNG and an SVG avatar shows none.
+The library's thumbnails come from `node scripts/thumbs.ts <folder>…` (this repository), which
+draws the avatar in the browser harness, awake and still.
 
 For `"kind": "svg"`: `"svg": "creature.svg"` and optionally `"css": "skin.css"` instead of `states`.
 `id`: lowercase letters, digits and dashes, unique (`classic` is taken). Installing an avatar

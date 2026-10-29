@@ -290,6 +290,10 @@ pub fn check_manifest(m: &Value) -> Result<Vec<String>, String> {
     if !m["css"].is_null() {
         add("css", &m["css"], &["css"])?;
     }
+    // The menu's picture of the avatar (optional, thumbs.rs reads it).
+    if !m["thumb"].is_null() {
+        add("thumb", &m["thumb"], &["png"])?;
+    }
     check_animations(m)?;
     check_geometry(m)?;
     Ok(files)
@@ -346,7 +350,13 @@ fn read_manifest(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("manifest.json: {e}"))
 }
 
-/// Installed avatars, valid ones only: `[{id, name, author, kind}]`, sorted by name.
+/// The file the menu shows for an avatar: its `thumb`, else a picture avatar's IDLE PNG.
+/// An SVG avatar without a thumbnail has none (drawing it takes the page's CSS).
+fn thumb_of(m: &Value) -> Option<&str> {
+    m["thumb"].as_str().or_else(|| m["states"]["IDLE"].as_str().filter(|f| extension(f) == "png"))
+}
+
+/// Installed avatars, valid ones only: `[{id, name, author, kind, thumb}]`, sorted by name.
 pub fn list(root: &Path) -> Vec<Value> {
     let mut out: Vec<Value> = fs::read_dir(dir(root))
         .into_iter()
@@ -367,7 +377,8 @@ pub fn list(root: &Path) -> Vec<Value> {
                     .collect()
             }).unwrap_or_default();
             (m["id"] == name.as_str()).then(|| json!({ "id": name, "name": m["name"], "names": names, "author": m["author"],
-                                                       "kind": m["kind"], "version": m["version"], "license": m["license"] }))
+                                                       "kind": m["kind"], "version": m["version"], "license": m["license"],
+                                                       "thumb": thumb_of(&m) }))
         })
         .collect();
     out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
@@ -641,6 +652,22 @@ mod tests {
         import(&root, &pkg, None).unwrap();
         assert!(dir(&root).join("demo.bak").exists());
         assert_eq!(list(&root).len(), 1, "the .bak is not listed");
+    }
+
+    #[test]
+    fn a_thumbnail_is_installed_with_the_avatar_and_listed() {
+        let root = tmp_root("thumb");
+        let pkg = root.join("t.claudepet");
+        let manifest = br#"{"format":1,"id":"demo","name":"Demo","kind":"svg","svg":"c.svg","thumb":"thumb.png"}"#;
+        zip_of(&pkg, &[("manifest.json", manifest), ("c.svg", b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"), ("thumb.png", PNG)]);
+        import(&root, &pkg, None).unwrap();
+        assert!(dir(&root).join("demo/thumb.png").exists());
+        assert_eq!(list(&root)[0]["thumb"], "thumb.png");
+        // Without one, a picture avatar's IDLE PNG stands in; an SVG avatar has none.
+        assert_eq!(thumb_of(&serde_json::from_slice(MANIFEST).unwrap()), Some("idle.png"));
+        assert_eq!(thumb_of(&json!({"kind": "svg", "svg": "c.svg"})), None);
+        assert_eq!(thumb_of(&json!({"kind": "images", "states": {"IDLE": "idle.gif"}})), None);
+        assert!(check_manifest(&json!({"format": 1, "id": "demo", "name": "Demo", "kind": "svg", "svg": "c.svg", "thumb": "t.gif"})).is_err());
     }
 
     #[test]

@@ -11,6 +11,7 @@ mod avatars;
 mod hit;
 mod menu;
 mod settings;
+mod thumbs;
 mod tray;
 
 use std::fs;
@@ -142,12 +143,13 @@ fn main_menu(app: &AppHandle, pet: &Pet, prefs: &Value, locale: &str, update: Va
     if let Ok(mut u) = app.state::<MenuUpdate>().0.lock() {
         *u = update.clone(); // the dialogs word themselves from it; the daemon decides
     }
-    let mut avatars = vec![("classic".to_owned(), "Classic".to_owned())];
+    let mut avatars = vec![("classic".to_owned(), "Classic".to_owned(), thumbs::classic())];
     for a in avatars::list(&root()) {
         // A manifest may name the avatar per language ("names": {"fr": "…"}).
         let name = a["names"][&locale].as_str().or(a["name"].as_str());
         if let (Some(id), Some(name)) = (a["id"].as_str(), name) {
-            avatars.push((id.to_owned(), name.to_owned()));
+            let thumb = a["thumb"].as_str().map(|f| avatars::dir(&root()).join(id).join(f));
+            avatars.push((id.to_owned(), name.to_owned(), thumbs::icon(thumb.as_deref())));
         }
     }
     let chat_on = settings::chat_enabled(&settings::user_config(&root()));
@@ -332,32 +334,40 @@ fn confirm_library_install(app: &AppHandle, id: &str) {
         });
 }
 
+/// Download one library avatar through the daemon, import it, record where it came from.
+fn fetch_from_library(app: &AppHandle, id: &str) -> Result<(String, String), String> {
+    let pet = app.state::<Pet>();
+    let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
+    let reply: Value = serde_json::from_str(&daemon.post_slow("/avatars/install", &serde_json::json!({ "id": id }).to_string())?)
+        .map_err(|e| e.to_string())?;
+    let path = PathBuf::from(reply["path"].as_str().ok_or("no package path")?);
+    // The daemon only ever downloads into ~/.claude-pet/.avatar-dl-*/: anything else is refused.
+    let folder = path.parent().filter(|p| {
+        p.parent() == Some(root().as_path())
+            && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".avatar-dl-"))
+    }).ok_or("unexpected package location")?.to_owned();
+    // The expected id is checked before the swap: a package naming another avatar must
+    // not replace (or, once refused, delete) the one already installed under that name.
+    let imported = avatars::import(&root(), &path, Some(&id));
+    let _ = fs::remove_dir_all(&folder);
+    let (installed_id, name) = imported?;
+    let record = serde_json::json!({
+        "source": "library",
+        "sha256": reply["sha256"],
+        "installed_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+    });
+    avatars::write_install_record(&root(), id, &record)?;
+    Ok((installed_id, name))
+}
+
+/// Install or update one avatar from the library, and put it on screen.
 fn install_from_library(app: &AppHandle, id: &str) {
-    let result = (|| -> Result<(String, String), String> {
+    let result = fetch_from_library(app, id).and_then(|done| {
         let pet = app.state::<Pet>();
         let daemon = pet.daemon.as_ref().ok_or("daemon not configured")?;
-        let reply: Value = serde_json::from_str(&daemon.post_slow("/avatars/install", &serde_json::json!({ "id": id }).to_string())?)
-            .map_err(|e| e.to_string())?;
-        let path = PathBuf::from(reply["path"].as_str().ok_or("no package path")?);
-        // The daemon only ever downloads into ~/.claude-pet/.avatar-dl-*/: anything else is refused.
-        let folder = path.parent().filter(|p| {
-            p.parent() == Some(root().as_path())
-                && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".avatar-dl-"))
-        }).ok_or("unexpected package location")?.to_owned();
-        // The expected id is checked before the swap: a package naming another avatar must
-        // not replace (or, once refused, delete) the one already installed under that name.
-        let imported = avatars::import(&root(), &path, Some(&id));
-        let _ = fs::remove_dir_all(&folder);
-        let (installed_id, name) = imported?;
-        let record = serde_json::json!({
-            "source": "library",
-            "sha256": reply["sha256"],
-            "installed_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-        });
-        avatars::write_install_record(&root(), id, &record)?;
         daemon.post("/config", &serde_json::json!({ "avatar": id }).to_string())?;
-        Ok((installed_id, name))
-    })();
+        Ok(done)
+    });
     match result {
         Ok((id, name)) => {
             let _ = app.emit("avatar", serde_json::json!({ "ok": true, "id": id, "name": name }));
@@ -366,6 +376,54 @@ fn install_from_library(app: &AppHandle, id: &str) {
             eprintln!("library install {id}: {error}");
             let _ = app.emit("avatar", serde_json::json!({ "ok": false, "error": error }));
         }
+    }
+}
+
+/// "Update all avatars (n)…": every installed avatar the library ships a newer version of,
+/// after one confirmation, without changing which one is on screen.
+fn confirm_library_update_all(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let locale = app.state::<MenuLocale>().0.lock().map(|l| l.clone()).unwrap_or_else(|_| "en".into());
+    let (catalog, current) = app.state::<MenuLibrary>().0.lock().map(|m| m.clone()).unwrap_or_default();
+    let items: Vec<menu::LibraryItem> = menu::library_items(&catalog, &locale).unwrap_or_default().into_iter().filter(|i| i.update).collect();
+    if items.is_empty() {
+        return;
+    }
+    let w = menu::Words::new(&locale);
+    let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+    let body = w.get("dialog.avatarUpdateAll.body").replace("{names}", &names.join(", "));
+    let handle = app.clone();
+    let ids: Vec<String> = items.into_iter().map(|i| i.id).collect();
+    app.dialog()
+        .message(body)
+        .title(w.get("dialog.avatarUpdateAll.title").replace("{n}", &ids.len().to_string()))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(w.get("dialog.avatarUpdateAll.ok"), w.get("dialog.cancel")))
+        .show(move |confirmed| {
+            if confirmed {
+                std::thread::spawn(move || update_all_from_library(&handle, &ids, &current));
+            }
+        });
+}
+
+fn update_all_from_library(app: &AppHandle, ids: &[String], current: &str) {
+    let mut failed = vec![];
+    for id in ids {
+        match fetch_from_library(app, id) {
+            // The one on screen changed under the page: it reloads it.
+            Ok((id, name)) if id == current => {
+                let _ = app.emit("avatar", serde_json::json!({ "ok": true, "id": id, "name": name }));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("library update {id}: {error}");
+                failed.push(format!("{id}: {error}"));
+            }
+        }
+    }
+    eprintln!("library update: {} of {} updated", ids.len() - failed.len(), ids.len());
+    if !failed.is_empty() {
+        let _ = app.emit("avatar", serde_json::json!({ "ok": false, "error": failed.join("; ") }));
     }
 }
 
@@ -529,6 +587,7 @@ fn on_menu(app: &AppHandle, id: &str) {
                 }
             }
         }
+        "lib:update-all" => confirm_library_update_all(app),
         lib if lib.starts_with("lib:install:") || lib.starts_with("lib:update:") => {
             if let Some(id) = lib.rsplit(':').next().filter(|id| avatars::valid_id(id)) {
                 confirm_library_install(app, id);
@@ -640,6 +699,8 @@ fn main() {
             // A desktop creature, not an app: no Dock icon, no menu bar takeover.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            #[cfg(target_os = "macos")]
+            thumbs::keep_menu_pictures_visible();
 
             let (url, token) = endpoint();
             let script = endpoint_script(&url, &token);
