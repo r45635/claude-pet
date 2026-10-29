@@ -207,6 +207,7 @@ screen in use: locked, nothing is composited and the numbers mean nothing.
 | `npm run docs:config` | regenerate [`CONFIG.md`](CONFIG.md) from the settings schema |
 | `node scripts/media.ts` | regenerate the README's pictures and the social preview (`docs/media/`, needs Chrome, ffmpeg and the avatar library cloned next to this repo) |
 | `node scripts/tray-icon.ts` | regenerate the menu-bar icon |
+| `node scripts/thumbs.ts [<folder>…]` | the avatar menu's pictures: Classic's (`apps/widget/src-tauri/icons/classic-thumb.png`), or each library folder's `thumb.png` (needs Chrome and the library cloned next to this repo) |
 
 ## Reference docs
 
