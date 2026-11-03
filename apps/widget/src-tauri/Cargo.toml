@@ -17,14 +17,18 @@ serde_json = "1"
 tauri-plugin-dialog = "2"
 base64 = "0.23"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# Already in the tree through Tauri's image-png: the avatar menu's pictures (thumbs.rs).
+png = "0.18"
 
 # Already in the tree through Tauri: to keep App Nap off while the creature lives in the menu
-# bar (tray.rs, a hidden window is otherwise throttled by ~20 s), and to bring a session's app
-# to the front (focus.rs).
+# bar (tray.rs, a hidden window is otherwise throttled by ~20 s), to bring a session's app
+# to the front (focus.rs), and to keep the menu's pictures visible (thumbs.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSMenu", "NSMenuItem", "NSRunningApplication"] }
+# The menu's pictures stay visible on macOS 27 (thumbs.rs): a notification observer block.
+block2 = "0.6"
 
 [profile.release]
 # A widget that sits on screen all day: small binary, no debug info.

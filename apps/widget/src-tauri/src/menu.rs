@@ -2,7 +2,8 @@
 //! `pref:<key>:<value>` becomes a POST /config patch, the rest are local actions.
 
 use serde_json::{json, Map, Value};
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
+use tauri::image::Image;
+use tauri::menu::{CheckMenuItemBuilder, IconMenuItemBuilder, Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
 /// The menu's words, from the same files as the page (web/i18n), bundled in the binary.
@@ -61,8 +62,10 @@ fn toggle<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, key: &str, l
     CheckMenuItemBuilder::with_id(format!("pref:{key}:{}", !on), w.get(label)).checked(on).build(app)
 }
 
-/// Avatar ▸ Classic and every installed one (`avatars`: id, name in the menu's language),
-/// plus the folder.
+/// An installed avatar as the menu shows it: id, name in the menu's language, picture
+/// (thumbs.rs).
+pub type AvatarItem = (String, String, Image<'static>);
+
 /// One library entry as the menu needs it: id, display name, and what installing does.
 pub struct LibraryItem {
     pub id: String,
@@ -101,19 +104,35 @@ pub fn library_unavailable_key(catalog: &Value) -> &'static str {
     }
 }
 
-fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars: &[(String, String)], library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<tauri::menu::Submenu<R>> {
+/// An avatar's line: its picture, its name, and a check after the name for the current one
+/// (a menu item cannot carry both a picture and the native check mark).
+pub fn avatar_label(name: &str, current: bool) -> String {
+    if current { format!("{name}  ✓") } else { name.to_owned() }
+}
+
+/// Avatar ▸ Classic and every installed one, the library, plus the folder.
+fn avatar_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value, avatars: &[AvatarItem], library: Option<&[LibraryItem]>, unavailable: &str) -> tauri::Result<tauri::menu::Submenu<R>> {
     let current = prefs["avatar"].as_str().unwrap_or("classic");
     let mut sub = SubmenuBuilder::new(app, w.get("menu.avatar"));
-    for (id, name) in avatars {
-        let label = if id == "classic" { w.get("menu.avatar.classic") } else { name.clone() };
-        let item = CheckMenuItemBuilder::with_id(format!("pref:avatar:{id}"), label).checked(current == id).build(app)?;
+    for (id, name, icon) in avatars {
+        let name = if id == "classic" { w.get("menu.avatar.classic") } else { name.clone() };
+        let item = IconMenuItemBuilder::with_id(format!("pref:avatar:{id}"), avatar_label(&name, current == id)).icon(icon.clone()).build(app)?;
         sub = sub.item(&item);
     }
     sub = sub.separator();
-    // Updates first: they concern what is already on screen.
-    for item in library.unwrap_or(&[]).iter().filter(|i| i.update) {
-        let label = w.get("menu.avatar.update").replace("{name}", &item.name);
-        sub = sub.item(&MenuItemBuilder::with_id(format!("lib:update:{}", item.id), label).build(app)?);
+    // Updates first: they concern what is already on screen. Several at once (a library
+    // release that touches them all) are one line.
+    let updates: Vec<&LibraryItem> = library.unwrap_or(&[]).iter().filter(|i| i.update).collect();
+    match updates.as_slice() {
+        [] => {}
+        [item] => {
+            let label = w.get("menu.avatar.update").replace("{name}", &item.name);
+            sub = sub.item(&MenuItemBuilder::with_id(format!("lib:update:{}", item.id), label).build(app)?);
+        }
+        many => {
+            let label = w.get("menu.avatar.updateAll").replace("{n}", &many.len().to_string());
+            sub = sub.item(&MenuItemBuilder::with_id("lib:update-all", label).build(app)?);
+        }
     }
     let mut lib = SubmenuBuilder::new(app, w.get("menu.avatar.library"));
     match library {
@@ -173,7 +192,7 @@ fn layout_menu<R: Runtime>(app: &AppHandle<R>, w: &Words, prefs: &Value) -> taur
 /// The menu. With the chat off (the default), its entries are replaced by one native
 /// "Enable chat…", which asks for confirmation — the page cannot turn it on.
 #[allow(clippy::too_many_arguments)]
-pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[(String, String)], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str, sessions: &[crate::focus::Session]) -> tauri::Result<Menu<R>> {
+pub fn build<R: Runtime>(app: &AppHandle<R>, locale: &str, prefs: &Value, chat_on: bool, busy: bool, avatars: &[AvatarItem], update: &Value, library: Option<&[LibraryItem]>, unavailable: &str, sessions: &[crate::focus::Session]) -> tauri::Result<Menu<R>> {
     let w = Words::new(locale);
     let item = |id: &str, key: &str| MenuItemBuilder::with_id(id, w.get(key)).build(app);
     let mut menu = MenuBuilder::new(app);
@@ -282,7 +301,7 @@ pub fn pref_patch(id: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{library_items, library_unavailable_key, pref_patch, update_action, valid_tag, Words};
+    use super::{avatar_label, library_items, library_unavailable_key, pref_patch, update_action, valid_tag, Words};
     use serde_json::json;
 
     #[test]
@@ -339,6 +358,12 @@ mod tests {
         let pkg: serde_json::Value = serde_json::from_str(include_str!("../../../../package.json")).unwrap();
         let repo = pkg["repository"].as_str().unwrap().trim_start_matches("github:");
         assert_eq!(env!("CARGO_PKG_REPOSITORY"), format!("https://github.com/{repo}"));
+    }
+
+    #[test]
+    fn the_current_avatar_is_checked_after_its_name() {
+        assert_eq!(avatar_label("Mint", true), "Mint  ✓");
+        assert_eq!(avatar_label("Mint", false), "Mint");
     }
 
     #[test]

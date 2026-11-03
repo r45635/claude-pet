@@ -71,6 +71,27 @@ test('format: oversized files are refused; an animated IDLE only warns', () => {
   assert.match(r.warnings.join(), /animated/);
 });
 
+test('format: a thumbnail is an optional PNG of at most limits.thumbPx a side', () => {
+  const ihdr = (w: number, h: number) => {
+    const b = new Uint8Array(24);
+    b.set(PNG);
+    b.set(new TextEncoder().encode('IHDR'), 12);
+    new DataView(b.buffer).setUint32(16, w);
+    new DataView(b.buffer).setUint32(20, h);
+    return b;
+  };
+  const withThumb = { ...images({ IDLE: 'idle.png' }), thumb: 'thumb.png' };
+  const ok = validateDir(avatarDir(withThumb, { 'idle.png': PNG, 'thumb.png': ihdr(128, 128) }));
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.files, ['idle.png', 'thumb.png'], 'packed and installed with the avatar');
+  const big = FORMAT.limits.thumbPx + 1;
+  assert.match(validateDir(avatarDir(withThumb, { 'idle.png': PNG, 'thumb.png': ihdr(big, 64) })).errors.join(), /at most/);
+  assert.match(validateDir(avatarDir(withThumb, { 'idle.png': PNG })).errors.join(), /referenced but missing/);
+  const errors: string[] = [];
+  checkManifest({ ...withThumb, thumb: 'thumb.gif' }, errors);
+  assert.match(errors.join(), /must be one of \.png/);
+});
+
 test('format: a stylesheet may not reach outside the avatar', () => {
   const svgAvatar = { format: 1, id: 'demo', name: 'Demo', kind: 'svg', svg: 'c.svg', css: 's.css' };
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><g class="critter"/></svg>';

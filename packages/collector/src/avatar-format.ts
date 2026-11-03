@@ -37,6 +37,7 @@ export type Manifest = {
   states?: Record<string, string>;
   svg?: string;
   css?: string;
+  thumb?: string;
   animations?: Animations;
   anchors?: { feet?: [number, number]; why?: [number, number] };
   hitbox?: { cx: number; cy: number; rx: number; ry: number };
@@ -98,6 +99,8 @@ export function checkManifest(raw: unknown, errors: string[]): { manifest: Manif
   }
   // Both kinds may ship a stylesheet: it is how pictures get motion too.
   if (m.css !== undefined) fileRef('css', m.css, ['css']);
+  // The menu's picture of the avatar (optional): a PNG, at most limits.thumbPx a side.
+  if (m.thumb !== undefined) fileRef('thumb', m.thumb, ['png']);
   if (m.animations !== undefined) checkAnimations(m.animations, errors);
 
   const anchors = m.anchors as Record<string, unknown> | undefined;
@@ -229,6 +232,15 @@ export function isAnimated(type: string, bytes: Uint8Array): boolean {
 }
 
 /** Validate an avatar folder (the unpacked form a creator works in). */
+/** A PNG's width and height, from its IHDR chunk, within limits.thumbPx. */
+export function thumbSizeOk(png: Uint8Array): boolean {
+  if (png.length < 24) return false;
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const w = view.getUint32(16);
+  const h = view.getUint32(20);
+  return w > 0 && h > 0 && w <= FORMAT.limits.thumbPx && h <= FORMAT.limits.thumbPx;
+}
+
 export function validateDir(dir: string): Report {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -269,6 +281,8 @@ export function validateDir(dir: string): Report {
       if (/["']|\/\*/.test(bare)) errors.push(`${name}: strings may only hold letters, digits, _, - and spaces`);
     } else if (real !== expected) {
       errors.push(`${name}: content is ${real ?? 'unknown'}, not .${ext}`);
+    } else if (name === manifest.thumb && !thumbSizeOk(bytes)) {
+      errors.push(`${name}: the thumbnail must be at most ${FORMAT.limits.thumbPx}×${FORMAT.limits.thumbPx} pixels`);
     } else if (manifest.kind === 'images' && manifest.states?.IDLE === name && isAnimated(real, bytes)) {
       warnings.push(`${name}: the IDLE image is animated — it keeps the CPU busy while the creature sleeps`);
     }
